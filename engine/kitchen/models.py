@@ -255,16 +255,19 @@ class RoundingRule(BaseModel):
     direction: Literal["up", "down"]
     step: int
 
+    def describe(self) -> str:
+        return f"{'вверх' if self.direction == 'up' else 'вниз'} до {self.step}"
+
     def apply(self, value: Decimal) -> int:
         mode = ROUND_CEILING if self.direction == "up" else ROUND_FLOOR
         return int((value / self.step).to_integral_value(rounding=mode)) * self.step
 
 
-_ROUNDING_RE = re.compile(r"^\s*(вверх|вниз)\s+до\s+(\d+)\s*$", re.IGNORECASE)
+_ROUNDING_RE = re.compile(r"^\s*(вверх|вниз)\s+до\s+([0-9]+)\s*$", re.IGNORECASE)
 _DIRECTIONS = {"вверх": "up", "вниз": "down"}
 
 
-def parse_rounding(value):
+def parse_rounding(value: object) -> RoundingRule:
     """«вверх до 1000» -> RoundingRule. Неизвестная форма — ошибка загрузки по-русски."""
     if isinstance(value, RoundingRule):
         return value

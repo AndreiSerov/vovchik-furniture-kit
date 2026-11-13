@@ -355,26 +355,24 @@ def test_unchanged_reimport_keeps_warnings_without_relogging(order, tmp_path):
     assert api.status(order).text.count("шкаф Н1 узкий") == 1
 
 
-def test_parallel_order_new_same_number_gives_russian_error_not_traceback(home):
-    code = (
-        "import sys\nfrom pathlib import Path\nfrom kitchen import api\n"
-        "from kitchen.errors import OrderError\n"
-        "try:\n    api.order_new('2026-047-' + sys.argv[2], home=Path(sys.argv[1]))\n"
-        "except OrderError as e:\n    print(e); sys.exit(3)"
+def test_order_new_takes_the_write_lock_before_checking_the_number(home, monkeypatch):
+    real_connect = sqlite3.connect
+    seen: list[str] = []
+
+    class Logging(sqlite3.Connection):
+        def execute(self, sql, *args):
+            seen.append(" ".join(sql.split()))
+            return super().execute(sql, *args)
+
+    monkeypatch.setattr(sqlite3, "connect", lambda *a, **k: real_connect(*a, factory=Logging, **k))
+    api.order_new("2026-047-petrov")
+    start = seen.index("BEGIN IMMEDIATE")  # первая транзакция — миграция схемы, нужна вторая
+    after = seen[start + 1 :]
+    assert "BEGIN IMMEDIATE" in after
+    mine = after[after.index("BEGIN IMMEDIATE") :]
+    assert mine.index("BEGIN IMMEDIATE") < min(
+        i for i, q in enumerate(mine) if q.startswith("SELECT * FROM orders WHERE number")
     )
-    api.order_new("2026-001-first")  # БД уже создана: гонка только за номер
-    procs = [
-        subprocess.Popen(
-            [sys.executable, "-c", code, str(home), f"p{i}"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        for i in range(8)
-    ]
-    out = [(p.wait(), p.stdout.read().decode(), p.stderr.read().decode()) for p in procs]
-    assert sorted(rc for rc, _, _ in out).count(0) == 1, out
-    for rc, stdout, stderr in out:
-        assert "Traceback" not in stderr, stderr
-        if rc:
-            assert rc == 3 and "уже занят" in stdout
 
 
 def test_integrity_error_on_insert_is_russian_order_error(home, monkeypatch):

@@ -54,9 +54,12 @@ def test_brief_save_rejected_exits_1_in_russian(home, tmp_path):
 def test_brief_show_prints_brief_json_and_json_equals_api(home, brief_file):
     runner.invoke(app, ["brief", "save", "2026-047-sergeev", str(brief_file)])
     r = runner.invoke(app, ["brief", "show", "sergeev"])
-    assert r.exit_code == 0 and json.loads(r.output) == sergey() and MOCK_BANNER not in r.output
+    lines = r.output.strip().splitlines()
+    assert r.exit_code == 0 and lines[0] == MOCK_BANNER and lines[-1] == MOCK_BANNER
+    assert json.loads("\n".join(lines[1:-1])) == sergey()
     j = runner.invoke(app, ["brief", "show", "sergeev", "--json"])
     assert json.loads(j.output) == json.loads(api.brief_show("sergeev", home).model_dump_json())
+    assert json.loads(j.output)["mock"] is True
 
 
 def test_brief_show_without_brief_exits_1(home):

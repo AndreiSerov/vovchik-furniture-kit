@@ -4,8 +4,10 @@ import os
 import re
 import sqlite3
 from contextlib import closing, contextmanager
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, tzinfo
 from pathlib import Path
+from typing import Literal
 
 from kitchen.errors import OrderError
 from kitchen.workshop import resolve_home
@@ -13,7 +15,7 @@ from kitchen.workshop import resolve_home
 SCHEMA_VERSION = 2
 
 # Миграции: номер схемы -> скрипт (операторы через «;», без «;» внутри комментариев).
-# Добавить v2: написать _SCHEMA_V2, внести в MIGRATIONS и поднять SCHEMA_VERSION.
+# Добавить v3: написать _SCHEMA_V3, внести в MIGRATIONS и поднять SCHEMA_VERSION.
 _SCHEMA_V1 = """
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
@@ -187,21 +189,52 @@ def order_ref_of(row: sqlite3.Row) -> str:
     return f"{row['number']}-{row['slug']}"
 
 
+@dataclass(frozen=True)
+class OrderQuery:
+    """Разобранный запрос заказа: `number` (ГГГГ-NNN), `full` (номер-фамилия) или `surname`."""
+
+    kind: Literal["number", "full", "surname"]
+    number: str | None = None
+    slug: str | None = None
+
+
+def parse_query(text: str) -> OrderQuery:
+    """Единственное место, где запрос превращается в номер, полный номер или фамилию.
+
+    Всё с цифрами, что не номер и не полный номер, — ошибка (опечатка в номере не станет фамилией).
+    """
+    q = text.strip()
+    if NUMBER_RE.match(q):
+        return OrderQuery("number", number=q)
+    if ID_RE.match(q):
+        number, slug = parse_order_id(q)
+        return OrderQuery("full", number=number, slug=slug)
+    if any(c.isdigit() for c in q):
+        raise OrderError(
+            f"«{text}» похоже на номер заказа, ожидалось ГГГГ-NNN-фамилия, например 2026-047-petrov."
+        )
+    slug = slugify(q)
+    if not slug:
+        raise OrderError(f"«{text}» — не фамилия. Укажите номер-фамилию (2026-047-petrov) или фамилию.")
+    return OrderQuery("surname", slug=slug)
+
+
 def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
     """Точный номер, `номер-фамилия` или подстрока фамилии или имени клиента (кириллица и латиница)."""
-    q = query.strip()
+    parsed = parse_query(query)
     rows = conn.execute("SELECT * FROM orders ORDER BY number").fetchall()
-    if NUMBER_RE.match(q):
-        hits = [r for r in rows if r["number"] == q]
-    elif ID_RE.match(q):
-        number, slug = parse_order_id(q)
-        hits = [r for r in rows if r["number"] == number and r["slug"] == slug]
-        taken = [r for r in rows if r["number"] == number]
+    if parsed.kind == "number":
+        hits = [r for r in rows if r["number"] == parsed.number]
+    elif parsed.kind == "full":
+        hits = [r for r in rows if r["number"] == parsed.number and r["slug"] == parsed.slug]
+        taken = [r for r in rows if r["number"] == parsed.number]
         if not hits and taken:
-            raise OrderError(f"Номер {number} занят заказом {order_ref_of(taken[0])}, а не «{q}».")
+            raise OrderError(
+                f"Номер {parsed.number} занят заказом {order_ref_of(taken[0])}, а не «{query.strip()}»."
+            )
     else:
-        needle = slugify(q)
-        hits = [r for r in rows if needle and (needle in r["slug"] or needle in slugify(r["client"]))]
+        needle = parsed.slug
+        hits = [r for r in rows if needle in r["slug"] or needle in slugify(r["client"])]
     if not hits:
         raise OrderError(f"Заказ «{query}» не найден. Заведите его: kitchen order new ГГГГ-NNN-фамилия.")
     if len(hits) > 1:

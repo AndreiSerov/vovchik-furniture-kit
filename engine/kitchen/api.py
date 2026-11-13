@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import re
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -507,22 +506,30 @@ def _next_number(conn: sqlite3.Connection) -> str:
 
 
 def _resolve_for_brief(conn: sqlite3.Connection, query: str, client: str) -> tuple[sqlite3.Row, bool]:
-    """Заказ для брифа: существующий (номер или номер-фамилия), новый по полному номеру или новый по фамилии."""
-    q = query.strip()
-    if store.NUMBER_RE.match(q):
-        return store.find_order(conn, q), False
-    if store.ID_RE.match(q):
-        number, slug = store.parse_order_id(q)
-        if conn.execute("SELECT 1 FROM orders WHERE number = ?", (number,)).fetchone():
-            return store.find_order(conn, q), False
-    else:
-        number, slug = None, store.slugify(q)
-        if not re.search(r"[a-z]", slug):
-            raise OrderError(
-                f"«{query}» — не фамилия. Укажите номер-фамилию (2026-047-petrov) или одну фамилию."
-            )
-        number = _next_number(conn)
-    return _insert_order(conn, number, slug, client, "", ""), True
+    """Заказ для брифа (внутри `BEGIN IMMEDIATE`).
+
+    Номер — существующий заказ. Номер-фамилия — существующий или новый с этим номером. Одна фамилия —
+    только новый заказ: если заказ с точно такой фамилией уже есть, это ошибка со списком.
+    """
+    parsed = store.parse_query(query)
+    if parsed.kind == "number":
+        return store.find_order(conn, query), False
+    if parsed.kind == "full":
+        if conn.execute("SELECT 1 FROM orders WHERE number = ?", (parsed.number,)).fetchone():
+            return store.find_order(conn, query), False
+        return _insert_order(conn, parsed.number, parsed.slug, client, "", ""), True
+    same = conn.execute("SELECT * FROM orders WHERE slug = ? ORDER BY number", (parsed.slug,)).fetchall()
+    number = _next_number(conn)
+    if same:
+        listing = ", ".join(store.order_ref_of(r) for r in same)
+        raise OrderError(
+            [
+                f"Заказ с фамилией «{parsed.slug}» уже есть: {listing}.",
+                "Чтобы обновить его бриф: kitchen brief save <номер-фамилия из списка> brief.json.",
+                f"Чтобы завести новый: kitchen brief save {number}-{parsed.slug} brief.json.",
+            ]
+        )
+    return _insert_order(conn, number, parsed.slug, client, "", ""), True
 
 
 def brief_save(order: str, brief_path: Path, home: Path | None = None) -> BriefSaveResult:
@@ -557,7 +564,7 @@ def brief_save(order: str, brief_path: Path, home: Path | None = None) -> BriefS
 
 
 def brief_show(order: str, home: Path | None = None) -> BriefShowResult:
-    """Последний сохранённый бриф заказа. Не результат мастерской, поэтому без плашки мока."""
+    """Последний сохранённый бриф заказа."""
     with _open_order(order, home) as o:
         row = o.conn.execute(
             "SELECT * FROM briefs WHERE order_id = ? ORDER BY id DESC LIMIT 1", (o.pk,)
@@ -569,6 +576,7 @@ def brief_show(order: str, home: Path | None = None) -> BriefShowResult:
             saved_at=row["created_at"],
             brief=json.loads(row["data"]),
             check=json.loads(row["check_result"]),
+            **_mock(o.home),
         )
 
 
@@ -576,12 +584,17 @@ def brief_show(order: str, home: Path | None = None) -> BriefShowResult:
 
 
 class QuickEstimate(Result):
-    meters: float
-    per_meter_low: float
-    per_meter_high: float
+    meters: int | float
+    per_meter_low: int | float
+    per_meter_high: int | float
     total_low: int
     total_high: int
     rounding: str  # как округлено, словами
+
+
+def _num(x: float) -> int | float:
+    """Целое число — целым в JSON (85000, не 85000.0)."""
+    return int(x) if x == int(x) else x
 
 
 def quick_estimate(meters: float, home: Path | None = None) -> QuickEstimate:
@@ -593,14 +606,13 @@ def quick_estimate(meters: float, home: Path | None = None) -> QuickEstimate:
     low, high = pricing.quick_estimate_per_m
     rule = pricing.price_rounding
     exact = Decimal(str(meters))  # через строку: без шума плавающей запятой
-    word = "вверх" if rule.direction == "up" else "вниз"
     return QuickEstimate(
-        meters=meters,
-        per_meter_low=low,
-        per_meter_high=high,
+        meters=_num(meters),
+        per_meter_low=_num(low),
+        per_meter_high=_num(high),
         total_low=rule.apply(exact * Decimal(str(low))),
         total_high=rule.apply(exact * Decimal(str(high))),
-        rounding=f"{word} до {rule.step}",
+        rounding=rule.describe(),
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,
     )

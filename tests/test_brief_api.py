@@ -66,14 +66,39 @@ def test_surname_only_takes_next_number_of_current_year(home, tmp_path):
     assert api.brief_save("Сергеев", _brief(tmp_path)).order == "2026-048-sergeev"
 
 
-def test_surname_only_always_creates_a_new_order(home, tmp_path):
+def test_surname_only_matching_existing_order_is_an_error_with_suggestion(home, tmp_path):
     api.order_new("2026-047-sergeev")
-    assert api.brief_save("sergeev", _brief(tmp_path)).order == "2026-048-sergeev"
+    api.order_new("2025-010-sergeev")  # совпадение ищется по всем годам
+    with pytest.raises(OrderError) as e:
+        api.brief_save("sergeev", _brief(tmp_path))
+    text = "\n".join(e.value.problems)
+    assert "2026-047-sergeev" in text and "2025-010-sergeev" in text
+    assert "kitchen brief save 2026-048-sergeev" in text  # как завести новый
+    with pytest.raises(OrderError, match="не найден"):
+        api.order_show("2026-048")  # ничего не создано
 
 
-@pytest.mark.parametrize("bad", ["  ", "---", "2026-047-"])
-def test_surname_only_without_letters_is_rejected(home, tmp_path, bad):
-    with pytest.raises(OrderError, match="фамилия|номер заказа"):
+def test_surname_match_is_exact_slug_not_substring_or_client_name(home, tmp_path):
+    api.order_new("2026-047-petrov", client="Сергеев Иван")
+    api.order_new("2026-048-sergeevich")
+    assert api.brief_save("sergeev", _brief(tmp_path)).order == "2026-049-sergeev"
+
+
+@pytest.mark.parametrize(
+    "bad", ["2026-47-ivanov", "2026-0477-x", "petrov 2026-047", "2026-047-", "47", "2026/047"]
+)
+def test_malformed_order_id_is_not_taken_for_a_surname(home, tmp_path, bad):
+    with pytest.raises(OrderError, match="похоже на номер заказа, ожидалось ГГГГ-NNN-фамилия"):
+        api.brief_save(bad, _brief(tmp_path))
+    with pytest.raises(OrderError, match="похоже на номер заказа"):
+        api.order_show(bad)  # тот же разбор запроса, что и в поиске заказа
+    api.order_new("2026-001-first")
+    assert api.order_show("first").order.number == "2026-001"  # ничего лишнего не создано
+
+
+@pytest.mark.parametrize("bad", ["  ", "---"])
+def test_query_without_letters_is_rejected(home, tmp_path, bad):
+    with pytest.raises(OrderError, match="фамилия"):
         api.brief_save(bad, _brief(tmp_path))
 
 
@@ -93,7 +118,7 @@ def test_show_returns_saved_brief_and_check(home, tmp_path):
     assert shown.order == "2026-047-sergeev"
     assert shown.brief == sergey()
     assert shown.check["summary"]["conflicts"] == 10
-    assert shown.mock is False  # бриф не считается из мастерской
+    assert shown.mock is True and shown.mock_files  # плашка мока везде одинаковая
 
 
 def test_show_without_brief(home):
@@ -149,18 +174,24 @@ def test_save_shows_stage_brief_and_logs_done(home, tmp_path, monkeypatch):
     assert "## Сделано\n\n- 2026-11-14: бриф сохранён\n" in st.text
 
 
-def test_old_v1_database_is_upgraded_for_briefs(home, tmp_path):
+def test_old_v1_database_is_upgraded_and_keeps_orders(home, tmp_path):
     db = home / "orders" / "kitchen.db"
     db.parent.mkdir()
     conn = sqlite3.connect(db)
     for statement in store.MIGRATIONS[1].split(";"):
         if statement.strip():
             conn.execute(statement)
+    conn.execute(
+        "INSERT INTO orders (number, slug, client, created_at, updated_at)"
+        " VALUES ('2026-047', 'petrov', 'Петров', '2026-11-01T00:00:00+00:00', '2026-11-01T00:00:00+00:00')"
+    )
     conn.execute("PRAGMA user_version = 1")
     conn.commit()
     conn.close()
-    assert api.brief_save("2026-047-sergeev", _brief(tmp_path)).created
-    assert api.brief_show("sergeev").check["summary"]["conflicts"] == 10
+    assert api.order_show("petrov").order.client == "Петров"
+    assert sqlite3.connect(db).execute("PRAGMA user_version").fetchone()[0] == 2
+    assert api.brief_save("2026-047-petrov", _brief(tmp_path)).created is False
+    assert api.brief_show("petrov").check["summary"]["conflicts"] == 10
 
 
 # --- quick-estimate ----------------------------------------------------------
@@ -169,15 +200,18 @@ def test_old_v1_database_is_upgraded_for_briefs(home, tmp_path):
 def test_quick_estimate_2_8_m(home):
     r = api.quick_estimate(2.8)
     assert (r.per_meter_low, r.per_meter_high) == (85000, 110000)
+    assert '"per_meter_low":85000,' in r.model_dump_json()  # целое, не 85000.0
     # 2.8 * 85000 = 238000, 2.8 * 110000 = 308000: уже кратны 1000
     assert (r.total_low, r.total_high) == (238000, 308000)
     assert r.meters == 2.8 and r.mock is True and "pricing.yaml" in r.mock_files
 
 
 def test_quick_estimate_4_6_m_survives_float_noise(home):
-    # float: 4.6 * 85000 == 391000.00000000006, «вверх до 1000» дало бы 392000
+    # в float 4.6 * 85000 = 390999.99999999994: «вниз до 1000» дало бы 390000 (и 505000 для верхнего конца)
+    _set_rounding(home, "вниз до 1000")
     r = api.quick_estimate(4.6)
     assert (r.total_low, r.total_high) == (391000, 506000)
+    assert r.rounding == "вниз до 1000"
 
 
 def test_quick_estimate_rounds_up(home):
