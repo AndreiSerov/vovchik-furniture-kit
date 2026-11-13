@@ -3,7 +3,15 @@
 import json
 from pathlib import Path
 
+import pytest
 from kitchen import api
+
+
+@pytest.fixture(autouse=True)
+def no_legacy_shelves(base_door_project):
+    project = json.loads(base_door_project.read_text(encoding="utf-8"))
+    project["walls"][0]["rows"][0]["modules"][0].pop("shelves", None)
+    base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
 
 
 def test_dishwasher_panel_600(home, base_door_project):
@@ -141,3 +149,78 @@ def test_drawer_edging_follows_workshop_rule(home, base_door_project):
     for part in parts:
         if part.name in ("дно ящика", "задняя стенка ящика"):
             assert set(part.edges.values()) == {"edge_08_white"}
+
+
+def test_drawer_uses_its_material_thickness(home, base_door_project):
+    path = home / "workshop/construction.yaml"
+    text = path.read_text(encoding="utf-8")
+    # У материала ящика толщина 3 мм; правила корпуса остаются 16 мм.
+    text = text.replace("материал: ldsp_16_white\n", "материал: hdf_3_white\n")
+    path.write_text(text, encoding="utf-8")
+    project = json.loads(base_door_project.read_text(encoding="utf-8"))
+    project["walls"][0]["rows"][0]["modules"][0]["template"] = "base_drawers"
+    base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    parts = api.parts_from_project(base_door_project, home).modules[0].parts
+    bottom = next(p for p in parts if p.id == "Н1-дно-ящ-1")
+    back = next(p for p in parts if p.id == "Н1-зад-ящ-1")
+    assert bottom.thickness == back.thickness == 3
+    assert back.position.y + back.thickness == bottom.position.y
+
+
+def test_legacy_shelves_are_not_silently_ignored(home, base_door_project):
+    import pytest
+    from kitchen.errors import OrderError
+
+    for template, shelves in (
+        ("base_sink", 1),
+        ("base_sink", 2),
+        ("base_bottle", 1),
+        ("base_bottle", 2),
+        ("base_drawers", 1),
+        ("base_drawers", 2),
+    ):
+        project = json.loads(base_door_project.read_text(encoding="utf-8"))
+        module = project["walls"][0]["rows"][0]["modules"][0]
+        module.update(template=template, shelves=shelves, width=150 if template == "base_bottle" else 600)
+        base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+        with pytest.raises(OrderError, match="Н1.*пол"):
+            api.parts_from_project(base_door_project, home)
+
+
+def test_drawers_and_bottle_do_not_consult_hinge_table(home, base_door_project):
+    path = home / "workshop/construction.yaml"
+    path.write_text(
+        path.read_text().replace("[[900, 2], [1600, 3], [2000, 4], [9999, 5]]", "[[100, 2]]"),
+        encoding="utf-8",
+    )
+    project = json.loads(base_door_project.read_text(encoding="utf-8"))
+    for template, width in (("base_drawers", 600), ("base_bottle", 150)):
+        project["walls"][0]["rows"][0]["modules"][0].update(template=template, width=width)
+        base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+        assert api.parts_from_project(base_door_project, home).modules
+
+
+def test_bottle_rejects_other_or_duplicate_inserts(home, base_door_project):
+    import pytest
+    from kitchen.errors import OrderError
+
+    project = json.loads(base_door_project.read_text(encoding="utf-8"))
+    module = project["walls"][0]["rows"][0]["modules"][0]
+    for inserts in (["bin_2sec"], ["bottle_150", "bottle_150"]):
+        module.update(template="base_bottle", width=150, contents={"inserts": inserts})
+        base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+        with pytest.raises(OrderError, match="Н1.*одна вставка"):
+            api.parts_from_project(base_door_project, home)
+
+
+def test_drawer_formulas_come_from_workshop(home, base_door_project):
+    path = home / "workshop/construction.yaml"
+    text = path.read_text(encoding="utf-8").replace('"W - 2 * T"', '"W - 2 * T - 10"')
+    text = text.replace('"Z + T"', '"Z + T + 5"')
+    path.write_text(text, encoding="utf-8")
+    project = json.loads(base_door_project.read_text(encoding="utf-8"))
+    project["walls"][0]["rows"][0]["modules"][0]["template"] = "base_drawers"
+    base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    parts = api.parts_from_project(base_door_project, home).modules[0].parts
+    bottom = next(p for p in parts if p.id == "Н1-дно-ящ-1")
+    assert (bottom.length, bottom.width, bottom.position.z) == (490, 483, 23)

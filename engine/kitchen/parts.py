@@ -267,6 +267,7 @@ def build_base_door(
     ws: Workshop,
     *,
     no_doors: bool = False,
+    no_hinges: bool = False,
     single_door: bool = False,
     no_shelf: bool = False,
     no_back: bool = False,
@@ -389,9 +390,11 @@ def build_base_door(
         )
 
     # фурнитура; соотношения («по одной на петлю») — из construction.yaml
-    hinges = steps_pick(c.hinges_by_facade_height, facade_h, "петли_по_высоте_фасада") * n_doors
-    out.hardware[hw.hinges] += hinges
-    out.hardware[hw.plates] += hinges * c.plates.per_unit
+    hinges = 0
+    if n_doors and not no_hinges:
+        hinges = steps_pick(c.hinges_by_facade_height, facade_h, "петли_по_высоте_фасада") * n_doors
+        out.hardware[hw.hinges] += hinges
+        out.hardware[hw.plates] += hinges * c.plates.per_unit
     joints = [(D, 2)] + [(rail, 2)] * 2  # дно к обеим боковинам; каждая царга к обеим
     confirmats = sum(
         steps_pick(c.confirmats_by_joint_length, length, "конфирматы_по_длине_соединения") * count
@@ -503,13 +506,18 @@ def build_base_bottle(
     c = ws.construction
     if dims.width > c.bottle.max_width:
         raise OrderError(f"Модуль {module.label}: ширина бутылочницы больше допустимой для одного фасада.")
-    out = build_base_door(module.model_copy(update={"shelves": 1}), dims, materials, ws, single_door=True)
-    out.parts = [p for p in out.parts if p.name != "полка"]
-    del out.hardware[c.furniture.shelf_pins]
-    hinges = out.hardware.pop(c.furniture.hinges)
-    del out.hardware[c.furniture.plates]
-    out.hardware[c.furniture.screws] -= hinges * c.screws_3_5x16.per_hinge
+    out = build_base_door(
+        module.model_copy(update={"shelves": 1}),
+        dims,
+        materials,
+        ws,
+        single_door=True,
+        no_hinges=True,
+        no_shelf=True,
+    )
     inserts = module.contents.inserts if module.contents and module.contents.inserts else [c.bottle.insert]
+    if inserts != [c.bottle.insert]:
+        raise OrderError(f"Модуль {module.label}: нужна одна вставка бутылочницы «{c.bottle.insert}».")
     for insert in inserts:
         out.hardware[insert] += 1
     return out
@@ -519,12 +527,9 @@ def build_base_drawers(
     module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
 ) -> TemplateOut:
     c = ws.construction
-    out = build_base_door(module.model_copy(update={"shelves": 1}), dims, materials, ws, no_doors=True)
-    out.parts = [p for p in out.parts if p.name not in ("полка", "фасад")]
-    del out.hardware[c.furniture.shelf_pins]
-    hinges = out.hardware.pop(c.furniture.hinges)
-    del out.hardware[c.furniture.plates]
-    out.hardware[c.furniture.screws] -= hinges * c.screws_3_5x16.per_hinge
+    out = build_base_door(
+        module.model_copy(update={"shelves": 1}), dims, materials, ws, no_doors=True, no_shelf=True
+    )
     out.hardware[materials.handles] = 3 * c.handles.per_unit
     out.hardware[c.drawers.hardware] += 3
     out.hardware[c.furniture.screws] += 3 * c.screws_3_5x16.per_drawer
@@ -532,12 +537,23 @@ def build_base_drawers(
     height = _calc(module, dims, "высота фасадов", facades.height_lower, H=dims.height, W=dims.width)
     width = _calc(module, dims, "ширина фасадов", facades.single_door_width, H=dims.height, W=dims.width)
     top = _whole(facades.three_drawers.top, "Высота верхнего фасада")
-    remaining = height - top - 2 * facades.gap
-    if remaining <= 0 or remaining % 2:
-        raise OrderError(f"Модуль {module.label}: остаток фасадов {remaining} мм нельзя разделить поровну.")
+    lower_height = _calc(
+        module,
+        dims,
+        "высота фасадов ящика",
+        c.drawers.lower_facade_height,
+        H=height,
+        TOP=top,
+        GAP=facades.gap,
+    )
+    if lower_height <= 0:
+        raise OrderError(f"Модуль {module.label}: высота фасада ящика должна быть положительной.")
     facade = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
     drawer_material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
-    inner = dims.width - 2 * c.case_thickness
+    drawer_t = _required_thickness(drawer_material, "деталей ящика")
+    inner = _calc(
+        module, dims, "внутренняя ширина ящика", c.drawers.inner_width, W=dims.width, T=c.case_thickness
+    )
     try:
         bottom_dims = formulas.evaluate(c.tandembox.bottom, внутр_ширина=inner)
         back_dims = formulas.evaluate(c.tandembox.back, внутр_ширина=inner)
@@ -550,7 +566,8 @@ def build_base_drawers(
             f"Модуль {module.label}: размеры деталей ящика должны быть положительными: {bottom_dims}, {back_dims}."
         )
     z = facades.gap
-    for n, h in enumerate((remaining // 2, remaining // 2, top), 1):
+    for n, h in enumerate((lower_height, lower_height, top), 1):
+        drawer_z = _calc(module, dims, "высота дна ящика", c.drawers.bottom_height, Z=z, T=c.case_thickness)
         out.parts.append(
             make_part(
                 pid=f"{module.label}-фасад-{n}",
@@ -572,7 +589,7 @@ def build_base_drawers(
                 "задняя стенка ящика",
                 back_dims,
                 ("x", "z"),
-                dims.depth - bottom_dims[1] - c.case_thickness,
+                dims.depth - bottom_dims[1] - drawer_t,
             ),
         ):
             out.parts.append(
@@ -582,10 +599,10 @@ def build_base_drawers(
                     name=name,
                     a=Span(sizes[0], axes[0]),
                     b=Span(sizes[1], axes[1]),
-                    thickness=c.case_thickness,
+                    thickness=drawer_t,
                     material_id=drawer_material.id,
                     textured=bool(drawer_material.texture),
-                    at=Position(x=(dims.width - sizes[0]) // 2, y=y, z=z),
+                    at=Position(x=(dims.width - sizes[0]) // 2, y=y, z=drawer_z),
                     edges=dict.fromkeys(EDGE_SIDES, _edge_id(ws, drawer_material.id))
                     if c.drawers.edge_parts
                     else None,
@@ -669,6 +686,10 @@ def _build_module(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws:
             f"{_ROW_RU[template.row_kind]}, а он в ряде «{row.kind}»."
         )
     if module.template in ("base_sink", "base_bottle", "base_drawers"):
+        if "shelves" in module.model_fields_set:
+            raise OrderError(
+                f"Модуль {module.label}: число полок {module.shelves} не поддерживается шаблоном."
+            )
         contents = module.contents
         unsupported = bool(module.corner or (module.without_back and module.template != "base_sink"))
         if contents:

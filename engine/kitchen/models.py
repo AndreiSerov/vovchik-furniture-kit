@@ -279,6 +279,16 @@ class BottleRules(Section):
 class DrawerRules(Section):
     hardware: str = _f("комплект")
     edge_parts: StrictBool = _f("кромить_детали")
+    inner_width: FormulaField = _f("внутренняя_ширина")
+    lower_facade_height: FormulaField = _f("высота_нижнего_фасада")
+    bottom_height: FormulaField = _f("высота_дна")
+
+    @model_validator(mode="after")
+    def check_formula_vars(self) -> "DrawerRules":
+        _check_formula_vars([("внутренняя_ширина", self.inner_width)], {"W", "T"})
+        _check_formula_vars([("высота_нижнего_фасада", self.lower_facade_height)], {"H", "TOP", "GAP"})
+        _check_formula_vars([("высота_дна", self.bottom_height)], {"Z", "T"})
+        return self
 
 
 class Screws(Section):
