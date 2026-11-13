@@ -15,3 +15,7 @@ class WorkshopError(KitchenError):
 
 class OrderError(KitchenError):
     """Заказ не найден, неоднозначен, или данные заказа неверны. Сообщения по-русски."""
+
+
+class InputError(KitchenError):
+    """Неверный аргумент команды (например, длина кухни не больше нуля)."""

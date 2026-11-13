@@ -1,6 +1,8 @@
 """Модели файлов мастерской. Поля английские, ключи YAML (русские) — алиасы."""
 
-from typing import Annotated
+import re
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, field_validator
 
@@ -246,12 +248,40 @@ class Labor(Section):
 # --- pricing.yaml -----------------------------------------------------------
 
 
+class RoundingRule(BaseModel):
+    """Правило округления цены: направление и шаг в рублях («вверх до 1000»)."""
+
+    model_config = ConfigDict(frozen=True)
+    direction: Literal["up", "down"]
+    step: int
+
+    def apply(self, value: Decimal) -> int:
+        mode = ROUND_CEILING if self.direction == "up" else ROUND_FLOOR
+        return int((value / self.step).to_integral_value(rounding=mode)) * self.step
+
+
+_ROUNDING_RE = re.compile(r"^\s*(вверх|вниз)\s+до\s+(\d+)\s*$", re.IGNORECASE)
+_DIRECTIONS = {"вверх": "up", "вниз": "down"}
+
+
+def parse_rounding(value):
+    """«вверх до 1000» -> RoundingRule. Неизвестная форма — ошибка загрузки по-русски."""
+    if isinstance(value, RoundingRule):
+        return value
+    m = _ROUNDING_RE.match(value) if isinstance(value, str) else None
+    if not m or int(m.group(2)) <= 0:
+        raise ValueError(
+            "неизвестная форма округления, ожидалось «вверх до N» или «вниз до N» (N больше нуля)"
+        )
+    return RoundingRule(direction=_DIRECTIONS[m.group(1).lower()], step=int(m.group(2)))
+
+
 class Pricing(Section):
     mock: StrictBool
     materials_markup: Num = _f("наценка_на_материалы")
     consumables_share: Num = _f("расходники_от_материалов")
     materials_delivery: Num = _f("доставка_материалов")
-    price_rounding: str = _f("округление_цены")
+    price_rounding: Annotated[RoundingRule, BeforeValidator(parse_rounding)] = _f("округление_цены")
     prepayment: Num = _f("предоплата")
     quick_estimate_per_m: tuple[Num, Num] = _f("быстрая_оценка_за_пог_м")
 

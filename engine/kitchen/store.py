@@ -4,13 +4,13 @@ import os
 import re
 import sqlite3
 from contextlib import closing, contextmanager
-from datetime import UTC, datetime, tzinfo
+from datetime import UTC, date, datetime, tzinfo
 from pathlib import Path
 
 from kitchen.errors import OrderError
 from kitchen.workshop import resolve_home
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Миграции: номер схемы -> скрипт (операторы через «;», без «;» внутри комментариев).
 # Добавить v2: написать _SCHEMA_V2, внести в MIGRATIONS и поднять SCHEMA_VERSION.
@@ -25,7 +25,7 @@ CREATE TABLE orders (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-CREATE TABLE briefs (                     -- заполняет `brief save` (тикет 04)
+CREATE TABLE briefs (                     -- каждое сохранение брифа — строка, актуален последний
     id INTEGER PRIMARY KEY,
     order_id INTEGER NOT NULL REFERENCES orders(id),
     data TEXT NOT NULL,
@@ -59,12 +59,22 @@ CREATE TABLE outputs (                    -- используется с эта�
 """
 
 
-MIGRATIONS = {1: _SCHEMA_V1}
+# check_result — итог check_brief.py при сохранении (комментарий внутри ALTER ломает схему в БД)
+_SCHEMA_V2 = """
+ALTER TABLE briefs ADD COLUMN check_result TEXT NOT NULL DEFAULT '{}'
+"""
+
+MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2}
 
 
 def now() -> str:
     """Текущее время в UTC (так хранится)."""
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def today() -> date:
+    """Сегодняшняя дата по местному времени (год для нумерации заказов)."""
+    return datetime.now().astimezone().date()
 
 
 def local_date(ts: str, tz: tzinfo | None = None) -> str:

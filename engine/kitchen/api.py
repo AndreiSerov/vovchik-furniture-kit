@@ -2,23 +2,28 @@
 
 import hashlib
 import json
+import re
 import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import tzinfo
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from kitchen import brief as brief_check
 from kitchen import store
-from kitchen.errors import OrderError
+from kitchen.errors import InputError, OrderError
 from kitchen.models import Workshop
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
 __all__ = [
+    "BriefSaveResult",
+    "BriefShowResult",
     "ExportResult",
     "FileSummary",
     "ImportResult",
@@ -26,10 +31,13 @@ __all__ = [
     "LogResult",
     "OrderInfo",
     "OrderResult",
+    "QuickEstimate",
     "StatusResult",
     "ValidationContext",
     "ValidationResult",
     "WorkshopCheck",
+    "brief_save",
+    "brief_show",
     "check_workshop",
     "export_project",
     "import_project",
@@ -37,6 +45,7 @@ __all__ = [
     "log_add",
     "order_new",
     "order_show",
+    "quick_estimate",
     "resolve_home",
     "status",
     "validate_wrapper",
@@ -192,14 +201,12 @@ def _open_order(query: str, home: Path | None = None) -> Iterator[OpenOrder]:
         conn.commit()
 
 
-def _create_order(
+def _insert_order(
     conn: sqlite3.Connection, number: str, slug: str, client: str, phone: str, address: str
 ) -> sqlite3.Row:
-    """Проверка номера и вставка заказа под одной блокировкой (параллельные запуски не гоняются)."""
-    conn.execute("BEGIN IMMEDIATE")
+    """Проверка номера и вставка заказа; вызывать внутри `BEGIN IMMEDIATE` (параллельные запуски не гоняются)."""
     taken = conn.execute("SELECT * FROM orders WHERE number = ?", (number,)).fetchone()
     if taken:
-        conn.rollback()
         raise OrderError(f"Номер {number} уже занят заказом {store.order_ref_of(taken)}.")
     ts = store.now()
     try:
@@ -209,7 +216,6 @@ def _create_order(
             (number, slug, client, phone, address, ts, ts),
         )
     except sqlite3.IntegrityError as e:
-        conn.rollback()
         raise OrderError(f"Номер {number} уже занят другим заказом.") from e
     return conn.execute("SELECT * FROM orders WHERE number = ?", (number,)).fetchone()
 
@@ -220,7 +226,8 @@ def order_new(
     home = home or resolve_home()
     number, slug = store.parse_order_id(order)
     with store.connect(home) as conn:
-        row = _create_order(conn, number, slug, client, phone, address)
+        conn.execute("BEGIN IMMEDIATE")
+        row = _insert_order(conn, number, slug, client, phone, address)
         conn.commit()
         return OrderResult(order=_info(row), created=True, **_mock(home))
 
@@ -299,19 +306,22 @@ def _insert_log(conn: sqlite3.Connection, pk: int, kind: str, text: str, version
     return LogEntry(created_at=ts, kind=kind, text=text, project_version=version)
 
 
-def import_project(
-    order: str, path: Path, validate: Validator = validate_wrapper, home: Path | None = None
-) -> ImportResult:
-    home = home or resolve_home()
-    path = Path(path)
+def _read_json(path: Path, what: str) -> Any:
     if not path.is_file():
-        raise OrderError(f"Файл проекта {path} не найден.")
+        raise OrderError(f"{what} {path} не найден.")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"), parse_constant=_reject_constant)
+        return json.loads(path.read_text(encoding="utf-8"), parse_constant=_reject_constant)
     except json.JSONDecodeError as e:
         raise OrderError(f"{path.name}: не JSON (строка {e.lineno}, столбец {e.colno}).") from e
     except ValueError as e:  # NaN/Infinity и ошибка кодировки
         raise OrderError(f"{path.name}: не JSON ({e}).") from e
+
+
+def import_project(
+    order: str, path: Path, validate: Validator = validate_wrapper, home: Path | None = None
+) -> ImportResult:
+    home = home or resolve_home()
+    data = _read_json(Path(path), "Файл проекта")
     with _open_order(order, home) as o:
         loaded = load(home)
         mock = _mock_of(loaded)
@@ -466,3 +476,131 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
             text=text,
             **mock,
         )
+
+
+# --- бриф --------------------------------------------------------------------
+
+
+class BriefSaveResult(Result):
+    order: str
+    created: bool
+    saved_at: str
+    missing_required: int
+    conflicts: int
+    check: dict[str, Any]
+
+
+class BriefShowResult(Result):
+    order: str
+    saved_at: str
+    brief: dict[str, Any]
+    check: dict[str, Any]
+
+
+def _next_number(conn: sqlite3.Connection) -> str:
+    year = store.today().year
+    taken = conn.execute("SELECT number FROM orders WHERE number LIKE ?", (f"{year}-%",)).fetchall()
+    nxt = max((int(r["number"][5:]) for r in taken), default=0) + 1
+    if nxt > 999:
+        raise OrderError(f"В {year} году заказы закончились: номера выше {year}-999 не бывает.")
+    return f"{year}-{nxt:03d}"
+
+
+def _resolve_for_brief(conn: sqlite3.Connection, query: str, client: str) -> tuple[sqlite3.Row, bool]:
+    """Заказ для брифа: существующий (номер или номер-фамилия), новый по полному номеру или новый по фамилии."""
+    q = query.strip()
+    if store.NUMBER_RE.match(q):
+        return store.find_order(conn, q), False
+    if store.ID_RE.match(q):
+        number, slug = store.parse_order_id(q)
+        if conn.execute("SELECT 1 FROM orders WHERE number = ?", (number,)).fetchone():
+            return store.find_order(conn, q), False
+    else:
+        number, slug = None, store.slugify(q)
+        if not re.search(r"[a-z]", slug):
+            raise OrderError(
+                f"«{query}» — не фамилия. Укажите номер-фамилию (2026-047-petrov) или одну фамилию."
+            )
+        number = _next_number(conn)
+    return _insert_order(conn, number, slug, client, "", ""), True
+
+
+def brief_save(order: str, brief_path: Path, home: Path | None = None) -> BriefSaveResult:
+    """Сохраняет бриф заказа. Заказа нет — создаёт (по фамилии берёт следующий номер года)."""
+    home = home or resolve_home()
+    brief = _read_json(Path(brief_path), "Файл брифа")
+    if not isinstance(brief, dict):
+        raise OrderError("Бриф должен быть JSON-объектом ({...}), а не списком или значением.")
+    check = brief_check.check(brief, store.today())  # неизвестные поля и ошибки схемы отклоняют бриф
+    mock = _mock(home)
+    with store.connect(home) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row, created = _resolve_for_brief(conn, order, brief_check.client_name(brief))
+        ts = store.now()
+        conn.execute(
+            "INSERT INTO briefs (order_id, data, check_result, created_at) VALUES (?, ?, ?, ?)",
+            (row["id"], _canonical(brief), json.dumps(check, ensure_ascii=False), ts),
+        )
+        current = _current_version(conn, row["id"])
+        _insert_log(conn, row["id"], "done", "бриф сохранён", current["version"] if current else None)
+        conn.execute("UPDATE orders SET updated_at = ? WHERE id = ?", (ts, row["id"]))
+        conn.commit()
+        return BriefSaveResult(
+            order=store.order_ref_of(row),
+            created=created,
+            saved_at=ts,
+            missing_required=check["summary"]["missing_required"],
+            conflicts=check["summary"]["conflicts"],
+            check=check,
+            **mock,
+        )
+
+
+def brief_show(order: str, home: Path | None = None) -> BriefShowResult:
+    """Последний сохранённый бриф заказа. Не результат мастерской, поэтому без плашки мока."""
+    with _open_order(order, home) as o:
+        row = o.conn.execute(
+            "SELECT * FROM briefs WHERE order_id = ? ORDER BY id DESC LIMIT 1", (o.pk,)
+        ).fetchone()
+        if not row:
+            raise OrderError(f"У заказа {o.ref} брифа ещё нет. Сначала kitchen brief save.")
+        return BriefShowResult(
+            order=o.ref,
+            saved_at=row["created_at"],
+            brief=json.loads(row["data"]),
+            check=json.loads(row["check_result"]),
+        )
+
+
+# --- быстрая вилка -----------------------------------------------------------
+
+
+class QuickEstimate(Result):
+    meters: float
+    per_meter_low: float
+    per_meter_high: float
+    total_low: int
+    total_high: int
+    rounding: str  # как округлено, словами
+
+
+def quick_estimate(meters: float, home: Path | None = None) -> QuickEstimate:
+    """Вилка цены по погонным метрам: быстрая_оценка_за_пог_м × метры, концы округлены по `pricing.yaml`."""
+    if not (meters > 0 and meters != float("inf")):  # NaN и бесконечность тоже сюда
+        raise InputError("Длина кухни в погонных метрах должна быть числом больше нуля.")
+    workshop = load_workshop(home)
+    pricing = workshop.pricing
+    low, high = pricing.quick_estimate_per_m
+    rule = pricing.price_rounding
+    exact = Decimal(str(meters))  # через строку: без шума плавающей запятой
+    word = "вверх" if rule.direction == "up" else "вниз"
+    return QuickEstimate(
+        meters=meters,
+        per_meter_low=low,
+        per_meter_high=high,
+        total_low=rule.apply(exact * Decimal(str(low))),
+        total_high=rule.apply(exact * Decimal(str(high))),
+        rounding=f"{word} до {rule.step}",
+        mock=workshop.is_mock,
+        mock_files=workshop.mock_files,
+    )

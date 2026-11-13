@@ -4,6 +4,7 @@
 ошибке живут в `emit`/`fail`: все команды печатают через них.
 """
 
+import json as stdlib_json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, NoReturn, TypeVar
@@ -175,3 +176,78 @@ def status(order: OrderArg, json: JsonOpt = False) -> None:
     except KitchenError as e:
         fail(e)
     emit(result, lambda r: f"{r.text}\nФайл: {r.path}", json)
+
+
+# --- бриф и быстрая вилка ----------------------------------------------------
+
+brief_app = typer.Typer(help="Бриф заказа: сохранить, показать.", no_args_is_help=True)
+app.add_typer(brief_app, name="brief")
+
+
+def _render_brief_saved(r: api.BriefSaveResult) -> str:
+    head = f"Заказ {r.order} заведён, бриф сохранён." if r.created else f"Заказ {r.order}: бриф сохранён."
+    return "\n".join(
+        [
+            head,
+            f"  Не заполнено обязательных полей: {r.missing_required}",
+            f"  Противоречий и рисков: {r.conflicts}",
+        ]
+    )
+
+
+@brief_app.command("save")
+def brief_save(
+    order: Annotated[
+        str,
+        typer.Argument(help="Номер-фамилия (2026-047-petrov) или одна фамилия: тогда следующий номер года."),
+    ],
+    brief: Annotated[Path, typer.Argument(help="Файл brief.json.")],
+    json: JsonOpt = False,
+) -> None:
+    """Проверить и сохранить бриф; заказа нет — завести."""
+    try:
+        result = api.brief_save(order, brief)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_brief_saved, json)
+
+
+@brief_app.command("show")
+def brief_show(order: OrderArg, json: JsonOpt = False) -> None:
+    """Напечатать сохранённый бриф (JSON)."""
+    try:
+        result = api.brief_show(order)
+    except KitchenError as e:
+        fail(e)
+    emit(result, lambda r: _dumps(r.brief), json)
+
+
+def _dumps(data: object) -> str:
+    return stdlib_json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def _rub(n: float) -> str:
+    return f"{n:,.0f}".replace(",", " ")
+
+
+def _render_estimate(r: api.QuickEstimate) -> str:
+    return "\n".join(
+        [
+            f"Кухня {r.meters:g} пог. м.",
+            f"  За пог. м: {_rub(r.per_meter_low)} – {_rub(r.per_meter_high)} ₽",
+            f"  Вилка цены: {_rub(r.total_low)} – {_rub(r.total_high)} ₽ (округление {r.rounding})",
+        ]
+    )
+
+
+@app.command("quick-estimate")
+def quick_estimate(
+    meters: Annotated[float, typer.Option("--meters", help="Длина кухни в погонных метрах.")],
+    json: JsonOpt = False,
+) -> None:
+    """Быстрая вилка цены по погонным метрам (расценка из pricing.yaml)."""
+    try:
+        result = api.quick_estimate(meters)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_estimate, json)
