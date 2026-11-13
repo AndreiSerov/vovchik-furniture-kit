@@ -25,6 +25,7 @@ kitchen check-workshop  # сводка по данным мастерской; -
 
 ```sh
 kitchen order new 2026-047-petrov --client "Петров П. П." --phone ... --address ...
+kitchen order show petrov                # найти заказ, показать карточку
 kitchen import petrov project.json       # новая версия, только если проект изменился
 kitchen export petrov [--version N] [--out файл]   # project.json с номером версии
 kitchen log petrov --kind done|decision|next|note "текст"

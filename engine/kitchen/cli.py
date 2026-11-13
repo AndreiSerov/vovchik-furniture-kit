@@ -11,7 +11,7 @@ from typing import Annotated, NoReturn, TypeVar
 import typer
 
 from kitchen import api
-from kitchen.errors import WorkshopError
+from kitchen.errors import KitchenError
 from kitchen.result import MOCK_BANNER, Result
 
 app = typer.Typer(help="Движок мастерской: проверка данных, заказы, раскрой, смета.", no_args_is_help=True)
@@ -39,7 +39,7 @@ def emit(result: R, render: Callable[[R], str], as_json: bool, ok: bool = True) 
         raise typer.Exit(1)
 
 
-def fail(err: WorkshopError) -> NoReturn:
+def fail(err: KitchenError) -> NoReturn:
     typer.echo("\n".join(err.problems), err=True)
     raise typer.Exit(1)
 
@@ -65,7 +65,7 @@ def check_workshop(json: JsonOpt = False) -> None:
     """Проверить файлы workshop/ и напечатать сводку."""
     try:
         result = api.check_workshop()
-    except WorkshopError as e:
+    except KitchenError as e:
         fail(e)
     emit(result, _render_check, json, ok=result.valid)
 
@@ -98,7 +98,7 @@ def order_new(
     """Завести заказ."""
     try:
         result = api.order_new(order, client=client, phone=phone, address=address)
-    except WorkshopError as e:
+    except KitchenError as e:
         fail(e)
     emit(result, _render_order, json)
 
@@ -108,7 +108,7 @@ def order_show(order: OrderArg, json: JsonOpt = False) -> None:
     """Найти заказ и показать его карточку."""
     try:
         result = api.order_show(order)
-    except WorkshopError as e:
+    except KitchenError as e:
         fail(e)
     emit(result, _render_order, json)
 
@@ -128,7 +128,7 @@ def import_(
     """Импортировать проект: новая версия появляется, только если проект изменился."""
     try:
         result = api.import_project(order, project)
-    except WorkshopError as e:
+    except KitchenError as e:
         fail(e)
     emit(result, _render_import, json)
 
@@ -147,7 +147,7 @@ def export(
     """Записать project.json версии проекта (с номером версии)."""
     try:
         result = api.export_project(order, version=version, out=out)
-    except WorkshopError as e:
+    except KitchenError as e:
         fail(e)
     emit(result, lambda r: f"Заказ {r.order}: версия {r.version} проекта записана в {r.path}.", json)
 
@@ -162,7 +162,7 @@ def log(
     """Добавить запись в журнал заказа."""
     try:
         result = api.log_add(order, kind, text)
-    except WorkshopError as e:
+    except KitchenError as e:
         fail(e)
     emit(result, lambda r: f"Заказ {r.order}: записано ({r.entry.kind}): {r.entry.text}", json)
 
@@ -172,6 +172,6 @@ def status(order: OrderArg, json: JsonOpt = False) -> None:
     """Собрать и напечатать status.md заказа (файл orders/<заказ>/status.md перезаписывается)."""
     try:
         result = api.status(order)
-    except WorkshopError as e:
+    except KitchenError as e:
         fail(e)
     emit(result, lambda r: f"{r.text}\nФайл: {r.path}", json)

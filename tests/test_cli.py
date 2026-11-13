@@ -123,4 +123,5 @@ def test_import_invalid_exit_1(home, tmp_path):
 def test_order_commands_without_workshop_fail(tmp_path, monkeypatch):
     monkeypatch.delenv("KITCHEN_HOME", raising=False)
     monkeypatch.chdir(tmp_path)
-    assert runner.invoke(app, ["order", "new", "2026-047-petrov"]).exit_code == 1
+    r = runner.invoke(app, ["order", "new", "2026-047-petrov"])
+    assert r.exit_code == 1 and "Мастерская не найдена" in r.output

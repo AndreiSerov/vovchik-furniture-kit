@@ -1,4 +1,9 @@
 import json
+import re
+import sqlite3
+import subprocess
+import sys
+from datetime import UTC, timedelta, timezone
 
 import pytest
 from kitchen import api
@@ -67,8 +72,6 @@ def test_kitchen_db_override(home, tmp_path, monkeypatch):
 
 
 def test_schema_version_stored_and_newer_db_rejected(home):
-    import sqlite3
-
     api.order_new("2026-047-petrov")
     db = home / "orders" / "kitchen.db"
     conn = sqlite3.connect(db)
@@ -141,12 +144,49 @@ def test_import_missing_file(order, tmp_path):
         api.import_project(order, tmp_path / "nope.json")
 
 
-def test_validator_is_a_seam(order, tmp_path):
-    def strict(data, order_number):
-        return ["нужны стены"] if not data.get("walls") else []
+def test_validator_errors_reject(order, tmp_path):
+    def strict(data, ctx):
+        return api.ValidationResult(errors=["нужны стены"] if not data.get("walls") else [])
 
     with pytest.raises(OrderError, match="нужны стены"):
         api.import_project(order, _project(tmp_path), validate=strict)
+    assert not api.status(order).project_version
+
+
+def test_validator_gets_context_and_warnings_go_to_log(order, tmp_path):
+    seen = []
+
+    def lenient(data, ctx):
+        seen.append(ctx)
+        return api.ValidationResult(warnings=["шкаф Н1 узкий"])
+
+    r = api.import_project(order, _project(tmp_path), validate=lenient)
+    assert r.warnings == ["шкаф Н1 узкий"]
+    assert (seen[0].order_ref, seen[0].order_number) == ("2026-047-petrov", "2026-047")
+    assert seen[0].workshop is not None
+    assert "Предупреждение при импорте: шкаф Н1 узкий" in api.status(order).text
+    api.import_project(order, _project(tmp_path), validate=lenient)  # без изменений: не дублируем
+    assert api.status(order).text.count("шкаф Н1 узкий") == 1
+
+
+def test_order_field_must_be_number_or_exact_full_id(order, tmp_path):
+    with pytest.raises(OrderError, match="не совпадает"):
+        api.import_project(order, _project(tmp_path, order="2026-047-ivanov"))
+
+
+def test_rejected_message_depends_on_existing_version(order, tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text("[]", encoding="utf-8")
+    with pytest.raises(OrderError) as e:
+        api.import_project(order, bad)
+    assert "не изменена" not in "\n".join(e.value.problems)
+
+
+def test_nan_rejected(order, tmp_path):
+    bad = tmp_path / "nan.json"
+    bad.write_text('{"order": "2026-047", "x": NaN}', encoding="utf-8")
+    with pytest.raises(OrderError, match="NaN"):
+        api.import_project(order, bad)
 
 
 def test_export_has_version_and_roundtrips_without_new_version(order, tmp_path):
@@ -206,8 +246,6 @@ def test_status_has_all_sections_and_writes_file(order, home, tmp_path):
     assert "версия 1" in text.lower()
     assert r.stage == "Проект" and r.project_version == 1
     assert text.index("заказать фасады") < text.index("старое дело")  # свежее выше
-    import re
-
     assert re.search(r"\d{4}-\d{2}-\d{2}.*замер сделан", text)
 
 
@@ -234,3 +272,68 @@ def test_no_mock_when_workshop_is_not_mock(home):
     for p in (home / "workshop").glob("*.yaml"):
         p.write_text(p.read_text(encoding="utf-8").replace("mock: true", "mock: false"), encoding="utf-8")
     assert api.order_new("2026-047-petrov").mock is False
+
+
+# --- даты, БД, поиск ---------------------------------------------------------
+
+
+def test_status_dates_are_local_not_utc(order, monkeypatch):
+    monkeypatch.setattr("kitchen.store.now", lambda: "2026-11-13T22:30:00+00:00")
+    api.log_add(order, "done", "замер сделан")
+    moscow = timezone(timedelta(hours=3))
+    assert "- 2026-11-14: замер сделан" in api.status(order, tz=moscow).text
+    assert "- 2026-11-13: замер сделан" in api.status(order, tz=UTC).text
+
+
+def test_concurrent_first_use_of_fresh_db(home):
+    code = (
+        "import sys\nfrom pathlib import Path\nfrom kitchen import store\n"
+        "with store.connect(Path(sys.argv[1])): pass"
+    )
+    procs = [
+        subprocess.Popen([sys.executable, "-c", code, str(home)], stderr=subprocess.PIPE) for _ in range(12)
+    ]
+    results = [(p.wait(), p.stderr.read().decode()) for p in procs]
+    assert all(rc == 0 for rc, _ in results), results
+    conn = sqlite3.connect(home / "orders" / "kitchen.db")
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_not_a_database_file(home):
+    db = home / "orders" / "kitchen.db"
+    db.parent.mkdir()
+    db.write_text("это не база, а просто текст " * 50, encoding="utf-8")
+    with pytest.raises(OrderError, match="не является базой"):
+        api.order_new("2026-047-petrov")
+
+
+def test_unopenable_database(home, monkeypatch):
+    monkeypatch.setenv("KITCHEN_DB", str(home))  # папка вместо файла
+    with pytest.raises(OrderError, match="не удалось открыть"):
+        api.order_new("2026-047-petrov")
+
+
+def test_relative_kitchen_db_resolves_against_home(home, monkeypatch, tmp_path):
+    monkeypatch.setenv("KITCHEN_DB", "data/my.db")
+    monkeypatch.chdir(tmp_path)
+    api.order_new("2026-047-petrov")
+    assert (home / "data" / "my.db").is_file()
+
+
+def test_lookup_by_client_name_translit(home):
+    api.order_new("2026-050-scherbakov", client="Щербаков Иван")
+    assert api.order_show("Щербаков").order.id == "2026-050-scherbakov"
+    assert api.order_show("иван").order.id == "2026-050-scherbakov"
+
+
+def test_full_id_with_taken_number_says_who_holds_it(order):
+    with pytest.raises(OrderError, match=r"2026-047 занят заказом 2026-047-petrov"):
+        api.order_show("2026-047-ivanov")
+
+
+def test_updated_at_touched_only_on_write(order, monkeypatch):
+    before = api.order_show(order).order.updated_at
+    monkeypatch.setattr("kitchen.store.now", lambda: "2030-01-01T00:00:00+00:00")
+    assert api.order_show(order).order.updated_at == before
+    api.log_add(order, "note", "x")
+    assert api.order_show(order).order.updated_at == "2030-01-01T00:00:00+00:00"
