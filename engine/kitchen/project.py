@@ -58,7 +58,7 @@ class ProjectMaterials(Section):
 
 class Project(Section):
     order: str
-    ceiling_height: Num = Field(alias="ceiling_height")
+    ceiling_height: Num
     walls: list[Wall]
     materials: ProjectMaterials
 

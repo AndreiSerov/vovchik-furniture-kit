@@ -31,7 +31,6 @@ __all__ = [
 ]
 
 EDGE_SIDES = ("L1", "L2", "W1", "W2")
-AXES = {"x", "y", "z"}
 
 
 # --- схема детали ------------------------------------------------------------
@@ -102,14 +101,17 @@ def make_part(
     y: int,
     z: int,
 ) -> Part:
-    """Собирает деталь: длина — вдоль текстуры, у нетекстурных — больший размер."""
+    """Собирает деталь: длина — вдоль текстуры (ось текстуры задаёт шаблон),
+    у нетекстурных — больший размер."""
     if textured or size_a >= size_b:
         length, length_axis = size_a, axis_a
         width, width_axis = size_b, axis_b
     else:
         length, length_axis = size_b, axis_b
         width, width_axis = size_a, axis_a
-    thickness_axis = (AXES - {length_axis, width_axis}).pop()
+    if length_axis == width_axis:
+        raise ValueError(f"Деталь {pid}: ось длины и ось ширины совпадают ({length_axis}).")
+    thickness_axis = next(a for a in ("x", "y", "z") if a not in (length_axis, width_axis))
     edge_map = dict.fromkeys(EDGE_SIDES, "")
     edge_map.update(edges)
     return Part(
@@ -229,8 +231,8 @@ def build_base_door(
     накладная задняя ХДФ, полки, двери по правилу ширины, петли и конфирматы по ступеням."""
     if module.shelves != 1:
         raise OrderError(
-            f"Модуль {module.label}: несколько полок пока не поддерживается — "
-            "наполнение придёт с полной схемой (тикет 06)."
+            f"Модуль {module.label}: пока поддерживается ровно одна полка, "
+            f"а задано полок: {module.shelves}. Наполнение придёт с полной схемой (тикет 06)."
         )
     c = ws.construction
     hw = ws.construction.furniture

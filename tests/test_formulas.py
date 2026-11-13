@@ -61,6 +61,12 @@ def test_variables_collected():
     assert variables("(внутр_ширина - 75) x (500 - 10)") == {"внутр_ширина"}
 
 
+def test_fractional_variable_rejected():
+    with pytest.raises(FormulaError) as e:
+        evaluate("H - 4", H=720.5)
+    assert "«H»" in str(e.value) and "целое" in str(e.value)
+
+
 # --- формулы проверяются при загрузке мастерской ------------------------------
 
 
@@ -95,6 +101,12 @@ def test_bad_purchase_rounding_rejected_at_load(home):
     )
     text = _problems(home)
     assert "округление_закупки" in text and "вверх до N м" in text
+
+
+def test_unsorted_steps_rejected_at_load(home):
+    _break(home, "construction.yaml", "[[900, 2], [1600, 3]", "[[1600, 2], [900, 3]")
+    text = _problems(home)
+    assert "петли_по_высоте_фасада" in text and "по возрастанию" in text
 
 
 def test_unknown_edge_in_material_mapping_rejected_at_load(home):

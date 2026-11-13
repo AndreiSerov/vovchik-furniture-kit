@@ -2,6 +2,7 @@
 
 import re
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
+from itertools import pairwise
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -247,6 +248,18 @@ class Construction(Section):
     furniture: HardwareRefs = _f("фурнитура")  # ДОБАВЛЕНО (МОК): id позиций hardware.yaml
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
+
+    @model_validator(mode="after")
+    def _steps_sorted(self) -> "Construction":
+        """Ступенчатая таблица работает, только если пороги идут по возрастанию."""
+        for key, steps in (
+            ("петли_по_высоте_фасада", self.hinges_by_facade_height),
+            ("конфирматы_по_длине_соединения", self.confirmats_by_joint_length),
+        ):
+            thresholds = [float(t) for t, _ in steps]
+            if any(b < a for a, b in pairwise(thresholds)):
+                raise ValueError(f"пороги таблицы «{key}» должны идти по возрастанию")
+        return self
 
 
 # --- materials.yaml ---------------------------------------------------------

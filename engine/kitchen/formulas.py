@@ -112,12 +112,18 @@ def variables(text: str) -> set[str]:
 
 
 def evaluate(formula: str | Node, **var_values) -> int | tuple[int, int]:
-    """Считает формулу над переменными. Результат — целое число или пара (через «x»)."""
+    """Считает формулу над переменными. Результат — целое число или пара (через «x»).
+
+    Переменные — целые миллиметры: дробное значение — русская ошибка.
+    """
     node = parse(formula) if isinstance(formula, str) else formula
     text = formula if isinstance(formula, str) else "<формула>"
-    allowed = {k: int(v) for k, v in var_values.items()}
-    result = _eval(node, allowed, text)
-    return result
+    allowed: dict[str, int] = {}
+    for name, value in var_values.items():
+        if isinstance(value, float) and not value.is_integer():
+            raise FormulaError(f"формула «{text}»: переменная «{name}» = {value}, а ожидалось целое число")
+        allowed[name] = int(value)
+    return _eval(node, allowed, text)
 
 
 def _eval(node: Node, var_values: dict[str, int], text: str) -> int | tuple[int, int]:
