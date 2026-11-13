@@ -2,15 +2,8 @@
 
 from pathlib import Path
 
-from kitchen.errors import WorkshopError
 from kitchen.result import Result
-from kitchen.workshop import (
-    FILES,
-    load_workshop,
-    mock_files_of,
-    read_raw,
-    resolve_home,
-)
+from kitchen.workshop import FILES, load, load_workshop, resolve_home
 
 __all__ = ["FileSummary", "WorkshopCheck", "check_workshop", "load_workshop", "resolve_home"]
 
@@ -41,17 +34,15 @@ def _counts(name: str, data: dict) -> dict[str, int]:
 
 
 def check_workshop(home: Path | None = None) -> WorkshopCheck:
-    home = home or resolve_home()
-    raw, read_problems = read_raw(home)
-    errors = list(read_problems)
-    try:
-        load_workshop(home)
-    except WorkshopError as e:
-        errors = list(dict.fromkeys(errors + e.problems))
-    mock = mock_files_of(raw)
+    loaded = load(home or resolve_home())
+    mock = loaded.mock_files
     files = [
-        FileSummary(file=n, counts=_counts(n, raw[n]), mock=n in mock, mock_files=[n] if n in mock else [])
+        FileSummary(
+            file=n, counts=_counts(n, loaded.raw[n]), mock=n in mock, mock_files=[n] if n in mock else []
+        )
         for n in FILES
-        if n in raw
+        if n in loaded.raw
     ]
-    return WorkshopCheck(valid=not errors, files=files, errors=errors, mock=bool(mock), mock_files=mock)
+    return WorkshopCheck(
+        valid=not loaded.problems, files=files, errors=loaded.problems, mock=bool(mock), mock_files=mock
+    )

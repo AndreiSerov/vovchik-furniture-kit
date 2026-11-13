@@ -5,7 +5,7 @@
 """
 
 from collections.abc import Callable
-from typing import Annotated, TypeVar
+from typing import Annotated, NoReturn, TypeVar
 
 import typer
 
@@ -38,7 +38,7 @@ def emit(result: R, render: Callable[[R], str], as_json: bool, ok: bool = True) 
         raise typer.Exit(1)
 
 
-def fail(err: WorkshopError) -> None:
+def fail(err: WorkshopError) -> NoReturn:
     typer.echo("\n".join(err.problems), err=True)
     raise typer.Exit(1)
 
@@ -66,5 +66,4 @@ def check_workshop(json: JsonOpt = False) -> None:
         result = api.check_workshop()
     except WorkshopError as e:
         fail(e)
-        return
     emit(result, _render_check, json, ok=result.valid)

@@ -25,7 +25,7 @@ dist/
 .ruff_cache/
 
 ### Orders (client data, ADR 0001) ###
-orders/
+orders/*
 
 ### IDE ###
 .idea/

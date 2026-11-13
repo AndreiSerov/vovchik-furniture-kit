@@ -5,8 +5,6 @@ from kitchen.cli import app
 from kitchen.result import MOCK_BANNER
 from typer.testing import CliRunner
 
-from .conftest import REPO
-
 runner = CliRunner()
 
 
@@ -53,7 +51,7 @@ def test_workshop_not_found(tmp_path, monkeypatch):
     assert "Мастерская не найдена" in r.output
 
 
-def test_root_discovery_from_repo_subfolder(monkeypatch):
+def test_root_discovery_from_repo_subfolder(monkeypatch, repo):
     monkeypatch.delenv("KITCHEN_HOME", raising=False)
-    monkeypatch.chdir(REPO / "tests")
+    monkeypatch.chdir(repo / "tests")
     assert runner.invoke(app, ["check-workshop"]).exit_code == 0

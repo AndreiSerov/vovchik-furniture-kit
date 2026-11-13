@@ -116,6 +116,7 @@ def test_home_resolution_env(home):
 def test_home_resolution_walks_up(tmp_path, monkeypatch):
     monkeypatch.delenv("KITCHEN_HOME", raising=False)
     (tmp_path / "workshop").mkdir()
+    (tmp_path / "workshop" / "construction.yaml").touch()
     deep = tmp_path / "a" / "b"
     deep.mkdir(parents=True)
     monkeypatch.chdir(deep)
@@ -135,3 +136,42 @@ def test_env_home_without_workshop(tmp_path, monkeypatch):
     with pytest.raises(WorkshopError) as e:
         api.resolve_home()
     assert "KITCHEN_HOME" in e.value.problems[0]
+
+
+@pytest.mark.parametrize("bad", ["1", '"true"', '"yes"'])
+def test_mock_must_be_real_bool(home, bad):
+    _break(home, "labor.yaml", "mock: true", f"mock: {bad}")
+    text = _problems(home)
+    assert "labor.yaml" in text and "«mock»" in text and "true или false" in text
+
+
+def test_bool_rejected_as_number(home):
+    _break(home, "labor.yaml", "ставка_в_час: 1000", "ставка_в_час: true")
+    text = _problems(home)
+    assert "ставка_в_час" in text and "число" in text
+
+
+def test_yaml_syntax_error_in_russian(home):
+    (home / "workshop" / "pricing.yaml").write_text("mock: true\nпредоплата: [0.5\n", encoding="utf-8")
+    text = _problems(home)
+    assert "pricing.yaml: строка" in text and "столбец" in text and "ошибка синтаксиса YAML" in text
+    assert "while" not in text
+
+
+def test_step_row_error_is_about_the_row(home):
+    _break(home, "construction.yaml", "[[150, 1], [600, 2]", "[[150], [600, 2]")
+    text = _problems(home)
+    assert "конфирматы_по_длине_соединения[0]" in text and "обязательный ключ" not in text
+
+
+def test_failed_file_still_flags_mock(home):
+    _break(home, "labor.yaml", "mock: true", "mock: 1")
+    assert api.check_workshop(home).mock is True
+
+
+def test_root_needs_construction_yaml(tmp_path, monkeypatch):
+    monkeypatch.delenv("KITCHEN_HOME", raising=False)
+    (tmp_path / "workshop").mkdir()
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(WorkshopError):
+        api.resolve_home()

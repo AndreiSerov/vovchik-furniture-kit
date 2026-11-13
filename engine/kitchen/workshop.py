@@ -1,10 +1,12 @@
 """Поиск мастерской и загрузка её файлов с русскими сообщениями об ошибках."""
 
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypeVar
 
 import yaml
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from kitchen.errors import WorkshopError
 from kitchen.models import (
@@ -17,17 +19,17 @@ from kitchen.models import (
     Workshop,
 )
 
-FILES: dict[str, type[BaseModel]] = {
-    "equipment.yaml": Equipment,
-    "construction.yaml": Construction,
-    "materials.yaml": Materials,
-    "hardware.yaml": Hardware,
-    "labor.yaml": Labor,
-    "pricing.yaml": Pricing,
-}
+FILES: tuple[str, ...] = (
+    "equipment.yaml",
+    "construction.yaml",
+    "materials.yaml",
+    "hardware.yaml",
+    "labor.yaml",
+    "pricing.yaml",
+)
 
 NOT_FOUND = (
-    "Мастерская не найдена: нет папки workshop/. "
+    "Мастерская не найдена: нет папки workshop/ с файлами. "
     "Задайте KITCHEN_HOME (папка, где лежит workshop/) или запустите команду внутри репозитория."
 )
 
@@ -41,7 +43,7 @@ def resolve_home(start: Path | None = None) -> Path:
         return home
     here = (start or Path.cwd()).resolve()
     for d in (here, *here.parents):
-        if (d / "workshop").is_dir():
+        if (d / "workshop" / "construction.yaml").is_file():
             return d
     raise WorkshopError(NOT_FOUND)
 
@@ -58,17 +60,15 @@ def read_raw(home: Path) -> tuple[dict[str, dict], list[str]]:
         try:
             data = yaml.safe_load(path.read_text(encoding="utf-8"))
         except yaml.YAMLError as e:
-            problems.append(f"{name}: не читается как YAML: {e}".replace("\n", " "))
+            mark = getattr(e, "problem_mark", None)
+            where = f"строка {mark.line + 1}, столбец {mark.column + 1}" if mark else "место не определено"
+            problems.append(f"{name}: {where}: ошибка синтаксиса YAML.")
             continue
         if not isinstance(data, dict):
             problems.append(f"{name}: ожидался набор «ключ: значение» в корне файла.")
             continue
         raw[name] = data
     return raw, problems
-
-
-def mock_files_of(raw: dict[str, dict]) -> list[str]:
-    return [n for n in FILES if raw.get(n, {}).get("mock") is True]
 
 
 _EXPECT = {
@@ -104,9 +104,11 @@ def translate(name: str, err: ValidationError) -> list[str]:
         path = _path(e["loc"])
         if e["type"] == "value_error":
             expect = str(e["ctx"]["error"])
+        elif e["type"] == "missing" and isinstance(e["loc"][-1], int):
+            expect = "в строке списка не хватает значения"
         else:
-            expect = _EXPECT.get(e["type"], e["msg"])
-        if e["type"] == "missing":
+            expect = _EXPECT.get(e["type"]) or f"значение не подходит ({e['type']}: {e['msg']})"
+        if e["type"] == "missing" and not isinstance(e["loc"][-1], int):
             msgs.append(f"{name}: ключ «{path}»: {expect}.")
         else:
             msgs.append(f"{name}: ключ «{path}»: значение «{e['input']}» — {expect}.")
@@ -128,28 +130,68 @@ def _cross_refs(w: Workshop) -> list[str]:
     return probs
 
 
-def load_workshop(home: Path | None = None) -> Workshop:
-    home = home or resolve_home()
+M = TypeVar("M", Equipment, Construction, Materials, Hardware, Labor, Pricing)
+
+
+@dataclass
+class Loaded:
+    """Итог одного чтения мастерской: модель (если всё верно), проблемы, сырые данные, моки."""
+
+    workshop: Workshop | None
+    problems: list[str]
+    raw: dict[str, dict]
+    mock_files: list[str] = field(default_factory=list)
+
+
+def load(home: Path) -> Loaded:
     raw, problems = read_raw(home)
-    models: dict[str, BaseModel] = {}
-    for name, cls in FILES.items():
+    parsed: dict[str, bool | None] = {}  # файл -> mock (None: файл не прошёл проверку)
+
+    def parse(name: str, cls: type[M]) -> M | None:
         if name not in raw:
-            continue
+            return None
         try:
-            models[name] = cls.model_validate(raw[name])
+            model = cls.model_validate(raw[name])
         except ValidationError as e:
-            problems += translate(name, e)
-    if not problems:
-        w = Workshop(
-            equipment=models["equipment.yaml"],  # type: ignore[arg-type]
-            construction=models["construction.yaml"],  # type: ignore[arg-type]
-            materials=models["materials.yaml"],  # type: ignore[arg-type]
-            hardware=models["hardware.yaml"],  # type: ignore[arg-type]
-            labor=models["labor.yaml"],  # type: ignore[arg-type]
-            pricing=models["pricing.yaml"],  # type: ignore[arg-type]
-            mock_files=mock_files_of(raw),
+            problems.extend(translate(name, e))
+            parsed[name] = None
+            return None
+        parsed[name] = model.mock
+        return model
+
+    equipment = parse("equipment.yaml", Equipment)
+    construction = parse("construction.yaml", Construction)
+    materials = parse("materials.yaml", Materials)
+    hardware = parse("hardware.yaml", Hardware)
+    labor = parse("labor.yaml", Labor)
+    pricing = parse("pricing.yaml", Pricing)
+
+    # Файл, который не прочитался или не прошёл проверку, считаем моком, пока он явно не `mock: false`.
+    mock_files = [
+        n
+        for n in FILES
+        if parsed.get(n) is True or (parsed.get(n) is None and raw.get(n, {}).get("mock") is not False)
+    ]
+
+    workshop = None
+    if not problems and equipment and construction and materials and hardware and labor and pricing:
+        workshop = Workshop(
+            equipment=equipment,
+            construction=construction,
+            materials=materials,
+            hardware=hardware,
+            labor=labor,
+            pricing=pricing,
+            mock_files=mock_files,
         )
-        problems = _cross_refs(w)
-        if not problems:
-            return w
-    raise WorkshopError(problems)
+        problems = _cross_refs(workshop)
+        if problems:
+            workshop = None
+    return Loaded(workshop, problems, raw, mock_files)
+
+
+def load_workshop(home: Path | None = None) -> Workshop:
+    loaded = load(home or resolve_home())
+    if loaded.workshop is None:
+        raise WorkshopError(loaded.problems)
+    return loaded.workshop

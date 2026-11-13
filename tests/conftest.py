@@ -12,3 +12,8 @@ def home(tmp_path, monkeypatch):
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
     monkeypatch.setenv("KITCHEN_HOME", str(tmp_path))
     return tmp_path
+
+
+@pytest.fixture
+def repo() -> Path:
+    return REPO
