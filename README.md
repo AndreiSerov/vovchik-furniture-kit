@@ -52,7 +52,7 @@ kitchen quick-estimate --meters 4.6             # вилка цены по prici
 kitchen parts --project project.json    # детали по модулям, фурнитура, кромка, фасады; без БД
 ```
 
-Минимальная схема проекта (тикет 05): стены с рядами и модулями, материалы по умолчанию; полная схема — тикет 06, так что пока поддержан модуль `base_door` нижнего ряда. Формулы и правила конструкции — только в `workshop/construction.yaml`. Эталон `base_door_600` — `tests/golden/base_door_600.json`, тест проходит до миллиметра.
+Расчёт поддерживает нижние шаблоны `base_door`, `base_sink`, `base_bottle`, `base_drawers` (три ящика) и `dishwasher_panel`. Формулы и правила конструкции — в `workshop/construction.yaml`. Ручные эталоны находятся в `tests/golden/`; добавленные правила помечены как мок и требуют проверки мастера.
 
 ## Разработка
 
@@ -75,4 +75,4 @@ python3 skills/kitchen-brief/scripts/check_brief.py brief.json
 один раз в ряду своей стены. Для ряда и модуля можно указать `materials` с полями
 `body`, `facades`, `handles`, `countertop`: значения модуля перекрывают ряд, ряд — проект.
 Наполнение (`contents`), параметры угла и флаг `without_back` сохраняются при импорте;
-расчёт `base_door` пока явно отказывает при таких параметрах.
+расчёт `base_door` пока явно отказывает при таких параметрах. Для `base_sink` можно указать `without_back` и `contents.inserts`, для `base_bottle` — `contents.inserts`, для `base_drawers` — `contents.drawers: 3`. Несовместимые параметры отклоняются.

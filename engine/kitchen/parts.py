@@ -261,7 +261,15 @@ class TemplateOut:
 
 
 def build_base_door(
-    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+    module: ModuleSpec,
+    dims: ModuleDims,
+    materials: ProjectMaterials,
+    ws: Workshop,
+    *,
+    no_doors: bool = False,
+    single_door: bool = False,
+    no_shelf: bool = False,
+    no_back: bool = False,
 ) -> TemplateOut:
     """Нижний распашной: боковины на всю высоту, дно и 2 царги между боковинами,
     накладная задняя ХДФ, полки, двери по правилу ширины, петли и конфирматы по ступеням."""
@@ -316,43 +324,48 @@ def build_base_door(
             c.edging.rails,
         )
 
-    # полка с отступами от боковин и спереди
-    shelf = c.shelf
-    carcass(
-        "полка",
-        "полка",
-        Span(W - 2 * t - 2 * shelf.side_gap, "x"),
-        Span(D - shelf.front_gap, "y"),
-        Position(x=t + shelf.side_gap, y=0, z=shelf.height),
-        c.edging.shelves,
-    )
-
-    # задняя стенка ХДФ накладная, с отступом по контуру; сзади корпуса
-    bp = c.back_panel
-    hdf = _material(ws.materials.sheets, bp.material, "Материал задней стенки", "листовые")
-    hdf_t = _required_thickness(hdf, "задней стенки")
-    back_h = H - 2 * bp.contour_offset
-    back_w = W - 2 * bp.contour_offset
-    out.parts.append(
-        make_part(
-            pid=f"{module.label}-зад",
-            module_label=module.label,
-            name="задняя стенка",
-            a=Span(back_h, "z"),
-            b=Span(back_w, "x"),
-            thickness=hdf_t,
-            material_id=hdf.id,
-            textured=False,
-            at=Position(x=bp.contour_offset, y=-hdf_t, z=bp.contour_offset),
+    if not no_shelf:
+        # полка с отступами от боковин и спереди
+        shelf = c.shelf
+        carcass(
+            "полка",
+            "полка",
+            Span(W - 2 * t - 2 * shelf.side_gap, "x"),
+            Span(D - shelf.front_gap, "y"),
+            Position(x=t + shelf.side_gap, y=0, z=shelf.height),
+            c.edging.shelves,
         )
-    )
+
+    if not no_back:
+        # задняя стенка ХДФ накладная, с отступом по контуру; сзади корпуса
+        bp = c.back_panel
+        hdf = _material(ws.materials.sheets, bp.material, "Материал задней стенки", "листовые")
+        hdf_t = _required_thickness(hdf, "задней стенки")
+        back_h = H - 2 * bp.contour_offset
+        back_w = W - 2 * bp.contour_offset
+        out.parts.append(
+            make_part(
+                pid=f"{module.label}-зад",
+                module_label=module.label,
+                name="задняя стенка",
+                a=Span(back_h, "z"),
+                b=Span(back_w, "x"),
+                thickness=hdf_t,
+                material_id=hdf.id,
+                textured=False,
+                at=Position(x=bp.contour_offset, y=-hdf_t, z=bp.contour_offset),
+            )
+        )
 
     # двери по правилу ширины: одна при W ≤ порога, иначе две; высота — по формуле
     f = c.facades
     facade_mat = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
     facade_t = _required_thickness(facade_mat, "фасадов")
     facade_h = _calc(module, dims, "высота фасада", f.height_lower, H=H, W=W)
-    if W > f.two_doors_if_wider_than:
+    if no_doors:
+        n_doors = 0
+        facade_w = 0
+    elif W > f.two_doors_if_wider_than and not single_door:
         n_doors = 2
         facade_w = _calc(module, dims, "фасады", f.two_doors_width, H=H, W=W)
     else:
@@ -386,12 +399,14 @@ def build_base_door(
     )
     out.hardware[hw.confirmats] += confirmats
     out.hardware[hw.caps] += confirmats * c.caps.per_unit
-    out.hardware[hw.shelf_pins] += shelf.pins * module.shelves
+    if not no_shelf:
+        out.hardware[hw.shelf_pins] += c.shelf.pins * module.shelves
     # ключи ножек «до_800»/«свыше_800» должны совпадать с порогом (DECISIONS, тикет 05)
     out.hardware[hw.legs] += c.legs.up_to_800 if W <= c.legs.threshold else c.legs.over_800
     screws = c.screws_3_5x16.per_hinge * hinges
-    perimeter = 2 * (back_h + back_w)
-    screws += _ceil_div(perimeter, bp.fastening_pitch)  # саморезы на ХДФ: периметр / шаг
+    if not no_back:
+        perimeter = 2 * (back_h + back_w)
+        screws += _ceil_div(perimeter, bp.fastening_pitch)  # саморезы на ХДФ: периметр / шаг
     out.hardware[hw.screws] += screws
     out.hardware[materials.handles] += n_doors * c.handles.per_unit
     return out
@@ -435,7 +450,158 @@ class Template:
     row_kind: str  # lower | upper | tall
 
 
-TEMPLATES = {"base_door": Template(build_base_door, "lower")}
+def build_base_sink(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+) -> TemplateOut:
+    c = ws.construction
+    no_back = c.sink.without_back or module.without_back
+    out = build_base_door(
+        module.model_copy(update={"shelves": 1}),
+        dims,
+        materials,
+        ws,
+        no_shelf=c.sink.without_shelf,
+        no_back=no_back,
+    )
+    if no_back:
+        out.warnings.append("без задней стенки")
+    if module.contents:
+        for insert in module.contents.inserts:
+            out.hardware[insert] += 1
+    return out
+
+
+def build_dishwasher_panel(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+) -> TemplateOut:
+    """Фасад ПММ: крепёж поставляется с техникой, корпус отсутствует."""
+    f = ws.construction.facades
+    facade = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
+    h = _calc(module, dims, "высота фасада", f.height_lower, H=dims.height, W=dims.width)
+    w = _calc(module, dims, "ширина фасада", f.single_door_width, H=dims.height, W=dims.width)
+    return TemplateOut(
+        parts=[
+            make_part(
+                pid=f"{module.label}-фасад",
+                module_label=module.label,
+                name="фасад",
+                a=Span(h, "z"),
+                b=Span(w, "x"),
+                thickness=_required_thickness(facade, "фасадов"),
+                material_id=facade.id,
+                textured=False,
+                at=Position(x=f.gap, y=dims.depth, z=f.gap),
+                area=True,
+            )
+        ]
+    )
+
+
+def build_base_bottle(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+) -> TemplateOut:
+    c = ws.construction
+    if dims.width > c.bottle.max_width:
+        raise OrderError(f"Модуль {module.label}: ширина бутылочницы больше допустимой для одного фасада.")
+    out = build_base_door(module.model_copy(update={"shelves": 1}), dims, materials, ws, single_door=True)
+    out.parts = [p for p in out.parts if p.name != "полка"]
+    del out.hardware[c.furniture.shelf_pins]
+    hinges = out.hardware.pop(c.furniture.hinges)
+    del out.hardware[c.furniture.plates]
+    out.hardware[c.furniture.screws] -= hinges * c.screws_3_5x16.per_hinge
+    inserts = module.contents.inserts if module.contents and module.contents.inserts else [c.bottle.insert]
+    for insert in inserts:
+        out.hardware[insert] += 1
+    return out
+
+
+def build_base_drawers(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+) -> TemplateOut:
+    c = ws.construction
+    out = build_base_door(module.model_copy(update={"shelves": 1}), dims, materials, ws, no_doors=True)
+    out.parts = [p for p in out.parts if p.name not in ("полка", "фасад")]
+    del out.hardware[c.furniture.shelf_pins]
+    hinges = out.hardware.pop(c.furniture.hinges)
+    del out.hardware[c.furniture.plates]
+    out.hardware[c.furniture.screws] -= hinges * c.screws_3_5x16.per_hinge
+    out.hardware[materials.handles] = 3 * c.handles.per_unit
+    out.hardware[c.drawers.hardware] += 3
+    out.hardware[c.furniture.screws] += 3 * c.screws_3_5x16.per_drawer
+    facades = c.facades
+    height = _calc(module, dims, "высота фасадов", facades.height_lower, H=dims.height, W=dims.width)
+    width = _calc(module, dims, "ширина фасадов", facades.single_door_width, H=dims.height, W=dims.width)
+    top = _whole(facades.three_drawers.top, "Высота верхнего фасада")
+    remaining = height - top - 2 * facades.gap
+    if remaining <= 0 or remaining % 2:
+        raise OrderError(f"Модуль {module.label}: остаток фасадов {remaining} мм нельзя разделить поровну.")
+    facade = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
+    drawer_material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
+    inner = dims.width - 2 * c.case_thickness
+    try:
+        bottom_dims = formulas.evaluate(c.tandembox.bottom, внутр_ширина=inner)
+        back_dims = formulas.evaluate(c.tandembox.back, внутр_ширина=inner)
+    except FormulaError as e:
+        raise OrderError(f"Модуль {module.label}: размеры ящика: {e}.") from e
+    if not isinstance(bottom_dims, tuple) or not isinstance(back_dims, tuple):
+        raise OrderError(f"Модуль {module.label}: формулы деталей ящика должны задавать два размера.")
+    if min(*bottom_dims, *back_dims) <= 0:
+        raise OrderError(
+            f"Модуль {module.label}: размеры деталей ящика должны быть положительными: {bottom_dims}, {back_dims}."
+        )
+    z = facades.gap
+    for n, h in enumerate((remaining // 2, remaining // 2, top), 1):
+        out.parts.append(
+            make_part(
+                pid=f"{module.label}-фасад-{n}",
+                module_label=module.label,
+                name="фасад",
+                a=Span(width, "x"),
+                b=Span(h, "z"),
+                thickness=_required_thickness(facade, "фасадов"),
+                material_id=facade.id,
+                textured=False,
+                at=Position(x=facades.gap, y=dims.depth, z=z),
+                area=True,
+            )
+        )
+        for suffix, name, sizes, axes, y in (
+            ("дно-ящ", "дно ящика", bottom_dims, ("x", "y"), dims.depth - bottom_dims[1]),
+            (
+                "зад-ящ",
+                "задняя стенка ящика",
+                back_dims,
+                ("x", "z"),
+                dims.depth - bottom_dims[1] - c.case_thickness,
+            ),
+        ):
+            out.parts.append(
+                make_part(
+                    pid=f"{module.label}-{suffix}-{n}",
+                    module_label=module.label,
+                    name=name,
+                    a=Span(sizes[0], axes[0]),
+                    b=Span(sizes[1], axes[1]),
+                    thickness=c.case_thickness,
+                    material_id=drawer_material.id,
+                    textured=bool(drawer_material.texture),
+                    at=Position(x=(dims.width - sizes[0]) // 2, y=y, z=z),
+                    edges=dict.fromkeys(EDGE_SIDES, _edge_id(ws, drawer_material.id))
+                    if c.drawers.edge_parts
+                    else None,
+                )
+            )
+        z += h + facades.gap
+    return out
+
+
+TEMPLATES = {
+    "base_door": Template(build_base_door, "lower"),
+    "base_sink": Template(build_base_sink, "lower"),
+    "base_bottle": Template(build_base_bottle, "lower"),
+    "base_drawers": Template(build_base_drawers, "lower"),
+    "dishwasher_panel": Template(build_dishwasher_panel, "lower"),
+}
 
 _ROW_RU = {"lower": "нижнем ряду", "upper": "верхнем ряду", "tall": "пенале"}
 
@@ -502,7 +668,24 @@ def _build_module(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws:
             f"Модуль {module.label}: шаблон {module.template} применяется в "
             f"{_ROW_RU[template.row_kind]}, а он в ряде «{row.kind}»."
         )
-    if module.contents is not None or module.without_back or module.corner is not None:
+    if module.template in ("base_sink", "base_bottle", "base_drawers"):
+        contents = module.contents
+        unsupported = bool(module.corner or (module.without_back and module.template != "base_sink"))
+        if contents:
+            unsupported |= bool(contents.doors is not None or contents.shelves is not None or contents.lift)
+            unsupported |= bool(
+                contents.drawers not in (None, 3)
+                if module.template == "base_drawers"
+                else contents.drawers is not None
+            )
+            unsupported |= bool(contents.inserts and module.template == "base_drawers")
+        if unsupported:
+            raise OrderError(
+                f"Модуль {module.label}: заданное наполнение или параметры не поддерживаются шаблоном."
+            )
+    if module.template not in ("base_sink", "base_bottle", "base_drawers") and (
+        module.contents is not None or module.without_back or module.corner is not None
+    ):
         raise OrderError(
             f"Модуль {module.label}: наполнение или параметры модуля ещё не поддерживаются расчётом."
         )

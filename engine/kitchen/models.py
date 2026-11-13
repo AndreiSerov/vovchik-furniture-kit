@@ -225,6 +225,13 @@ class ThreeDrawers(Section):
     top: Num = _f("верхний")
     others: str = _f("остальные")
 
+    @field_validator("others")
+    @classmethod
+    def equal_remaining(cls, value: str) -> str:
+        if value != "делят остаток поровну":
+            raise ValueError("ожидалось «делят остаток поровну»")
+        return value
+
 
 class Facades(Section):
     gap: Int = _f("зазор")
@@ -257,6 +264,21 @@ class HardwareRefs(Section):
     shelf_pins: str = _f("полкодержатели")
     legs: str = _f("опоры")
     screws: str = _f("саморезы")
+
+
+class SinkRules(Section):
+    without_shelf: StrictBool = _f("без_полки")
+    without_back: StrictBool = _f("без_задней_стенки")
+
+
+class BottleRules(Section):
+    insert: str = _f("вставка")
+    max_width: Int = _f("макс_ширина")
+
+
+class DrawerRules(Section):
+    hardware: str = _f("комплект")
+    edge_parts: StrictBool = _f("кромить_детали")
 
 
 class Screws(Section):
@@ -308,6 +330,9 @@ class Construction(Section):
     plates: Annotated[RatioRule, BeforeValidator(_ratio("петлю"))] = _f("ответные_планки")
     handles: Annotated[RatioRule, BeforeValidator(_ratio("фасад"))] = _f("ручки")
     furniture: HardwareRefs = _f("фурнитура")  # ДОБАВЛЕНО (МОК): id позиций hardware.yaml
+    sink: SinkRules = _f("мойка")
+    bottle: BottleRules = _f("бутылочница")
+    drawers: DrawerRules = _f("ящики")
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
 
