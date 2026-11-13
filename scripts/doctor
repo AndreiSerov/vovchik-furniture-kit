@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS = ROOT / ".claude" / "skills"
-REQUIRED_IGNORES = [".claude/skills/", ".claude/settings.local.json", ".claude/worktrees/"]
+REQUIRED_IGNORES = [".claude/skills/", ".claude/settings.local.json", ".claude/worktrees/", ".agents/", ".qwen/"]
 REQUIRED_FILES = ["AGENTS.md", "docs/agents/workflow.md", "docs/agents/agreements.md"]
 
 
@@ -36,6 +36,19 @@ def check_skills() -> list[str]:
             if not (SKILLS / Path(path).name / "SKILL.md").is_file():
                 problems.append(f"skill not installed: {Path(path).name}; run scripts/sync-skills")
     return problems
+
+
+def check_kitchen_links() -> list[str]:
+    done = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "link-skills"), "--check"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if not done.returncode:
+        return []
+    lines = done.stdout.splitlines()[:-1]
+    return lines or [f"link-skills --check failed: {done.stderr.strip() or done.returncode}"]
 
 
 def check_references() -> list[str]:
@@ -68,7 +81,7 @@ def main() -> int:
     if not os.access(check, os.X_OK):
         problems.append("scripts/check is missing or not executable")
     problems += [f"not gitignored: {p}" for p in REQUIRED_IGNORES if not ignored(p)]
-    problems += check_skills() + check_references() + check_settings()
+    problems += check_skills() + check_kitchen_links() + check_references() + check_settings()
     for problem in problems:
         print(f"- {problem}")
     print("Harness OK" if not problems else f"{len(problems)} problem(s) found")

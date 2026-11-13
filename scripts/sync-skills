@@ -109,7 +109,8 @@ def main() -> int:
         encoding="utf-8",
     )
     print(f"{len(installed)} skills installed in .claude/skills")
-    return 0
+    # Our own kitchen-* links share .claude/skills; link-skills leaves managed skills alone.
+    return subprocess.run([sys.executable, str(ROOT / "scripts" / "link-skills")], check=False).returncode
 
 
 if __name__ == "__main__":
