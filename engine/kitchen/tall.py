@@ -61,7 +61,12 @@ def build_tall_oven(
     oven_top = bottom_z + t + oven_h
     microwave_top = oven_top + t + microwave_h
     upper_z = microwave_top + t
-    shelf_z = _calc(module, dims, "высота верхней полки", rules.top_shelf_height, Z=upper_z, H=H)
+    try:
+        shelf_z = formulas.evaluate(rules.top_shelf_height, Z=upper_z, H=H, HALF=(H - upper_z) // 2)
+    except FormulaError as e:
+        raise OrderError(f"Модуль {module.label}: формула высоты верхней полки: {e}.") from e
+    if not isinstance(shelf_z, int):
+        raise OrderError(f"Модуль {module.label}: формула высоты верхней полки должна давать одно число.")
     door_h = H - gap - upper_z
     if min(W - 2 * t, D, rules.drawer_facade_height, door_h, shelf_z - upper_z, H - t - shelf_z) <= 0:
         raise OrderError(f"Модуль {module.label}: недостаточные габариты для ниш, ящика и верхней полки.")
@@ -110,10 +115,10 @@ def build_tall_oven(
     facade = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
     facade_t = _required_thickness(facade, "фасадов")
     facade_w = _calc(module, dims, "ширина фасада", c.facades.single_door_width, H=H, W=W)
-    for suffix, z, height in (("ящ", gap, rules.drawer_facade_height), ("верх", upper_z, door_h)):
+    for suffix, z, height in (("-1", gap, rules.drawer_facade_height), ("", upper_z, door_h)):
         out.parts.append(
             make_part(
-                pid=f"{module.label}-фасад-{suffix}",
+                pid=f"{module.label}-фасад{suffix}",
                 module_label=module.label,
                 name="фасад",
                 a=Span(facade_w, "x"),

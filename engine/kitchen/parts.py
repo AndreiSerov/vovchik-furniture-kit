@@ -891,6 +891,12 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     for wall in project.walls:
         for row in wall.rows:
             for module in row.modules:
+                if module.template in ("base_corner", "wall_corner") and module.corner:
+                    adjacent = module.corner.adjacent_wall
+                    if adjacent == wall.label or adjacent not in {w.label for w in project.walls}:
+                        raise OrderError(
+                            f"Модуль {module.label}: соседняя стена «{adjacent}» должна существовать и отличаться от стены «{wall.label}»."
+                        )
                 out = _build_module(module, row, project.materials, ws, project.appliances)
                 for part in out.parts:
                     if part.id in seen:
@@ -969,13 +975,17 @@ def _build_module(
             raise OrderError(f"Модуль {module.label}: неподдерживаемые параметры.")
     contents = module.contents
     if module.template in ("base_corner", "wall_corner") and (
+        module.corner is None or not module.corner.adjacent_wall.strip()
+    ):
+        raise OrderError(f"Модуль {module.label}: укажите соседнюю стену углового модуля.")
+    if module.template in ("base_corner", "wall_corner") and (
         module.without_back
         or "shelves" in module.model_fields_set
         or (
             contents
             and (
-                contents.doors is not None
-                or contents.shelves is not None
+                contents.doors not in (None, 1)
+                or contents.shelves not in (None, 0 if module.template == "base_corner" else 1)
                 or contents.drawers is not None
                 or contents.lift
                 or contents.inserts

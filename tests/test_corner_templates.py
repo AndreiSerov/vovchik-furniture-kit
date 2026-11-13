@@ -7,6 +7,8 @@ from kitchen import api
 
 def corner_project(path, template, width, kind):
     project = json.loads(path.read_text(encoding="utf-8"))
+    if not any(wall["label"] == "Б" for wall in project["walls"]):
+        project["walls"].append({"label": "Б", "length": 1800, "rows": []})
     row = project["walls"][0]["rows"][0]
     row["kind"] = kind
     row["modules"] = [
@@ -101,3 +103,48 @@ def test_wall_corner_rejects_carousel(home, base_door_project):
     base_door_project.write_text(json.dumps(project))
     with pytest.raises(OrderError, match="наполнение"):
         api.parts_from_project(base_door_project, home)
+
+
+def test_corner_accepts_matching_contents(home, base_door_project):
+    for template, width, kind, contents in (
+        ("base_corner", 1050, "lower", {"doors": 1, "shelves": 0, "inserts": ["corner_carousel"]}),
+        ("wall_corner", 600, "upper", {"doors": 1, "shelves": 1}),
+    ):
+        corner_project(base_door_project, template, width, kind)
+        project = json.loads(base_door_project.read_text())
+        project["walls"][0]["rows"][0]["modules"][0]["contents"] = contents
+        base_door_project.write_text(json.dumps(project, ensure_ascii=False))
+        result = api.parts_from_project(base_door_project, home)
+        assert len([p for p in result.modules[0].parts if p.name == "фасад"]) == 1
+
+
+def test_corner_requires_adjacent_wall(home, base_door_project):
+    import pytest
+    from kitchen.errors import OrderError
+
+    corner_project(base_door_project, "base_corner", 1050, "lower")
+    project = json.loads(base_door_project.read_text())
+    del project["walls"][0]["rows"][0]["modules"][0]["corner"]
+    base_door_project.write_text(json.dumps(project))
+    with pytest.raises(OrderError, match="соседн"):
+        api.parts_from_project(base_door_project, home)
+
+
+def test_workshop_rejects_negative_corner_values(home):
+    path = home / "workshop/construction.yaml"
+    path.write_text(path.read_text().replace("саморезов_заглушки: 4", "саморезов_заглушки: -100"))
+    result = api.check_workshop(home)
+    assert any("саморезов_заглушки" in error for error in result.errors)
+
+
+def test_corner_rejects_missing_or_same_adjacent_wall(home, base_door_project):
+    import pytest
+    from kitchen.errors import OrderError
+
+    for neighbor in ("нет", "A"):
+        corner_project(base_door_project, "base_corner", 1050, "lower")
+        project = json.loads(base_door_project.read_text())
+        project["walls"][0]["rows"][0]["modules"][0]["corner"]["adjacent_wall"] = neighbor
+        base_door_project.write_text(json.dumps(project))
+        with pytest.raises(OrderError, match="соседн"):
+            api.parts_from_project(base_door_project, home)

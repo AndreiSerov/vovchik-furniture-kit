@@ -327,12 +327,13 @@ Steps = list[tuple[Num, Int]]
 class TallRules(Section):
     oven: str = _f("духовка")
     microwave: str = _f("свч")
-    drawer_facade_height: Int = _f("высота_фасада_ящика")
+    drawer_facade_height: Annotated[Int, Field(gt=0)] = _f("высота_фасада_ящика")
     top_shelf_height: FormulaField = _f("высота_верхней_полки")
+    shelf_rounding: Literal["вниз"] = _f("округление_полки")
 
     @model_validator(mode="after")
     def _formula_vars(self) -> "TallRules":
-        _check_formula_vars([("высота_верхней_полки", self.top_shelf_height)], {"Z", "H"})
+        _check_formula_vars([("высота_верхней_полки", self.top_shelf_height)], {"Z", "H", "HALF"})
         return self
 
 
@@ -348,14 +349,14 @@ class UpperRules(Section):
 
 
 class CornerRules(Section):
-    lower_offset: Int = _f("смещение_нижнего")
-    upper_offset: Int = _f("смещение_верхнего")
-    wall_tolerance: Int = _f("допуск_стены")
-    base_facade_width: Int = _f("ширина_фасада_нижнего")
-    upper_filler_width: Int = _f("ширина_заглушки_верхнего")
-    upper_depth: Int = _f("глубина_верхнего")
+    lower_offset: Annotated[Int, Field(ge=0)] = _f("смещение_нижнего")
+    upper_offset: Annotated[Int, Field(ge=0)] = _f("смещение_верхнего")
+    wall_tolerance: Annotated[Int, Field(ge=0)] = _f("допуск_стены")
+    base_facade_width: Annotated[Int, Field(gt=0)] = _f("ширина_фасада_нижнего")
+    upper_filler_width: Annotated[Int, Field(gt=0)] = _f("ширина_заглушки_верхнего")
+    upper_depth: Annotated[Int, Field(gt=0)] = _f("глубина_верхнего")
     carousel: str = _f("карусель")
-    filler_screws: Int = _f("саморезов_заглушки")
+    filler_screws: Annotated[Int, Field(ge=0)] = _f("саморезов_заглушки")
     filler_material: str = _f("материал_заглушки")
     filler_edges: StrictBool = _f("кромить_заглушку")
 

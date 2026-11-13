@@ -40,7 +40,7 @@ def test_tall_oven_project_microwave_dimensions_change_niche(home, base_door_pro
     result = api.parts_from_project(base_door_project, home)
     by_id = {p.id: p for p in result.modules[0].parts}
     assert by_id["П1-перег-2"].position.z == 1324
-    assert by_id["П1-фасад-верх"].position.z == 1340
+    assert by_id["П1-фасад"].position.z == 1340
 
 
 def test_tall_oven_rejects_impossible_drawer_or_niche(home, base_door_project):
@@ -90,3 +90,13 @@ def test_tall_upper_row_uses_module_facade_override(home, base_door_project):
     result = api.parts_from_project(base_door_project, home)
     facades = [part for part in result.modules[0].parts if part.name == "фасад"]
     assert all(part.material == "other_facade" and part.thickness == 16 for part in facades)
+
+
+def test_tall_odd_niche_height_places_shelf_on_whole_mm(home, base_door_project):
+    project = json.loads(base_door_project.read_text())
+    project["walls"][0]["rows"][0]["modules"] = [{"label": "П1", "template": "tall_oven", "width": 600}]
+    project["appliances"] = [{"type": "microwave", "module": "П1", "width": 600, "height": 381}]
+    base_door_project.write_text(json.dumps(project, ensure_ascii=False))
+    result = api.parts_from_project(base_door_project, home)
+    shelf = next(part for part in result.modules[0].parts if part.name == "полка")
+    assert shelf.position.z == 1700
