@@ -26,8 +26,29 @@ def wanted() -> list[str]:
 
 
 def points_into_source(link: Path) -> bool:
-    target = os.path.normpath(os.path.join(link.parent, os.readlink(link)))
+    target = os.path.normpath(os.path.join(os.path.realpath(link.parent), os.readlink(link)))
     return os.path.commonpath([target, str(SOURCE)]) == str(SOURCE) and target != str(SOURCE)
+
+
+def check_folder(folder: Path, names: list[str]) -> list[str]:
+    """Report what sync_folder would have to fix, changing nothing."""
+    problems = []
+    if folder.is_dir():
+        for entry in sorted(folder.glob(f"{PREFIX}*")):
+            if entry.is_symlink() and entry.name not in names and points_into_source(entry):
+                problems.append(f"{entry} is a dangling link to a removed skill")
+    for name in names:
+        link = folder / name
+        if link.is_symlink():
+            if not points_into_source(link):
+                problems.append(f"{link} is a foreign symlink, not ours")
+            elif not (link / "SKILL.md").is_file():
+                problems.append(f"{link} is a dangling link (target has no SKILL.md)")
+        elif link.exists():
+            problems.append(f"{link} is a real file or folder, not our link")
+        else:
+            problems.append(f"{link} is missing")
+    return problems
 
 
 def sync_folder(folder: Path, names: list[str], absolute: bool) -> list[str]:
@@ -60,9 +81,20 @@ def sync_folder(folder: Path, names: list[str], absolute: bool) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--hermes", action="store_true", help="also link into ~/.hermes/skills")
+    parser.add_argument("--check", action="store_true", help="report problems, change nothing")
     args = parser.parse_args()
 
     names = wanted()
+    if args.check:
+        found = []
+        for place in PLACES:
+            found += check_folder(ROOT / place, names)
+        if args.hermes:
+            found += check_folder(Path.home() / ".hermes" / "skills", names)
+        for problem in found:
+            print(problem)
+        print("kitchen links OK" if not found else f"{len(found)} problem(s); run scripts/link-skills")
+        return 1 if found else 0
     problems = []
     for place in PLACES:
         problems += sync_folder(ROOT / place, names, absolute=False)

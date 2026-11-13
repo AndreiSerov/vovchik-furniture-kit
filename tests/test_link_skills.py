@@ -144,3 +144,73 @@ def test_hermes_leaves_foreign_skills(repo, fake_home):
     (other / "SKILL.md").write_text("theirs")
     assert run(repo, fake_home, "--hermes").returncode == 0
     assert (other / "SKILL.md").read_text() == "theirs"
+
+
+def snapshot(root):
+    """Всё, что лежит в местах ссылок: путь -> цель симлинка или None."""
+    found = {}
+    for place in PLACES:
+        base = root / place
+        for p in sorted(base.rglob("*")) if base.exists() else []:
+            found[str(p)] = os.readlink(p) if p.is_symlink() else None
+    return found
+
+
+def test_check_clean_returns_zero(repo, fake_home):
+    run(repo, fake_home)
+    r = run(repo, fake_home, "--check")
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_check_reports_missing_and_changes_nothing(repo, fake_home):
+    r = run(repo, fake_home, "--check")
+    assert r.returncode == 1
+    assert "missing" in r.stdout and "kitchen-a" in r.stdout
+    assert snapshot(repo) == {}
+    assert not (repo / ".claude").exists()
+
+
+def test_check_reports_dangling_own_link(repo, fake_home):
+    run(repo, fake_home)
+    shutil.rmtree(repo / "skills" / "kitchen-b")
+    before = snapshot(repo)
+    r = run(repo, fake_home, "--check")
+    assert r.returncode == 1
+    assert "dangling" in r.stdout and "kitchen-b" in r.stdout
+    assert snapshot(repo) == before
+
+
+def test_check_reports_foreign_kitchen_symlink(repo, fake_home):
+    run(repo, fake_home)
+    link = repo / ".claude" / "skills" / "kitchen-a"
+    link.unlink()
+    link.symlink_to(repo)
+    before = snapshot(repo)
+    r = run(repo, fake_home, "--check")
+    assert r.returncode == 1
+    assert "foreign" in r.stdout and "kitchen-a" in r.stdout
+    assert snapshot(repo) == before
+
+
+def test_check_reports_blocked_by_real_dir(repo, fake_home):
+    run(repo, fake_home)
+    link = repo / ".qwen" / "skills" / "kitchen-a"
+    link.unlink()
+    link.mkdir()
+    before = snapshot(repo)
+    r = run(repo, fake_home, "--check")
+    assert r.returncode == 1
+    assert "real file or folder" in r.stdout and "kitchen-a" in r.stdout
+    assert snapshot(repo) == before
+
+
+def test_foreign_symlink_with_wanted_name_is_warned_and_kept(repo, fake_home):
+    outside = repo / "elsewhere"
+    outside.mkdir()
+    link = repo / ".claude" / "skills" / "kitchen-a"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(outside)
+    r = run(repo, fake_home)
+    assert r.returncode == 1
+    assert "kitchen-a" in r.stderr
+    assert os.readlink(link) == str(outside)
