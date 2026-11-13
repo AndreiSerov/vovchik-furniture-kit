@@ -38,6 +38,19 @@ def check_skills() -> list[str]:
     return problems
 
 
+def check_kitchen_links() -> list[str]:
+    problems = []
+    names = sorted(p.name for p in (ROOT / "skills").glob("kitchen-*") if (p / "SKILL.md").is_file())
+    for place in (".claude/skills", ".agents/skills", ".qwen/skills"):
+        for name in names:
+            link = ROOT / place / name
+            if not link.is_symlink():
+                problems.append(f"{place}/{name} is missing; run scripts/link-skills")
+            elif not (link / "SKILL.md").is_file():
+                problems.append(f"{place}/{name} is a broken link; run scripts/link-skills")
+    return problems
+
+
 def check_references() -> list[str]:
     problems = []
     for document in ("AGENTS.md", "docs/agents/workflow.md"):
@@ -68,7 +81,7 @@ def main() -> int:
     if not os.access(check, os.X_OK):
         problems.append("scripts/check is missing or not executable")
     problems += [f"not gitignored: {p}" for p in REQUIRED_IGNORES if not ignored(p)]
-    problems += check_skills() + check_references() + check_settings()
+    problems += check_skills() + check_kitchen_links() + check_references() + check_settings()
     for problem in problems:
         print(f"- {problem}")
     print("Harness OK" if not problems else f"{len(problems)} problem(s) found")

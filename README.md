@@ -25,6 +25,8 @@ scripts/sync-skills     # скиллы агента из .claude/skills.toml
 scripts/check           # ruff + pytest
 ```
 
+`scripts/link-skills` ставит симлинки `skills/kitchen-*` в `.claude/skills/`, `.agents/skills/`, `.qwen/skills/` (его же вызывает `sync-skills`); для Hermes один раз вручную: `scripts/link-skills --hermes` (пишет в `~/.hermes/skills/`).
+
 Проверка брифа вручную:
 
 ```sh

@@ -1,6 +1,9 @@
 ### Agentic development ###
 # Installed by scripts/sync-skills from .claude/skills.toml
 .claude/skills/
+# Symlinks to skills/kitchen-* made by scripts/link-skills
+.agents/
+.qwen/
 # Local, per-machine agent state
 .claude/settings.local.json
 .claude/worktrees/

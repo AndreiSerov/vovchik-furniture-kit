@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Link skills/kitchen-*/ into the folders where Claude Code, Codex and Qwen Code look for skills.
+
+Relative symlinks go into .claude/skills/, .agents/skills/ and .qwen/skills/. --hermes also links
+into ~/.hermes/skills/ with absolute targets: that writes to the home folder, so run it by hand.
+Only symlinks named kitchen-* that point into skills/ count as ours; nothing else is touched.
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+SOURCE = ROOT / "skills"
+PLACES = [".claude/skills", ".agents/skills", ".qwen/skills"]
+PREFIX = "kitchen-"
+
+
+def wanted() -> list[str]:
+    if not SOURCE.is_dir():
+        return []
+    return sorted(
+        p.name for p in SOURCE.glob(f"{PREFIX}*") if p.is_dir() and (p / "SKILL.md").is_file()
+    )
+
+
+def points_into_source(link: Path) -> bool:
+    target = os.path.normpath(os.path.join(link.parent, os.readlink(link)))
+    return os.path.commonpath([target, str(SOURCE)]) == str(SOURCE) and target != str(SOURCE)
+
+
+def sync_folder(folder: Path, names: list[str], absolute: bool) -> list[str]:
+    """Bring one folder in line with `names`; return the problems found."""
+    problems = []
+    folder.mkdir(parents=True, exist_ok=True)
+    for entry in sorted(folder.glob(f"{PREFIX}*")):
+        if entry.is_symlink() and entry.name not in names and points_into_source(entry):
+            entry.unlink()
+            print(f"removed {entry}")
+    for name in names:
+        link = folder / name
+        target = SOURCE / name
+        wish = str(target) if absolute else os.path.relpath(target, folder)
+        if link.is_symlink():
+            if os.readlink(link) == wish:
+                continue
+            if not points_into_source(link):
+                problems.append(f"{link} is someone else's symlink; left alone")
+                continue
+            link.unlink()
+        elif link.exists():
+            problems.append(f"{link} is a real file or folder, not our link; skipped")
+            continue
+        link.symlink_to(wish)
+        print(f"linked {link} -> {wish}")
+    return problems
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--hermes", action="store_true", help="also link into ~/.hermes/skills")
+    args = parser.parse_args()
+
+    names = wanted()
+    problems = []
+    for place in PLACES:
+        problems += sync_folder(ROOT / place, names, absolute=False)
+    if args.hermes:
+        problems += sync_folder(Path.home() / ".hermes" / "skills", names, absolute=True)
+    for problem in problems:
+        print(f"warning: {problem}", file=sys.stderr)
+    print(f"{len(names)} kitchen skills linked" if not problems else f"{len(problems)} problem(s)")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
