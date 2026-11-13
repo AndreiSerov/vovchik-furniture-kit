@@ -54,7 +54,7 @@
           "material": "ldsp_16_white",
           "texture": false,
           "edges": {"L1": "edge_08_white", "L2": "", "W1": "", "W2": ""},
-          "position": {"x": 16, "y": 460, "z": 620},
+          "position": {"x": 16, "y": 460, "z": 704},
           "orientation": {"length": "x", "width": "y", "thickness": "z"}
         },
         {
@@ -67,7 +67,7 @@
           "material": "ldsp_16_white",
           "texture": false,
           "edges": {"L1": "edge_08_white", "L2": "", "W1": "", "W2": ""},
-          "position": {"x": 16, "y": 0, "z": 620},
+          "position": {"x": 16, "y": 0, "z": 704},
           "orientation": {"length": "x", "width": "y", "thickness": "z"}
         },
         {
@@ -107,7 +107,8 @@
           "texture": false,
           "edges": {"L1": "", "L2": "", "W1": "", "W2": ""},
           "position": {"x": 2, "y": 560, "z": 2},
-          "orientation": {"length": "z", "width": "x", "thickness": "y"}
+          "orientation": {"length": "z", "width": "x", "thickness": "y"},
+          "area_m2": 0.212652
         },
         {
           "id": "Н1-фасад-П",
@@ -120,7 +121,8 @@
           "texture": false,
           "edges": {"L1": "", "L2": "", "W1": "", "W2": ""},
           "position": {"x": 301, "y": 560, "z": 2},
-          "orientation": {"length": "z", "width": "x", "thickness": "y"}
+          "orientation": {"length": "z", "width": "x", "thickness": "y"},
+          "area_m2": 0.212652
         }
       ]
     }

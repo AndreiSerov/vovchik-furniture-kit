@@ -9,13 +9,25 @@
 
 import re
 
-__all__ = ["Formula", "FormulaError", "compile_formula", "evaluate", "parse", "variables"]
+__all__ = [
+    "Formula",
+    "FormulaError",
+    "InexactDivisionError",
+    "compile_formula",
+    "evaluate",
+    "parse",
+    "variables",
+]
 
 _TOKEN_RE = re.compile(r"[0-9]+(?:\.[0-9]+)?|[^\W\d][\w]*|[()+\-*/]", re.UNICODE)
 
 
 class FormulaError(ValueError):
     """Формула не разобралась или не посчиталась. Сообщение по-русски."""
+
+
+class InexactDivisionError(FormulaError):
+    """Деление не нацело: шаблон превращает её в ошибку с модулем и шириной."""
 
 
 def _tokenize(text: str) -> list[str]:
@@ -85,8 +97,11 @@ class _Parser:
                 raise self.error("не хватает закрывающей скобки")
             self.pos += 1
             return node
-        if token.isdigit() or (token[0].isdigit() and "." in token):
-            return ("num", float(token) if "." in token else int(token))
+        if token[0].isdigit():
+            value = float(token)
+            if not value.is_integer():
+                raise self.error(f"{token} — не целое число, дробные не поддерживаются")
+            return ("num", int(value))
         if len(token) == 1 and token in "+-*/)":
             raise self.error(f"неожиданный элемент «{token}»")
         return ("var", token)
@@ -94,7 +109,9 @@ class _Parser:
 
 def parse(text: str) -> Node:
     """Разбирает текст формулы в дерево. Ошибка синтаксиса — FormulaError по-русски."""
-    if not isinstance(text, str) or not text.strip():
+    if not isinstance(text, str):
+        raise FormulaError(f"ожидалась строка-формула, получено {text!r}")
+    if not text.strip():
         raise FormulaError(f"пустая формула: {text!r}")
     return _Parser(text).parse()
 
@@ -129,10 +146,7 @@ def evaluate(formula: str | Node, **var_values) -> int | tuple[int, int]:
 def _eval(node: Node, var_values: dict[str, int], text: str) -> int | tuple[int, int]:
     kind = node[0]
     if kind == "num":
-        value = node[1]
-        if isinstance(value, float) and not value.is_integer():
-            raise FormulaError(f"формула «{text}»: {value} — не целое число, дробные не поддерживаются")
-        return int(value)
+        return node[1]
     if kind == "var":
         name = node[1]
         if name not in var_values:
@@ -151,7 +165,7 @@ def _eval(node: Node, var_values: dict[str, int], text: str) -> int | tuple[int,
     if b == 0:
         raise FormulaError(f"формула «{text}»: деление на ноль")
     if a % b:
-        raise FormulaError(f"формула «{text}»: {a} не делится нацело на {b}")
+        raise InexactDivisionError(f"формула «{text}»: {a} не делится нацело на {b}")
     return a // b
 
 

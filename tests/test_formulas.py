@@ -1,7 +1,7 @@
 import pytest
 from kitchen import api
 from kitchen.errors import WorkshopError
-from kitchen.formulas import FormulaError, evaluate, variables
+from kitchen.formulas import FormulaError, evaluate, parse, variables
 
 
 def test_height_lower_h720():
@@ -119,3 +119,16 @@ def test_unknown_material_in_edge_mapping_rejected_at_load(home):
     _break(home, "materials.yaml", "ldsp_16_white: edge_08_white", "ldsp_nope: edge_08_white")
     text = _problems(home)
     assert "кромка_к_материалу" in text and "ldsp_nope" in text
+
+
+def test_non_string_formula_message():
+    with pytest.raises(FormulaError) as e:
+        parse(596)
+    assert "ожидалась строка-формула, получено 596" in str(e.value)
+
+
+def test_fractional_constant_rejected_at_parse_time():
+    with pytest.raises(FormulaError) as e:
+        parse("W - 4.5")
+    assert "4.5" in str(e.value) and "дробные" in str(e.value)
+    assert evaluate("W - 4.0", W=600) == 596

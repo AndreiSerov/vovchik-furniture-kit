@@ -8,7 +8,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 
 from kitchen.errors import OrderError
 from kitchen.models import Num
@@ -29,7 +29,7 @@ class ModuleSpec(Section):
     width: Num
     height: Num | None = Field(default=None)
     depth: Num | None = Field(default=None)
-    shelves: int = 1  # наполнение: несколько полок придёт с полной схемой (тикет 06)
+    shelves: StrictInt = 1  # наполнение: несколько полок придёт с полной схемой (тикет 06)
 
 
 class Row(Section):

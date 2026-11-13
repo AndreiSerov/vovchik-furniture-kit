@@ -53,7 +53,7 @@ class SheetTrim(Section):
 
 class EdgingMachine(Section):
     machine: str = _f("станок")
-    allowance_per_side: Num = _f("припуск_на_сторону")
+    allowance_per_side: Int = _f("припуск_на_сторону")
 
 
 class Drilling(Section):
@@ -74,38 +74,38 @@ class Equipment(Section):
 
 
 class LowerModule(Section):
-    height: Num = _f("высота")
-    depth: Num = _f("глубина")
+    height: Int = _f("высота")
+    depth: Int = _f("глубина")
     scheme: str = _f("схема")
-    rail_width: Num = _f("царга_ширина")
+    rail_width: Int = _f("царга_ширина")
 
 
 class UpperModule(Section):
-    height: Num = _f("высота")
-    depth: Num = _f("глубина")
+    height: Int = _f("высота")
+    depth: Int = _f("глубина")
     scheme: str = _f("схема")
 
 
 class TallModule(Section):
-    height: Num = _f("высота")
-    depth: Num = _f("глубина")
+    height: Int = _f("высота")
+    depth: Int = _f("глубина")
 
 
 class BackPanel(Section):
     material: str = _f("материал")
-    contour_offset: Num = _f("отступ_по_контуру")
-    fastening_pitch: Num = _f("крепёж_шаг")
+    contour_offset: Int = _f("отступ_по_контуру")
+    fastening_pitch: Int = _f("крепёж_шаг")
 
 
 class Shelf(Section):
-    side_gap: Num = _f("отступ_от_боковин")
-    front_gap: Num = _f("отступ_спереди")
+    side_gap: Int = _f("отступ_от_боковин")
+    front_gap: Int = _f("отступ_спереди")
     pins: Int = _f("полкодержателей")
-    height: Num = _f("высота")  # ДОБАВЛЕНО (МОК): положение полки от низа корпуса
+    height: Int = _f("высота")  # ДОБАВЛЕНО (МОК): положение полки от низа корпуса
 
 
 class Legs(Section):
-    height: Num = _f("высота")
+    height: Int = _f("высота")
     up_to_800: Int = _f("до_800")
     over_800: Int = _f("свыше_800")
     threshold: Num = _f("порог_ширины")  # ДОБАВЛЕНО (МОК): порог «до 800» — значением, а не именем ключа
@@ -160,13 +160,74 @@ def _check_formula_vars(spec: list[tuple[str, str]], allowed: set[str]) -> None:
         raise ValueError("; ".join(problems) + ".")
 
 
+class RatioRule(BaseModel):
+    """Сколько штук на единицу («по одной на конфирмат» — 1, «по 2 на петлю» — 2)."""
+
+    model_config = ConfigDict(frozen=True)
+    per_unit: int
+
+
+_COUNT_WORDS = {"одной": 1, "одному": 1}
+
+
+def _ratio(unit: str):
+    """Разбор «по одной на <unit>» / «по N на <unit>» (N больше нуля) в `RatioRule`."""
+    pattern = re.compile(rf"^\s*по\s+(одной|одному|[0-9]+)\s+на\s+{unit}\s*$", re.IGNORECASE)
+
+    def parse(value: object) -> RatioRule:
+        if isinstance(value, RatioRule):
+            return value
+        m = pattern.match(value) if isinstance(value, str) else None
+        count = None
+        if m:
+            word = m.group(1).lower()
+            count = _COUNT_WORDS.get(word) or int(word)
+        if not count:
+            raise ValueError(f"неизвестная формулировка, ожидалось «по одной на {unit}» или «по N на {unit}»")
+        return RatioRule(per_unit=count)
+
+    return parse
+
+
+class EdgeRule(BaseModel):
+    """Какая сторона детали кромится: передняя (грань `+y`) или длинная сторона L1 (в комнату)."""
+
+    model_config = ConfigDict(frozen=True)
+    side: Literal["front", "long"]
+
+    @property
+    def face(self) -> str:
+        """Ключ для `make_part`: геометрическая грань `+y` или сторона детали `L1`."""
+        return "+y" if self.side == "front" else "L1"
+
+
+_EDGE_PHRASES = {
+    "передняя видимая кромка, пвх 0.8": "front",
+    "передняя кромка": "front",
+    "одна длинная сторона": "long",
+}
+
+
+def parse_edge_rule(value: object) -> EdgeRule:
+    """«передняя кромка», «одна длинная сторона» -> EdgeRule. Иная формулировка — ошибка загрузки."""
+    if isinstance(value, EdgeRule):
+        return value
+    side = _EDGE_PHRASES.get(" ".join(value.lower().split())) if isinstance(value, str) else None
+    if side is None:
+        accepted = ", ".join(
+            f"«{p}»" for p in ("передняя видимая кромка, ПВХ 0.8", "передняя кромка", "одна длинная сторона")
+        )
+        raise ValueError(f"неизвестная формулировка кромки, допустимы: {accepted}")
+    return EdgeRule(side=side)  # type: ignore[arg-type]
+
+
 class ThreeDrawers(Section):
     top: Num = _f("верхний")
     others: str = _f("остальные")
 
 
 class Facades(Section):
-    gap: Num = _f("зазор")
+    gap: Int = _f("зазор")
     height_lower: FormulaField = _f("высота_нижнего")
     single_door_width: FormulaField = _f("одна_дверь_ширина")
     two_doors_if_wider_than: Num = _f("две_двери_если_ширина_больше")
@@ -204,9 +265,9 @@ class Screws(Section):
 
 
 class ConstructionEdging(Section):
-    case: str = _f("корпус")
-    rails: str = _f("царги")
-    shelves: str = _f("полки")
+    case: Annotated[EdgeRule, BeforeValidator(parse_edge_rule)] = _f("корпус")
+    rails: Annotated[EdgeRule, BeforeValidator(parse_edge_rule)] = _f("царги")
+    shelves: Annotated[EdgeRule, BeforeValidator(parse_edge_rule)] = _f("полки")
     reserve: Num = _f("запас")
     purchase_rounding: Annotated["MeterRounding", BeforeValidator(parse_meter_rounding)] = _f(
         "округление_закупки"
@@ -231,7 +292,7 @@ Steps = list[tuple[Num, Int]]
 
 class Construction(Section):
     mock: StrictBool
-    case_thickness: Num = _f("толщина_корпуса")
+    case_thickness: Int = _f("толщина_корпуса")
     lower: LowerModule = _f("нижний")
     upper: UpperModule = _f("верхний")
     tall: TallModule = _f("пенал")
@@ -241,10 +302,11 @@ class Construction(Section):
     facades: Facades = _f("фасады")
     hinges_by_facade_height: Steps = _f("петли_по_высоте_фасада")
     confirmats_by_joint_length: Steps = _f("конфирматы_по_длине_соединения")
-    caps: str = _f("заглушки")
+    caps: Annotated[RatioRule, BeforeValidator(_ratio("конфирмат"))] = _f("заглушки")
     screws_3_5x16: Screws = _f("саморезы_3_5x16")
-    plates: str = _f("ответные_планки")  # ДОБАВЛЕНО (МОК): по одной на петлю
-    handles: str = _f("ручки")  # ДОБАВЛЕНО (МОК): по одной на фасад
+    # ДОБАВЛЕНО (МОК): ответные планки — по одной на петлю, ручки — по одной на фасад
+    plates: Annotated[RatioRule, BeforeValidator(_ratio("петлю"))] = _f("ответные_планки")
+    handles: Annotated[RatioRule, BeforeValidator(_ratio("фасад"))] = _f("ручки")
     furniture: HardwareRefs = _f("фурнитура")  # ДОБАВЛЕНО (МОК): id позиций hardware.yaml
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
@@ -270,7 +332,7 @@ class SheetMaterial(Section):
     name: str = _f("название")
     sheet: tuple[Num, Num] = _f("лист")
     texture: bool | str = _f("текстура")
-    thickness: Num | None = Field(
+    thickness: Int | None = Field(
         default=None, alias="толщина"
     )  # ДОБАВЛЕНО (МОК): у ХДФ — 3 (у ЛДСП корпуса толщина из construction.yaml)
     price: Num = _f("цена")
@@ -303,7 +365,7 @@ class Countertop(Section):
 class FacadeMaterial(Section):
     id: str
     name: str = _f("название")
-    thickness: Num | None = Field(default=None, alias="толщина")  # ДОБАВЛЕНО (МОК): 19 у МДФ
+    thickness: Int | None = Field(default=None, alias="толщина")  # ДОБАВЛЕНО (МОК): 19 у МДФ
     price_per_m2: Num = _f("цена_за_м2")
     outsourced: bool = _f("заказ_на_стороне")
     lead_days: Int = _f("срок_раб_дней")

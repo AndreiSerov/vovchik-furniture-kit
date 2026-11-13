@@ -7,15 +7,17 @@ construction.yaml (МОК), ручек — из материалов проек�
 """
 
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from decimal import ROUND_CEILING, Decimal
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 from typing import Literal
 
 from pydantic import BaseModel
 
 from kitchen import formulas
 from kitchen.errors import OrderError, WorkshopError
-from kitchen.models import Num, Workshop
+from kitchen.formulas import FormulaError, InexactDivisionError
+from kitchen.models import EdgeRule, Num, Workshop
 from kitchen.project import ModuleSpec, Project, ProjectMaterials, Row
 
 __all__ = [
@@ -27,10 +29,14 @@ __all__ = [
     "Part",
     "PartsComputation",
     "Position",
+    "Span",
+    "Template",
     "compute_parts",
 ]
 
 EDGE_SIDES = ("L1", "L2", "W1", "W2")
+
+Axis = Literal["x", "y", "z"]
 
 
 # --- схема детали ------------------------------------------------------------
@@ -47,9 +53,9 @@ class Position(BaseModel):
 class Orientation(BaseModel):
     """Какой оси модуля соответствует длина, ширина и толщина детали."""
 
-    length: Literal["x", "y", "z"]
-    width: Literal["x", "y", "z"]
-    thickness: Literal["x", "y", "z"]
+    length: Axis
+    width: Axis
+    thickness: Axis
 
 
 class Part(BaseModel):
@@ -66,6 +72,7 @@ class Part(BaseModel):
     edges: dict[str, str]  # L1/L2 (длинные), W1/W2 (короткие) — id кромки или пусто
     position: Position
     orientation: Orientation
+    area_m2: float | None = None  # только у фасадов (1.2): длина × ширина, м² без округления
 
 
 class EdgeTotals(BaseModel):
@@ -84,48 +91,70 @@ class ModuleParts(BaseModel):
     parts: list[Part]
 
 
+@dataclass(frozen=True)
+class Span:
+    """Размер детали вдоль оси модуля, мм."""
+
+    size: int
+    axis: Axis
+
+
+_FACES = {f"{sign}{axis}" for sign in "+-" for axis in "xyz"}
+
+
+def _side_of_face(face: str, length_axis: str, width_axis: str, pid: str) -> str:
+    """Грань детали (`+y`) -> сторона кромки: на оси ширины `+` — L1, `-` — L2;
+    на оси длины `-` — W1 (начало), `+` — W2 (конец)."""
+    sign, axis = face[0], face[1]
+    if axis == width_axis:
+        return "L1" if sign == "+" else "L2"
+    if axis == length_axis:
+        return "W2" if sign == "+" else "W1"
+    raise ValueError(f"Деталь {pid}: грань {face} — плоскость детали, кромить её нельзя.")
+
+
 def make_part(
     *,
     pid: str,
     module_label: str,
     name: str,
-    size_a: int,
-    axis_a: str,
-    size_b: int,
-    axis_b: str,
+    a: Span,
+    b: Span,
     thickness: int,
     material_id: str,
     textured: bool,
-    edges: dict[str, str],
-    x: int,
-    y: int,
-    z: int,
+    at: Position,
+    edges: dict[str, str] | None = None,
+    area: bool = False,
 ) -> Part:
-    """Собирает деталь: длина — вдоль текстуры (ось текстуры задаёт шаблон),
-    у нетекстурных — больший размер."""
-    if textured or size_a >= size_b:
-        length, length_axis = size_a, axis_a
-        width, width_axis = size_b, axis_b
-    else:
-        length, length_axis = size_b, axis_b
-        width, width_axis = size_a, axis_a
-    if length_axis == width_axis:
-        raise ValueError(f"Деталь {pid}: ось длины и ось ширины совпадают ({length_axis}).")
-    thickness_axis = next(a for a in ("x", "y", "z") if a not in (length_axis, width_axis))
+    """Собирает деталь. Длина — вдоль текстуры (ось `a` — ось текстуры, её задаёт шаблон),
+    у нетекстурных — больший размер. Кромка задаётся гранями в осях модуля (`+y` — передняя)
+    или сторонами детали (`L1`); по осям длины и ширины, выбранным здесь, грани
+    превращаются в L1/L2/W1/W2, поэтому поворот детали кромку не сбивает."""
+    first, second = (a, b) if textured or a.size >= b.size else (b, a)
+    if first.axis == second.axis:
+        raise ValueError(f"Деталь {pid}: ось длины и ось ширины совпадают ({first.axis}).")
+    thickness_axis = next(x for x in ("x", "y", "z") if x not in (first.axis, second.axis))
     edge_map = dict.fromkeys(EDGE_SIDES, "")
-    edge_map.update(edges)
+    for key, edge_id in (edges or {}).items():
+        if key in _FACES:
+            key = _side_of_face(key, first.axis, second.axis, pid)
+        elif key not in edge_map:
+            raise ValueError(f"Деталь {pid}: неизвестная сторона кромки «{key}».")
+        edge_map[key] = edge_id
     return Part(
         id=pid,
         module=module_label,
         name=name,
-        length=length,
-        width=width,
+        length=first.size,
+        width=second.size,
         thickness=thickness,
         material=material_id,
         texture=textured,
         edges=edge_map,
-        position=Position(x=x, y=y, z=z),
-        orientation=Orientation(length=length_axis, width=width_axis, thickness=thickness_axis),
+        position=at,
+        orientation=Orientation(length=first.axis, width=second.axis, thickness=thickness_axis),
+        area_m2=float(Decimal(first.size * second.size) / 1_000_000) if area else None,
     )
 
 
@@ -136,7 +165,7 @@ def steps_pick(steps: list[tuple[Num, int]], value: Num, table: str) -> int:
     """Ступенчатая таблица: первая ступень, где значение ≤ порога."""
     for threshold, count in steps:
         if value <= threshold:
-            return int(count)
+            return count
     thresholds = ", ".join(str(t) for t, _ in steps)
     raise WorkshopError(
         f"construction.yaml: в таблице «{table}» нет ступени для значения {value} (пороги: {thresholds})."
@@ -166,30 +195,21 @@ def _module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
         height=(
             _whole(module.height, f"Высота модуля {module.label}")
             if module.height is not None
-            else int(base.height)
+            else base.height
         ),
         depth=(
-            _whole(module.depth, f"Глубина модуля {module.label}")
-            if module.depth is not None
-            else int(base.depth)
+            _whole(module.depth, f"Глубина модуля {module.label}") if module.depth is not None else base.depth
         ),
     )
 
 
-def _sheet(ws: Workshop, material_id: str, what: str):
-    for m in ws.materials.sheets:
+def _material(items: list, material_id: str, what: str, kind: str):
+    """Материал по id из списка materials.yaml (`kind` — «листовые» или «фасады»)."""
+    for m in items:
         if m.id == material_id:
             return m
-    ids = ", ".join(sorted(m.id for m in ws.materials.sheets))
-    raise OrderError(f"{what} «{material_id}» не найден в materials.yaml (листовые: {ids}).")
-
-
-def _facade(ws: Workshop, material_id: str, what: str):
-    for m in ws.materials.facades:
-        if m.id == material_id:
-            return m
-    ids = ", ".join(sorted(m.id for m in ws.materials.facades))
-    raise OrderError(f"{what} «{material_id}» не найден в materials.yaml (фасады: {ids}).")
+    ids = ", ".join(sorted(m.id for m in items))
+    raise OrderError(f"{what} «{material_id}» не найден в materials.yaml ({kind}: {ids}).")
 
 
 def _edge_id(ws: Workshop, material_id: str) -> str:
@@ -208,16 +228,32 @@ def _required_thickness(material, where: str) -> int:
             f"materials.yaml: у материала «{material.id}» не указана толщина "
             f"(добавьте «толщина: N»), она нужна для {where}."
         )
-    return int(material.thickness)
+    return material.thickness
+
+
+def _calc(module: ModuleSpec, dims: ModuleDims, what: str, formula: str, **variables) -> int:
+    """Формула шаблона: единственное место, где считаются формулы construction.yaml.
+    Деление не нацело — русская ошибка с модулем и шириной, а не трассировка."""
+    try:
+        result = formulas.evaluate(formula, **variables)
+    except InexactDivisionError as e:
+        raise OrderError(
+            f"Модуль {module.label}: ширина {dims.width} — {what} «{formula}» не делятся нацело "
+            f"({e}); возьмите чётную ширину."
+        ) from e
+    except FormulaError as e:
+        raise OrderError(f"Модуль {module.label}: {what}: {e}.") from e
+    if not isinstance(result, int):
+        raise OrderError(f"Модуль {module.label}: {what} «{formula}» — ожидалось одно число, а не пара.")
+    return result
 
 
 @dataclass
 class TemplateOut:
-    """Результат шаблона: детали, фурнитура, площадь фасадов, предупреждения."""
+    """Результат шаблона: детали, фурнитура, предупреждения."""
 
     parts: list[Part] = field(default_factory=list)
     hardware: Counter = field(default_factory=Counter)
-    facade_area_mm2: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -235,180 +271,129 @@ def build_base_door(
             f"а задано полок: {module.shelves}. Наполнение придёт с полной схемой (тикет 06)."
         )
     c = ws.construction
-    hw = ws.construction.furniture
-    t = int(c.case_thickness)
+    hw = c.furniture
+    t = c.case_thickness
     W, H, D = dims.width, dims.height, dims.depth
-    body = _sheet(ws, materials.body, "Материал корпуса")
+    body = _material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
     edge_id = _edge_id(ws, body.id)
     textured = bool(body.texture)
     out = TemplateOut()
 
-    # боковины на всю высоту и глубину; кромится передняя длинная сторона (L1)
+    def carcass(pid: str, name: str, a: Span, b: Span, at: Position, rule: EdgeRule) -> None:
+        out.parts.append(
+            make_part(
+                pid=f"{module.label}-{pid}",
+                module_label=module.label,
+                name=name,
+                a=a,
+                b=b,
+                thickness=t,
+                material_id=body.id,
+                textured=textured,
+                at=at,
+                edges={rule.face: edge_id},
+            )
+        )
+
+    # боковины на всю высоту и глубину
     for suffix, x in (("Л", 0), ("П", W - t)):
-        out.parts.append(
-            make_part(
-                pid=f"{module.label}-бок-{suffix}",
-                module_label=module.label,
-                name="боковина",
-                size_a=H,
-                axis_a="z",
-                size_b=D,
-                axis_b="y",
-                thickness=t,
-                material_id=body.id,
-                textured=textured,
-                edges={"L1": edge_id},
-                x=x,
-                y=0,
-                z=0,
-            )
+        carcass(
+            f"бок-{suffix}", "боковина", Span(H, "z"), Span(D, "y"), Position(x=x, y=0, z=0), c.edging.case
         )
 
-    # дно между боковинами, кромится передняя сторона
-    out.parts.append(
-        make_part(
-            pid=f"{module.label}-дно",
-            module_label=module.label,
-            name="дно",
-            size_a=W - 2 * t,
-            axis_a="x",
-            size_b=D,
-            axis_b="y",
-            thickness=t,
-            material_id=body.id,
-            textured=textured,
-            edges={"L1": edge_id},
-            x=t,
-            y=0,
-            z=0,
-        )
-    )
+    # дно между боковинами
+    carcass("дно", "дно", Span(W - 2 * t, "x"), Span(D, "y"), Position(x=t, y=0, z=0), c.edging.case)
 
-    # 2 царги между боковинами у верха корпуса: передняя (у фасада) и задняя
-    rail = int(c.lower.rail_width)
+    # 2 царги между боковинами у верха корпуса, плашмя: передняя (у фасада) и задняя
+    rail = c.lower.rail_width
     for n, y in ((1, D - rail), (2, 0)):
-        out.parts.append(
-            make_part(
-                pid=f"{module.label}-царга-{n}",
-                module_label=module.label,
-                name="царга",
-                size_a=W - 2 * t,
-                axis_a="x",
-                size_b=rail,
-                axis_b="y",
-                thickness=t,
-                material_id=body.id,
-                textured=textured,
-                edges={"L1": edge_id},
-                x=t,
-                y=y,
-                z=H - rail,
-            )
+        carcass(
+            f"царга-{n}",
+            "царга",
+            Span(W - 2 * t, "x"),
+            Span(rail, "y"),
+            Position(x=t, y=y, z=H - t),
+            c.edging.rails,
         )
 
     # полка с отступами от боковин и спереди
     shelf = c.shelf
-    side_gap = int(shelf.side_gap)
-    out.parts.append(
-        make_part(
-            pid=f"{module.label}-полка",
-            module_label=module.label,
-            name="полка",
-            size_a=W - 2 * t - 2 * side_gap,
-            axis_a="x",
-            size_b=D - int(shelf.front_gap),
-            axis_b="y",
-            thickness=t,
-            material_id=body.id,
-            textured=textured,
-            edges={"L1": edge_id},
-            x=t + side_gap,
-            y=0,
-            z=int(shelf.height),
-        )
+    carcass(
+        "полка",
+        "полка",
+        Span(W - 2 * t - 2 * shelf.side_gap, "x"),
+        Span(D - shelf.front_gap, "y"),
+        Position(x=t + shelf.side_gap, y=0, z=shelf.height),
+        c.edging.shelves,
     )
 
     # задняя стенка ХДФ накладная, с отступом по контуру; сзади корпуса
     bp = c.back_panel
-    hdf = _sheet(ws, bp.material, "Материал задней стенки")
+    hdf = _material(ws.materials.sheets, bp.material, "Материал задней стенки", "листовые")
     hdf_t = _required_thickness(hdf, "задней стенки")
-    offset = int(bp.contour_offset)
-    back_h = H - 2 * offset
-    back_w = W - 2 * offset
+    back_h = H - 2 * bp.contour_offset
+    back_w = W - 2 * bp.contour_offset
     out.parts.append(
         make_part(
             pid=f"{module.label}-зад",
             module_label=module.label,
             name="задняя стенка",
-            size_a=back_h,
-            axis_a="z",
-            size_b=back_w,
-            axis_b="x",
+            a=Span(back_h, "z"),
+            b=Span(back_w, "x"),
             thickness=hdf_t,
             material_id=hdf.id,
             textured=False,
-            edges={},
-            x=offset,
-            y=-hdf_t,
-            z=offset,
+            at=Position(x=bp.contour_offset, y=-hdf_t, z=bp.contour_offset),
         )
     )
 
     # двери по правилу ширины: одна при W ≤ порога, иначе две; высота — по формуле
     f = c.facades
-    gap = int(f.gap)
-    facade_mat = _facade(ws, materials.facades_lower, "Материал фасадов")
+    facade_mat = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
     facade_t = _required_thickness(facade_mat, "фасадов")
-    facade_h = formulas.evaluate(f.height_lower, H=H, W=W)
+    facade_h = _calc(module, dims, "высота фасада", f.height_lower, H=H, W=W)
     if W > f.two_doors_if_wider_than:
         n_doors = 2
-        facade_w = formulas.evaluate(f.two_doors_width, H=H, W=W)
+        facade_w = _calc(module, dims, "фасады", f.two_doors_width, H=H, W=W)
     else:
         n_doors = 1
-        facade_w = formulas.evaluate(f.single_door_width, H=H, W=W)
+        facade_w = _calc(module, dims, "фасад", f.single_door_width, H=H, W=W)
     for i in range(n_doors):
         suffix = ("Л", "П")[i] if n_doors == 2 else ""
-        pid = f"{module.label}-фасад-{suffix}" if suffix else f"{module.label}-фасад"
         out.parts.append(
             make_part(
-                pid=pid,
+                pid=f"{module.label}-фасад-{suffix}" if suffix else f"{module.label}-фасад",
                 module_label=module.label,
                 name="фасад",
-                size_a=facade_h,
-                axis_a="z",
-                size_b=facade_w,
-                axis_b="x",
+                a=Span(facade_h, "z"),
+                b=Span(facade_w, "x"),
                 thickness=facade_t,
                 material_id=facade_mat.id,
                 textured=False,
-                edges={},
-                x=gap + i * (facade_w + gap),
-                y=D,
-                z=gap,
+                at=Position(x=f.gap + i * (facade_w + f.gap), y=D, z=f.gap),
+                area=True,
             )
         )
-        out.facade_area_mm2 += facade_h * facade_w
 
-    # фурнитура
-    hinges_per_facade = steps_pick(c.hinges_by_facade_height, facade_h, "петли_по_высоте_фасада")
-    hinges = hinges_per_facade * n_doors
+    # фурнитура; соотношения («по одной на петлю») — из construction.yaml
+    hinges = steps_pick(c.hinges_by_facade_height, facade_h, "петли_по_высоте_фасада") * n_doors
     out.hardware[hw.hinges] += hinges
-    out.hardware[hw.plates] += hinges  # ответные планки: по одной на петлю
+    out.hardware[hw.plates] += hinges * c.plates.per_unit
     joints = [(D, 2)] + [(rail, 2)] * 2  # дно к обеим боковинам; каждая царга к обеим
-    confirmats = 0
-    for length, count in joints:
-        confirmats += (
-            steps_pick(c.confirmats_by_joint_length, length, "конфирматы_по_длине_соединения") * count
-        )
+    confirmats = sum(
+        steps_pick(c.confirmats_by_joint_length, length, "конфирматы_по_длине_соединения") * count
+        for length, count in joints
+    )
     out.hardware[hw.confirmats] += confirmats
-    out.hardware[hw.caps] += confirmats  # заглушки: по одной на конфирмат
+    out.hardware[hw.caps] += confirmats * c.caps.per_unit
     out.hardware[hw.shelf_pins] += shelf.pins * module.shelves
-    out.hardware[hw.legs] += int(c.legs.up_to_800) if W <= c.legs.threshold else int(c.legs.over_800)
-    screws = int(c.screws_3_5x16.per_hinge) * hinges
+    # ключи ножек «до_800»/«свыше_800» должны совпадать с порогом (DECISIONS, тикет 05)
+    out.hardware[hw.legs] += c.legs.up_to_800 if W <= c.legs.threshold else c.legs.over_800
+    screws = c.screws_3_5x16.per_hinge * hinges
     perimeter = 2 * (back_h + back_w)
-    screws += _ceil_div(perimeter, int(bp.fastening_pitch))  # саморезы на ХДФ: периметр / шаг
+    screws += _ceil_div(perimeter, bp.fastening_pitch)  # саморезы на ХДФ: периметр / шаг
     out.hardware[hw.screws] += screws
-    out.hardware[materials.handles] += n_doors  # ручки: по одной на фасад
+    out.hardware[materials.handles] += n_doors * c.handles.per_unit
     return out
 
 
@@ -426,7 +411,7 @@ def _edge_totals(parts: list[Part], ws: Workshop) -> dict[str, EdgeTotals]:
                 continue
             clean_mm[edge_id] += p.length if side.startswith("L") else p.width
             sides[edge_id] += 1
-    allowance = int(ws.equipment.edging.allowance_per_side)
+    allowance = ws.equipment.edging.allowance_per_side
     edging = ws.construction.edging
     totals = {}
     for edge_id in sorted(clean_mm):
@@ -442,7 +427,17 @@ def _edge_totals(parts: list[Part], ws: Workshop) -> dict[str, EdgeTotals]:
     return totals
 
 
-TEMPLATES = {"base_door": build_base_door}
+@dataclass(frozen=True)
+class Template:
+    """Шаблон модуля: построитель деталей и ряд, в котором он применяется."""
+
+    build: Callable[[ModuleSpec, ModuleDims, ProjectMaterials, Workshop], TemplateOut]
+    row_kind: str  # lower | upper | tall
+
+
+TEMPLATES = {"base_door": Template(build_base_door, "lower")}
+
+_ROW_RU = {"lower": "нижнем ряду", "upper": "верхнем ряду", "tall": "пенале"}
 
 
 # --- расчёт деталей проекта ----------------------------------------------------
@@ -464,7 +459,6 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     modules: list[ModuleParts] = []
     hw: Counter = Counter()
     seen: dict[str, str] = {}
-    facade_mm2 = 0
     warnings: list[str] = []
     for wall in project.walls:
         for row in wall.rows:
@@ -478,33 +472,35 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
                     seen[part.id] = module.label
                 modules.append(ModuleParts(module=module.label, template=module.template, parts=out.parts))
                 hw.update(out.hardware)
-                facade_mm2 += out.facade_area_mm2
                 warnings += [f"{module.label}: {w}" for w in out.warnings]
     known = {i.id for i in ws.hardware.items}
     unknown = sorted(set(hw) - known)
     if unknown:
         raise OrderError(f"Неизвестные позиции фурнитуры (нет в hardware.yaml): {', '.join(unknown)}.")
     all_parts = [p for m in modules for p in m.parts]
+    # площадь фасадов — сумма площадей их деталей; округляется один раз, до 4 знаков
+    facade_area = sum((Decimal(str(p.area_m2)) for p in all_parts if p.area_m2 is not None), Decimal(0))
     return PartsComputation(
         modules=modules,
         hardware=dict(sorted(hw.items())),
         edges=_edge_totals(all_parts, ws),
-        facade_area=round(facade_mm2 / 1_000_000, 4),
+        facade_area=float(facade_area.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
         warnings=warnings,
     )
 
 
 def _build_module(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws: Workshop) -> TemplateOut:
     """Один модуль → результат шаблона: выбор шаблона, габариты, ряд."""
-    builder = TEMPLATES.get(module.template)
-    if builder is None:
+    template = TEMPLATES.get(module.template)
+    if template is None:
         known = ", ".join(sorted(TEMPLATES))
         raise OrderError(
             f"Модуль {module.label}: неизвестный шаблон «{module.template}» (известные: {known})."
         )
-    if module.template == "base_door" and row.kind != "lower":
+    if template.row_kind != row.kind:
         raise OrderError(
-            f"Модуль {module.label}: шаблон base_door применяется в нижнем ряду, а он в ряде «{row.kind}»."
+            f"Модуль {module.label}: шаблон {module.template} применяется в "
+            f"{_ROW_RU[template.row_kind]}, а он в ряде «{row.kind}»."
         )
     dims = _module_dims(module, row.kind, ws)
-    return builder(module, dims, materials, ws)
+    return template.build(module, dims, materials, ws)

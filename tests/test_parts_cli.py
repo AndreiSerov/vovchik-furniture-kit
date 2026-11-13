@@ -26,3 +26,15 @@ def test_parts_json_equals_api_and_text_has_banner(home, base_door_project):
 def test_parts_missing_file_exits_1(home):
     r = runner.invoke(app, ["parts", "--project", str(home / "nope.json")])
     assert r.exit_code == 1 and "не найден" in r.output
+
+
+def test_odd_width_exits_1_without_traceback(home, base_door_project):
+    project = json.loads(base_door_project.read_text(encoding="utf-8"))
+    project["walls"][0]["rows"][0]["modules"][0]["width"] = 601
+    odd = home / "odd.json"
+    odd.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    for extra in ([], ["--json"]):
+        r = runner.invoke(app, ["parts", "--project", str(odd), *extra])
+        assert r.exit_code == 1, r.output
+        assert "Traceback" not in r.output
+        assert "Н1" in r.output and "601" in r.output and "чётную" in r.output
