@@ -175,3 +175,8 @@ def test_root_needs_construction_yaml(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(WorkshopError):
         api.resolve_home()
+
+
+def test_wrong_type_error_shows_input_type(home):
+    _break(home, "labor.yaml", "mock: true", 'mock: "true"')
+    assert "«true» (строка) — ожидалось true или false" in _problems(home)

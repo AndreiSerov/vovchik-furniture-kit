@@ -98,6 +98,17 @@ def _path(loc: tuple) -> str:
     return out
 
 
+_TYPE_RU = {
+    bool: "логическое значение",
+    int: "целое число",
+    float: "число",
+    str: "строка",
+    list: "список",
+    dict: "раздел",
+    type(None): "пусто",
+}
+
+
 def translate(name: str, err: ValidationError) -> list[str]:
     msgs = []
     for e in err.errors():
@@ -111,7 +122,10 @@ def translate(name: str, err: ValidationError) -> list[str]:
         if e["type"] == "missing" and not isinstance(e["loc"][-1], int):
             msgs.append(f"{name}: ключ «{path}»: {expect}.")
         else:
-            msgs.append(f"{name}: ключ «{path}»: значение «{e['input']}» — {expect}.")
+            shown = f"«{e['input']}»"
+            if e["type"] != "value_error" and type(e["input"]) in _TYPE_RU:
+                shown += f" ({_TYPE_RU[type(e['input'])]})"
+            msgs.append(f"{name}: ключ «{path}»: значение {shown} — {expect}.")
     return msgs
 
 
