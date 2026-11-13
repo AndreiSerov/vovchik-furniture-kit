@@ -214,3 +214,25 @@ def test_foreign_symlink_with_wanted_name_is_warned_and_kept(repo, fake_home):
     assert r.returncode == 1
     assert "kitchen-a" in r.stderr
     assert os.readlink(link) == str(outside)
+
+
+def test_check_reports_link_pointing_at_wrong_skill(repo, fake_home):
+    run(repo, fake_home)
+    link = repo / ".claude" / "skills" / "kitchen-a"
+    link.unlink()
+    link.symlink_to("../../skills/kitchen-b")
+    before = snapshot(repo)
+    r = run(repo, fake_home, "--check")
+    assert r.returncode == 1
+    assert "wrong skill" in r.stdout and "kitchen-a" in r.stdout
+    assert snapshot(repo) == before
+
+
+def test_check_with_hermes_uses_fake_home(repo, fake_home):
+    run(repo, fake_home)
+    r = run(repo, fake_home, "--check", "--hermes")
+    assert r.returncode == 1
+    assert ".hermes" in r.stdout and "missing" in r.stdout
+    assert not (fake_home / ".hermes").exists()
+    run(repo, fake_home, "--hermes")
+    assert run(repo, fake_home, "--check", "--hermes").returncode == 0

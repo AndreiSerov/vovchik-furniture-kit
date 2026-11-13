@@ -45,7 +45,10 @@ def check_kitchen_links() -> list[str]:
         capture_output=True,
         text=True,
     )
-    return done.stdout.splitlines()[:-1] if done.returncode else []
+    if not done.returncode:
+        return []
+    lines = done.stdout.splitlines()[:-1]
+    return lines or [f"link-skills --check failed: {done.stderr.strip() or done.returncode}"]
 
 
 def check_references() -> list[str]:

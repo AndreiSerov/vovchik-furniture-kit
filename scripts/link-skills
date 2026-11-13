@@ -44,6 +44,8 @@ def check_folder(folder: Path, names: list[str]) -> list[str]:
                 problems.append(f"{link} is a foreign symlink, not ours")
             elif not (link / "SKILL.md").is_file():
                 problems.append(f"{link} is a dangling link (target has no SKILL.md)")
+            elif os.path.realpath(link) != os.path.realpath(SOURCE / name):
+                problems.append(f"{link} points at the wrong skill")
         elif link.exists():
             problems.append(f"{link} is a real file or folder, not our link")
         else:
