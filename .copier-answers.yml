@@ -1,0 +1,13 @@
+# Written by Copier. Run `copier update` instead of editing this file.
+_commit: v1.0.0-3-g954e713
+_src_path: /Users/andreiserov/Developer/harness-template
+ci: true
+ci_runner: ubuntu-latest
+description: 'Это проект для моделирования мебели на заказ для мебельщика: генерация
+    3D-модели, план раскроя, расчёт стоимости материалов.'
+issue_tracker: github
+optional_skills: []
+private_paths: []
+project_name: vovchik-furniture-kit
+stack: python-uv
+use_opencode: false

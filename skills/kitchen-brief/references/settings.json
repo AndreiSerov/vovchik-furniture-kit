@@ -1,0 +1,31 @@
+{
+  "$comment": "Настройки салона для check_brief.py. Цены — ориентиры по умолчанию, замените на цены своего салона. Все суммы в рублях, без техники, со сборкой.",
+  "reference_length_m": 4,
+  "min_budget_to_ceiling_per_reference_length": 450000,
+  "min_budget_standard_per_reference_length": 320000,
+  "budget_reserve_pct": 10,
+  "countertop_height_mm": 900,
+  "base_depth_mm": 600,
+  "island_min_passage_mm": 900,
+  "production_weeks": 6,
+  "measure_to_contract_weeks": 2,
+  "hood_min_height_over_gas_mm": 750,
+  "hood_min_height_over_electric_mm": 650,
+  "max_client_questions": 15,
+  "price_ranges_per_meter": {
+    "$comment": "Для ответа клиенту «кухни такого уровня обычно стоят от … до …». Без техники, со сборкой, за погонный метр. Нижняя граница economy не ниже min_budget_standard / reference_length_m.",
+    "economy": [
+      80000,
+      110000
+    ],
+    "middle": [
+      110000,
+      170000
+    ],
+    "premium": [
+      170000,
+      350000
+    ]
+  },
+  "disabled_rules": []
+}

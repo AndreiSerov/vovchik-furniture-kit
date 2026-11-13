@@ -1,0 +1,542 @@
+{
+  "$comment": "Схема брифа кухни. Каждое поле в брифе записывается как {\"value\": ..., \"source\": \"client\" | \"measured\", \"note\": \"...\"}. source=client — со слов клиента (размеры предварительные), source=measured — подтверждено замером. Неизвестное поле не записывается вовсе или value=null. required — без поля нельзя считать проект; ask — когда выяснять, если поле пустое: now (в переписке) или measure (на замере).",
+  "sources": {
+    "client": "со слов клиента",
+    "measured": "подтверждено замером"
+  },
+  "sections": {
+    "client": {
+      "label": "Клиент",
+      "fields": {
+        "name": {
+          "label": "Имя",
+          "type": "string",
+          "required": true,
+          "ask": "now"
+        },
+        "phone": {
+          "label": "Телефон",
+          "type": "string",
+          "required": true,
+          "ask": "now"
+        },
+        "email": {
+          "label": "Email или другой контакт",
+          "type": "string",
+          "required": false,
+          "ask": "now"
+        },
+        "address": {
+          "label": "Адрес объекта",
+          "type": "string",
+          "required": true,
+          "ask": "now"
+        },
+        "object_type": {
+          "label": "Тип объекта",
+          "type": "enum",
+          "values": [
+            "apartment",
+            "house"
+          ],
+          "value_labels": {
+            "apartment": "квартира",
+            "house": "частный дом"
+          },
+          "required": false,
+          "ask": "now"
+        },
+        "floor": {
+          "label": "Этаж (для квартиры)",
+          "type": "integer",
+          "required": false,
+          "ask": "now"
+        },
+        "elevator": {
+          "label": "Лифт",
+          "type": "enum",
+          "values": [
+            "none",
+            "passenger",
+            "freight"
+          ],
+          "required": false,
+          "ask": "now"
+        }
+      }
+    },
+    "room": {
+      "label": "Помещение",
+      "fields": {
+        "shape": {
+          "label": "Форма кухни",
+          "type": "enum",
+          "values": [
+            "straight",
+            "corner",
+            "u_shape",
+            "island"
+          ],
+          "value_labels": {
+            "straight": "прямая",
+            "corner": "угловая",
+            "u_shape": "П-образная",
+            "island": "только остров"
+          },
+          "required": true,
+          "ask": "now"
+        },
+        "has_island": {
+          "label": "Есть остров",
+          "type": "boolean",
+          "required": false,
+          "ask": "now"
+        },
+        "island": {
+          "label": "Остров",
+          "type": "object",
+          "item": {
+            "length_mm": "integer",
+            "depth_mm": "integer",
+            "location": "string: где стоит, напр. «внутри П», «в зоне гостиной»"
+          },
+          "required": false,
+          "ask": "now"
+        },
+        "walls": {
+          "label": "Стены под мебель",
+          "type": "list",
+          "item": {
+            "name": "string: короткая метка стены, напр. A, B, «длинная»",
+            "length_mm": "integer",
+            "furnished": "boolean: стоит ли на стене мебель (по умолчанию true)"
+          },
+          "required": true,
+          "ask": "now"
+        },
+        "ceiling_height_mm": {
+          "label": "Высота потолка, мм",
+          "type": "integer",
+          "required": true,
+          "ask": "now"
+        },
+        "window": {
+          "label": "Окно",
+          "type": "object",
+          "item": {
+            "present": "boolean",
+            "wall": "string: метка стены",
+            "width_mm": "integer",
+            "sill_height_mm": "integer: высота подоконника от чистового пола",
+            "offset_from_corner_mm": "integer",
+            "radiator_below": "boolean"
+          },
+          "required": true,
+          "ask": "now"
+        },
+        "door": {
+          "label": "Дверь",
+          "type": "object",
+          "item": {
+            "wall": "string",
+            "opening_side": "string: внутрь/наружу, петли слева/справа, или проём без двери",
+            "width_mm": "integer",
+            "offset_from_corner_mm": "integer"
+          },
+          "required": true,
+          "ask": "measure"
+        },
+        "water": {
+          "label": "Вода и канализация (где выводы)",
+          "type": "object",
+          "item": {
+            "wall": "string",
+            "position": "string",
+            "movable": "boolean: можно ли перенести"
+          },
+          "required": true,
+          "ask": "now"
+        },
+        "vent_duct": {
+          "label": "Вентканал",
+          "type": "object",
+          "item": {
+            "wall": "string",
+            "position": "string",
+            "height_mm": "integer"
+          },
+          "required": false,
+          "ask": "measure"
+        },
+        "gas": {
+          "label": "Газ",
+          "type": "object",
+          "item": {
+            "present": "boolean",
+            "pipe_location": "string",
+            "meter": "boolean: есть ли счётчик на кухне"
+          },
+          "required": true,
+          "ask": "now"
+        },
+        "protrusions": {
+          "label": "Выступы, короба, колонны",
+          "type": "list",
+          "item": {
+            "wall": "string",
+            "description": "string",
+            "size_mm": "string"
+          },
+          "required": false,
+          "ask": "measure"
+        },
+        "sockets": {
+          "label": "Розетки и выводы электрики",
+          "type": "string",
+          "required": false,
+          "ask": "measure"
+        },
+        "renovation_stage": {
+          "label": "Стадия ремонта",
+          "type": "enum",
+          "values": [
+            "rough",
+            "pre_finish",
+            "finish",
+            "done"
+          ],
+          "value_labels": {
+            "rough": "черновая (стены не выровнены)",
+            "pre_finish": "предчистовая (стены выровнены, нет плитки/обоев)",
+            "finish": "чистовая отделка идёт",
+            "done": "ремонт закончен, кухня меняется"
+          },
+          "required": true,
+          "ask": "now"
+        }
+      }
+    },
+    "appliances": {
+      "label": "Техника и мойка",
+      "fields": {
+        "items": {
+          "label": "Техника",
+          "type": "list",
+          "item": {
+            "type": "enum: sink, hob, cooker (отдельностоящая плита), oven, microwave, dishwasher, washing_machine, coffee_machine, wine_cooler, other",
+            "built_in": "boolean",
+            "fuel": "enum для варочной или плиты: induction, electric, gas",
+            "brand": "string: бренд, если назван без модели",
+            "model": "string: модель (без неё встраиваемую технику нельзя пускать в производство)",
+            "width_mm": "integer",
+            "dimensions": "string: Ш×В×Г, если известно",
+            "location": "string: где стоит, словами клиента (напр. «у окна», «в высоком шкафу», «на острове»)",
+            "who_buys": "enum: client, salon",
+            "keep_existing": "boolean: остаётся своя, уже стоит"
+          },
+          "required": true,
+          "ask": "now"
+        },
+        "fridge": {
+          "label": "Холодильник",
+          "type": "object",
+          "item": {
+            "built_in": "boolean",
+            "brand": "string",
+            "model": "string",
+            "width_mm": "integer",
+            "height_mm": "integer",
+            "location": "string",
+            "existing": "boolean: свой, уже есть"
+          },
+          "required": true,
+          "ask": "now"
+        },
+        "hood": {
+          "label": "Вытяжка",
+          "type": "object",
+          "item": {
+            "kind": "enum: built_in, telescopic, wall, island, worktop, none",
+            "exhaust": "enum: duct (отвод в вентканал), recirculation",
+            "model": "string",
+            "width_mm": "integer"
+          },
+          "required": true,
+          "ask": "now"
+        }
+      }
+    },
+    "style": {
+      "label": "Стиль",
+      "fields": {
+        "fronts_material": {
+          "label": "Материал фасадов",
+          "type": "string",
+          "required": false,
+          "ask": "measure"
+        },
+        "fronts_finish": {
+          "label": "Глянец / мат",
+          "type": "enum",
+          "values": [
+            "matte",
+            "gloss",
+            "mixed",
+            "texture"
+          ],
+          "required": false,
+          "ask": "now"
+        },
+        "colors": {
+          "label": "Цвета",
+          "type": "string",
+          "required": true,
+          "ask": "now"
+        },
+        "handles": {
+          "label": "Ручки",
+          "type": "enum",
+          "values": [
+            "handles",
+            "handleless_profile",
+            "push_open",
+            "integrated",
+            "undecided_handleless"
+          ],
+          "value_labels": {
+            "handles": "обычные ручки",
+            "handleless_profile": "профиль Gola",
+            "push_open": "открывание нажатием (push/tip-on)",
+            "integrated": "фрезерованная/торцевая ручка",
+            "undecided_handleless": "«без ручек», способ не выбран"
+          },
+          "required": false,
+          "ask": "measure"
+        },
+        "style_words": {
+          "label": "Стиль словами клиента",
+          "type": "string",
+          "required": false,
+          "ask": "now"
+        },
+        "references": {
+          "label": "Референсы (ссылки, фото)",
+          "type": "list",
+          "required": false,
+          "ask": "now"
+        }
+      }
+    },
+    "storage": {
+      "label": "Хранение",
+      "fields": {
+        "upper_height": {
+          "label": "Высота верхних шкафов",
+          "type": "enum",
+          "values": [
+            "none",
+            "720",
+            "900",
+            "to_ceiling"
+          ],
+          "value_labels": {
+            "none": "без верхних",
+            "720": "720 мм",
+            "900": "900 мм",
+            "to_ceiling": "до потолка"
+          },
+          "required": true,
+          "ask": "now"
+        },
+        "upper_walls": {
+          "label": "На каких стенах верхние шкафы",
+          "type": "list",
+          "required": false,
+          "ask": "measure"
+        },
+        "base_layout": {
+          "label": "Низ: ящики или двери",
+          "type": "enum",
+          "values": [
+            "drawers",
+            "doors",
+            "mixed"
+          ],
+          "required": false,
+          "ask": "measure"
+        },
+        "corner_solution": {
+          "label": "Угловое решение",
+          "type": "string",
+          "required": false,
+          "ask": "measure"
+        },
+        "trash_bin": {
+          "label": "Мусорное ведро / сортировка",
+          "type": "string",
+          "required": false,
+          "ask": "measure"
+        },
+        "dish_rack": {
+          "label": "Сушка для посуды",
+          "type": "string",
+          "required": false,
+          "ask": "measure"
+        },
+        "lighting": {
+          "label": "Подсветка",
+          "type": "string",
+          "required": false,
+          "ask": "measure"
+        },
+        "tall_units": {
+          "label": "Высокие шкафы-пеналы",
+          "type": "string",
+          "required": false,
+          "ask": "measure"
+        }
+      }
+    },
+    "countertop": {
+      "label": "Столешница и фартук",
+      "fields": {
+        "material": {
+          "label": "Материал столешницы",
+          "type": "string",
+          "required": true,
+          "ask": "measure"
+        },
+        "decor": {
+          "label": "Декор столешницы",
+          "type": "string",
+          "required": false,
+          "ask": "measure"
+        },
+        "backsplash_material": {
+          "label": "Материал фартука",
+          "type": "string",
+          "required": false,
+          "ask": "measure"
+        },
+        "backsplash_decor": {
+          "label": "Декор фартука",
+          "type": "string",
+          "required": false,
+          "ask": "measure"
+        }
+      }
+    },
+    "usage": {
+      "label": "Эксплуатация",
+      "fields": {
+        "main_user_height_cm": {
+          "label": "Рост основного пользователя, см",
+          "type": "integer",
+          "required": false,
+          "ask": "measure"
+        },
+        "household_size": {
+          "label": "Сколько человек живёт",
+          "type": "integer",
+          "required": false,
+          "ask": "measure"
+        },
+        "cooking_frequency": {
+          "label": "Как часто готовят",
+          "type": "string",
+          "required": false,
+          "ask": "measure"
+        }
+      }
+    },
+    "budget": {
+      "label": "Бюджет",
+      "fields": {
+        "amount_rub": {
+          "label": "Сумма, ₽",
+          "type": "integer",
+          "required": true,
+          "ask": "now"
+        },
+        "includes_assembly": {
+          "label": "Включает сборку и монтаж",
+          "type": "boolean",
+          "required": true,
+          "ask": "now"
+        },
+        "includes_appliances": {
+          "label": "Включает технику",
+          "type": "boolean",
+          "required": true,
+          "ask": "now"
+        },
+        "flexibility": {
+          "label": "Гибкость бюджета",
+          "type": "enum",
+          "values": [
+            "rigid",
+            "some",
+            "flexible"
+          ],
+          "value_labels": {
+            "rigid": "жёсткий потолок",
+            "some": "можно немного больше",
+            "flexible": "гибкий"
+          },
+          "required": false,
+          "ask": "now"
+        }
+      }
+    },
+    "timeline": {
+      "label": "Сроки",
+      "fields": {
+        "desired_date": {
+          "label": "Желаемая дата установки (ГГГГ-ММ-ДД)",
+          "type": "date",
+          "required": true,
+          "ask": "now"
+        },
+        "desired_date_text": {
+          "label": "Срок словами клиента",
+          "type": "string",
+          "required": false,
+          "ask": "now"
+        },
+        "hardness": {
+          "label": "Насколько жёсткий срок",
+          "type": "enum",
+          "values": [
+            "hard",
+            "soft"
+          ],
+          "required": false,
+          "ask": "now"
+        }
+      }
+    },
+    "service": {
+      "label": "Служебное",
+      "fields": {
+        "open_questions": {
+          "label": "Открытые вопросы",
+          "type": "list",
+          "required": false,
+          "ask": "measure"
+        },
+        "conflicts": {
+          "label": "Противоречия",
+          "type": "list",
+          "required": false,
+          "ask": "measure"
+        },
+        "other_wishes": {
+          "label": "Прочие пожелания словами клиента",
+          "type": "list",
+          "required": false,
+          "ask": "measure"
+        }
+      }
+    }
+  }
+}
