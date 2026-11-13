@@ -192,23 +192,36 @@ def _open_order(query: str, home: Path | None = None) -> Iterator[OpenOrder]:
         conn.commit()
 
 
+def _create_order(
+    conn: sqlite3.Connection, number: str, slug: str, client: str, phone: str, address: str
+) -> sqlite3.Row:
+    """Проверка номера и вставка заказа под одной блокировкой (параллельные запуски не гоняются)."""
+    conn.execute("BEGIN IMMEDIATE")
+    taken = conn.execute("SELECT * FROM orders WHERE number = ?", (number,)).fetchone()
+    if taken:
+        conn.rollback()
+        raise OrderError(f"Номер {number} уже занят заказом {store.order_ref_of(taken)}.")
+    ts = store.now()
+    try:
+        conn.execute(
+            "INSERT INTO orders (number, slug, client, phone, address, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (number, slug, client, phone, address, ts, ts),
+        )
+    except sqlite3.IntegrityError as e:
+        conn.rollback()
+        raise OrderError(f"Номер {number} уже занят другим заказом.") from e
+    return conn.execute("SELECT * FROM orders WHERE number = ?", (number,)).fetchone()
+
+
 def order_new(
     order: str, client: str = "", phone: str = "", address: str = "", home: Path | None = None
 ) -> OrderResult:
     home = home or resolve_home()
     number, slug = store.parse_order_id(order)
     with store.connect(home) as conn:
-        taken = conn.execute("SELECT * FROM orders WHERE number = ?", (number,)).fetchone()
-        if taken:
-            raise OrderError(f"Номер {number} уже занят заказом {store.order_ref_of(taken)}.")
-        ts = store.now()
-        conn.execute(
-            "INSERT INTO orders (number, slug, client, phone, address, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (number, slug, client, phone, address, ts, ts),
-        )
+        row = _create_order(conn, number, slug, client, phone, address)
         conn.commit()
-        row = conn.execute("SELECT * FROM orders WHERE number = ?", (number,)).fetchone()
         return OrderResult(order=_info(row), created=True, **_mock(home))
 
 
@@ -238,6 +251,21 @@ class ValidationResult:
 Validator = Callable[[Any, ValidationContext], ValidationResult]
 
 
+def _same_order(value: Any, ctx: ValidationContext) -> bool:
+    """Номер заказа или `номер-фамилия`; фамилия сравнивается после транслитерации."""
+    if not isinstance(value, str):
+        return False
+    if value == ctx.order_number:
+        return True
+    try:
+        return store.parse_order_id(value) == (
+            ctx.order_number,
+            ctx.order_ref.removeprefix(ctx.order_number + "-"),
+        )
+    except OrderError:
+        return False
+
+
 def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
     """Минимальная обёртка проекта до этапа 1: объект с полем `order` — номер заказа или `номер-фамилия`.
 
@@ -249,7 +277,7 @@ def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
     if "order" not in data:
         return ValidationResult(["В проекте нет поля «order» с номером заказа."])
     value = data["order"]
-    if value not in (ctx.order_number, ctx.order_ref):
+    if not _same_order(value, ctx):
         return ValidationResult([f"Поле «order» = «{value}» не совпадает с заказом {ctx.order_ref}."])
     return ValidationResult()
 
@@ -301,7 +329,13 @@ def import_project(
         prev = current["version"] if current else None
         if current and current["content_hash"] == digest:
             return ImportResult(
-                order=o.ref, changed=False, version=prev, previous_version=prev, content_hash=digest, **mock
+                order=o.ref,
+                changed=False,
+                version=prev,
+                previous_version=prev,
+                content_hash=digest,
+                warnings=checked.warnings,
+                **mock,
             )
         version = (prev or 0) + 1
         o.conn.execute(

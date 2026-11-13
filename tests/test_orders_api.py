@@ -315,9 +315,12 @@ def test_unopenable_database(home, monkeypatch):
 
 def test_relative_kitchen_db_resolves_against_home(home, monkeypatch, tmp_path):
     monkeypatch.setenv("KITCHEN_DB", "data/my.db")
-    monkeypatch.chdir(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
     api.order_new("2026-047-petrov")
     assert (home / "data" / "my.db").is_file()
+    assert not (elsewhere / "data").exists()
 
 
 def test_lookup_by_client_name_translit(home):
@@ -337,3 +340,67 @@ def test_updated_at_touched_only_on_write(order, monkeypatch):
     assert api.order_show(order).order.updated_at == before
     api.log_add(order, "note", "x")
     assert api.order_show(order).order.updated_at == "2030-01-01T00:00:00+00:00"
+
+
+# --- правки ревью тикета 03 (в тикете 04) -----------------------------------
+
+
+def test_unchanged_reimport_keeps_warnings_without_relogging(order, tmp_path):
+    def lenient(data, ctx):
+        return api.ValidationResult(warnings=["шкаф Н1 узкий"])
+
+    api.import_project(order, _project(tmp_path), validate=lenient)
+    again = api.import_project(order, _project(tmp_path), validate=lenient)
+    assert again.changed is False and again.warnings == ["шкаф Н1 узкий"]
+    assert api.status(order).text.count("шкаф Н1 узкий") == 1
+
+
+def test_parallel_order_new_same_number_gives_russian_error_not_traceback(home):
+    code = (
+        "import sys\nfrom pathlib import Path\nfrom kitchen import api\n"
+        "from kitchen.errors import OrderError\n"
+        "try:\n    api.order_new('2026-047-' + sys.argv[2], home=Path(sys.argv[1]))\n"
+        "except OrderError as e:\n    print(e); sys.exit(3)"
+    )
+    api.order_new("2026-001-first")  # БД уже создана: гонка только за номер
+    procs = [
+        subprocess.Popen(
+            [sys.executable, "-c", code, str(home), f"p{i}"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        for i in range(8)
+    ]
+    out = [(p.wait(), p.stdout.read().decode(), p.stderr.read().decode()) for p in procs]
+    assert sorted(rc for rc, _, _ in out).count(0) == 1, out
+    for rc, stdout, stderr in out:
+        assert "Traceback" not in stderr, stderr
+        if rc:
+            assert rc == 3 and "уже занят" in stdout
+
+
+def test_integrity_error_on_insert_is_russian_order_error(home, monkeypatch):
+    real_connect = sqlite3.connect
+
+    class Racing(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if sql.lstrip().startswith("INSERT INTO orders"):
+                raise sqlite3.IntegrityError("UNIQUE constraint failed: orders.number")
+            return super().execute(sql, *args)
+
+    monkeypatch.setattr(sqlite3, "connect", lambda *a, **k: real_connect(*a, factory=Racing, **k))
+    with pytest.raises(OrderError, match="уже занят"):
+        api.order_new("2026-047-petrov")
+
+
+def test_every_migration_splits_into_complete_statements():
+    from kitchen import store
+
+    for version, script in store.MIGRATIONS.items():
+        chunks = [c for c in script.split(";") if c.strip()]
+        assert chunks, version
+        for chunk in chunks:
+            assert sqlite3.complete_statement(chunk + ";"), (version, chunk)
+
+
+@pytest.mark.parametrize("value", ["2026-047-Petrov", "2026-047-Петров", "2026-047-petrov", "2026-047"])
+def test_wrapper_accepts_surname_in_any_spelling(order, tmp_path, value):
+    assert api.import_project(order, _project(tmp_path, order=value)).version == 1
