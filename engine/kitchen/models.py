@@ -4,7 +4,17 @@ import re
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, field_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
+
+from kitchen.formulas import compile_formula, variables
 
 
 def _not_bool(v):
@@ -90,12 +100,63 @@ class Shelf(Section):
     side_gap: Num = _f("отступ_от_боковин")
     front_gap: Num = _f("отступ_спереди")
     pins: Int = _f("полкодержателей")
+    height: Num = _f("высота")  # ДОБАВЛЕНО (МОК): положение полки от низа корпуса
 
 
 class Legs(Section):
     height: Num = _f("высота")
     up_to_800: Int = _f("до_800")
     over_800: Int = _f("свыше_800")
+    threshold: Num = _f("порог_ширины")  # ДОБАВЛЕНО (МОК): порог «до 800» — значением, а не именем ключа
+
+
+class MeterRounding(BaseModel):
+    """Округление длины в метрах («вверх до 0.1 м» — закупка кромки)."""
+
+    model_config = ConfigDict(frozen=True)
+    direction: Literal["up", "down"]
+    step_m: float
+
+    def apply_mm(self, mm: Decimal) -> Decimal:
+        step = Decimal(str(self.step_m)) * 1000
+        mode = ROUND_CEILING if self.direction == "up" else ROUND_FLOOR
+        return (mm / step).to_integral_value(rounding=mode) * step
+
+
+_METER_RE = re.compile(r"^\s*(вверх|вниз)\s+до\s+([0-9]+(?:\.[0-9]+)?)\s*м\s*$", re.IGNORECASE)
+
+
+def parse_meter_rounding(value: object) -> MeterRounding:
+    """«вверх до 0.1 м» -> MeterRounding. Неизвестная форма — ошибка загрузки по-русски."""
+    if isinstance(value, MeterRounding):
+        return value
+    m = _METER_RE.match(value) if isinstance(value, str) else None
+    if not m or float(m.group(2)) <= 0:
+        raise ValueError(
+            "неизвестная форма округления, ожидалось «вверх до N м» или «вниз до N м» (N больше нуля)"
+        )
+    return MeterRounding(direction=_DIRECTIONS[m.group(1).lower()], step_m=float(m.group(2)))
+
+
+# Формула construction.yaml: строка, разобранная при загрузке (синтаксис и переменные).
+# Поле — str: pydantic не строит схему для подклассов str, а compile_formula
+# возвращает экземпляр Formula (подкласс str), проверив синтаксис заранее.
+FormulaField = Annotated[str, BeforeValidator(compile_formula)]
+
+
+def _check_formula_vars(spec: list[tuple[str, str]], allowed: set[str]) -> None:
+    """Переменные формул должны быть из известного набора, иначе ошибка загрузки."""
+    problems = []
+    for key, text in spec:
+        unknown = sorted(variables(text) - allowed)
+        if unknown:
+            listed = ", ".join(f"«{v}»" for v in unknown)
+            problems.append(
+                f"формула «{text}» (ключ «{key}») использует переменную {listed}, "
+                f"а допускаются: {', '.join(sorted(allowed))}"
+            )
+    if problems:
+        raise ValueError("; ".join(problems) + ".")
 
 
 class ThreeDrawers(Section):
@@ -105,11 +166,35 @@ class ThreeDrawers(Section):
 
 class Facades(Section):
     gap: Num = _f("зазор")
-    height_lower: str = _f("высота_нижнего")
-    single_door_width: str = _f("одна_дверь_ширина")
+    height_lower: FormulaField = _f("высота_нижнего")
+    single_door_width: FormulaField = _f("одна_дверь_ширина")
     two_doors_if_wider_than: Num = _f("две_двери_если_ширина_больше")
-    two_doors_width: str = _f("две_двери_ширина")
+    two_doors_width: FormulaField = _f("две_двери_ширина")
     three_drawers: ThreeDrawers = _f("ящики_3_шт")
+
+    @model_validator(mode="after")
+    def _formula_vars(self) -> "Facades":
+        _check_formula_vars(
+            [
+                ("высота_нижнего", self.height_lower),
+                ("одна_дверь_ширина", self.single_door_width),
+                ("две_двери_ширина", self.two_doors_width),
+            ],
+            {"H", "W"},
+        )
+        return self
+
+
+class HardwareRefs(Section):
+    """Какие позиции hardware.yaml идут в модуль (МОК)."""
+
+    hinges: str = _f("петли")
+    plates: str = _f("ответные_планки")
+    confirmats: str = _f("конфирматы")
+    caps: str = _f("заглушки")
+    shelf_pins: str = _f("полкодержатели")
+    legs: str = _f("опоры")
+    screws: str = _f("саморезы")
 
 
 class Screws(Section):
@@ -122,14 +207,21 @@ class ConstructionEdging(Section):
     rails: str = _f("царги")
     shelves: str = _f("полки")
     reserve: Num = _f("запас")
-    purchase_rounding: str = _f("округление_закупки")
+    purchase_rounding: Annotated["MeterRounding", BeforeValidator(parse_meter_rounding)] = _f(
+        "округление_закупки"
+    )
 
 
 class Tandembox(Section):
     guide_length: Num = _f("длина_направляющей")
-    bottom: str = _f("дно")
-    back: str = _f("задняя_стенка")
+    bottom: FormulaField = _f("дно")
+    back: FormulaField = _f("задняя_стенка")
     material: str = _f("материал")
+
+    @model_validator(mode="after")
+    def _formula_vars(self) -> "Tandembox":
+        _check_formula_vars([("дно", self.bottom), ("задняя_стенка", self.back)], {"внутр_ширина"})
+        return self
 
 
 # Таблица ступеней: [[порог, значение], ...]; берётся первая ступень, где значение <= порога.
@@ -150,6 +242,9 @@ class Construction(Section):
     confirmats_by_joint_length: Steps = _f("конфирматы_по_длине_соединения")
     caps: str = _f("заглушки")
     screws_3_5x16: Screws = _f("саморезы_3_5x16")
+    plates: str = _f("ответные_планки")  # ДОБАВЛЕНО (МОК): по одной на петлю
+    handles: str = _f("ручки")  # ДОБАВЛЕНО (МОК): по одной на фасад
+    furniture: HardwareRefs = _f("фурнитура")  # ДОБАВЛЕНО (МОК): id позиций hardware.yaml
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
 
@@ -162,6 +257,9 @@ class SheetMaterial(Section):
     name: str = _f("название")
     sheet: tuple[Num, Num] = _f("лист")
     texture: bool | str = _f("текстура")
+    thickness: Num | None = Field(
+        default=None, alias="толщина"
+    )  # ДОБАВЛЕНО (МОК): у ХДФ — 3 (у ЛДСП корпуса толщина из construction.yaml)
     price: Num = _f("цена")
     shop: str = _f("магазин")
 
@@ -192,6 +290,7 @@ class Countertop(Section):
 class FacadeMaterial(Section):
     id: str
     name: str = _f("название")
+    thickness: Num | None = Field(default=None, alias="толщина")  # ДОБАВЛЕНО (МОК): 19 у МДФ
     price_per_m2: Num = _f("цена_за_м2")
     outsourced: bool = _f("заказ_на_стороне")
     lead_days: Int = _f("срок_раб_дней")
@@ -204,6 +303,8 @@ class Materials(Section):
     edges: list[EdgeMaterial] = _f("кромка")
     countertops: list[Countertop] = _f("столешницы")
     facades: list[FacadeMaterial] = _f("фасады")
+    # ДОБАВЛЕНО (МОК): какая кромка клеится на какой материал корпуса
+    edge_by_material: dict[str, str] = Field(default_factory=dict, alias="кромка_к_материалу")
 
 
 # --- hardware.yaml ----------------------------------------------------------

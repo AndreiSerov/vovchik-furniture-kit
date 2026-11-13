@@ -11,7 +11,7 @@
 
 ## Этап 1. Модуль → детали
 
-- [ ] 05 — Пробный ход через `base_door` (1.1, 1.2, 1.3) ([спека](docs/specs/stage-1-modules-to-parts.md))
+- [x] 05 — Пробный ход через `base_door` (1.1, 1.2, 1.3) ([спека](docs/specs/stage-1-modules-to-parts.md))
 - [ ] 06 — Полная схема в импорте и `diff` (1.1, 0.4) ([спека](docs/specs/stage-1-modules-to-parts.md))
 - [ ] 07 — Нижние шаблоны (1.4) ([спека](docs/specs/stage-1-modules-to-parts.md))
 - [ ] 08 — Верхние шаблоны и `appliances.yaml` (1.4) ([спека](docs/specs/stage-1-modules-to-parts.md))

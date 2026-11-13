@@ -17,19 +17,24 @@ from kitchen import brief as brief_check
 from kitchen import store
 from kitchen.errors import InputError, OrderError
 from kitchen.models import Workshop
+from kitchen.parts import EdgeTotals, ModuleParts, compute_parts
+from kitchen.project import parse_project
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
 __all__ = [
     "BriefSaveResult",
     "BriefShowResult",
+    "EdgeTotals",
     "ExportResult",
     "FileSummary",
     "ImportResult",
     "LogEntry",
     "LogResult",
+    "ModuleParts",
     "OrderInfo",
     "OrderResult",
+    "PartsResult",
     "QuickEstimate",
     "StatusResult",
     "ValidationContext",
@@ -44,6 +49,7 @@ __all__ = [
     "log_add",
     "order_new",
     "order_show",
+    "parts_from_project",
     "quick_estimate",
     "resolve_home",
     "status",
@@ -584,7 +590,40 @@ def brief_show(order: str, home: Path | None = None) -> BriefShowResult:
         )
 
 
-# --- быстрая вилка -----------------------------------------------------------
+# --- детали проекта -----------------------------------------------------------
+
+
+class PartsResult(Result):
+    """Детали по модулям, фурнитура, кромка, площадь фасадов, предупреждения."""
+
+    order: str  # поле order проекта
+    modules: list[ModuleParts]
+    hardware: dict[str, int]
+    edges: dict[str, EdgeTotals]
+    facade_area: float  # м², округлено до 4 знаков
+    warnings: list[str]
+
+
+def parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
+    """`kitchen parts --project <файл>`: детали проекта без БД (черновик до импорта)."""
+    home = home or resolve_home()
+    data = _read_json(Path(path), "Файл проекта")
+    project = parse_project(data)
+    workshop = load_workshop(home)
+    computed = compute_parts(project, workshop)
+    return PartsResult(
+        order=project.order,
+        modules=computed.modules,
+        hardware=computed.hardware,
+        edges=computed.edges,
+        facade_area=computed.facade_area,
+        warnings=computed.warnings,
+        mock=workshop.is_mock,
+        mock_files=workshop.mock_files,
+    )
+
+
+# --- быстрая вилка ------------------------------------------------------------
 
 
 class QuickEstimate(Result):

@@ -131,15 +131,50 @@ def translate(name: str, err: ValidationError) -> list[str]:
 
 def _cross_refs(w: Workshop) -> list[str]:
     ids = {m.id for m in w.materials.sheets}
+    edge_ids = {m.id for m in w.materials.edges}
+    hw_ids = {i.id for i in w.hardware.items}
     probs = []
-    for path, ref in (
-        ("задняя_стенка.материал", w.construction.back_panel.material),
-        ("ящик_tandembox.материал", w.construction.tandembox.material),
+    for path, ref, known, where in (
+        (
+            "задняя_стенка.материал",
+            w.construction.back_panel.material,
+            ids,
+            "листовых материалах materials.yaml",
+        ),
+        (
+            "ящик_tandembox.материал",
+            w.construction.tandembox.material,
+            ids,
+            "листовых материалах materials.yaml",
+        ),
+        *(
+            (f"фурнитура.{key}", ref, hw_ids, "позициях hardware.yaml")
+            for key, ref in (
+                ("петли", w.construction.furniture.hinges),
+                ("ответные_планки", w.construction.furniture.plates),
+                ("конфирматы", w.construction.furniture.confirmats),
+                ("заглушки", w.construction.furniture.caps),
+                ("полкодержатели", w.construction.furniture.shelf_pins),
+                ("опоры", w.construction.furniture.legs),
+                ("саморезы", w.construction.furniture.screws),
+            )
+        ),
     ):
-        if ref not in ids:
+        if ref not in known:
             probs.append(
-                f"construction.yaml: ключ «{path}»: значение «{ref}» — нет такого id в листовых "
-                f"материалах materials.yaml (есть: {', '.join(sorted(ids))})."
+                f"construction.yaml: ключ «{path}»: значение «{ref}» — нет такого id в {where} "
+                f"(есть: {', '.join(sorted(known))})."
+            )
+    for material_id, edge_id in w.materials.edge_by_material.items():
+        if material_id not in ids:
+            probs.append(
+                f"materials.yaml: ключ «кромка_к_материалу»: «{material_id}» — нет такого id в "
+                f"листовых материалах (есть: {', '.join(sorted(ids))})."
+            )
+        if edge_id not in edge_ids:
+            probs.append(
+                f"materials.yaml: ключ «кромка_к_материалу»: «{material_id}: {edge_id}» — нет такой "
+                f"кромки в кромке materials.yaml (есть: {', '.join(sorted(edge_ids))})."
             )
     return probs
 

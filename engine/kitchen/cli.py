@@ -178,6 +178,40 @@ def status(order: OrderArg, json: JsonOpt = False) -> None:
     emit(result, lambda r: f"{r.text}\nФайл: {r.path}", json)
 
 
+def _render_parts(r: api.PartsResult) -> str:
+    lines = [f"Детали проекта {r.order}:"]
+    for m in r.modules:
+        lines.append(f"  Модуль {m.module} ({m.template}) — {len(m.parts)} дет.")
+        for p in m.parts:
+            edged = ", ".join(side for side, edge in p.edges.items() if edge)
+            tail = f", кромка: {edged}" if edged else ""
+            lines.append(f"    {p.id} — {p.name} {p.length}×{p.width} мм{tail}")
+    hw = ", ".join(f"{pid} ×{n}" for pid, n in r.hardware.items())
+    lines.append(f"Фурнитура: {hw}")
+    for edge_id, e in r.edges.items():
+        lines.append(
+            f"Кромка {edge_id}: чистая {e.clean_m:.3f} м, с припуском "
+            f"{e.with_allowance_m:.3f} м, к закупке {e.purchase_m:.1f} м"
+        )
+    lines.append(f"Фасады: {r.facade_area:.4f} м²")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("parts")
+def parts(
+    project: Annotated[Path, typer.Option("--project", help="Файл project.json (без БД).")],
+    json: JsonOpt = False,
+) -> None:
+    """Детали проекта: по модулям, фурнитура, кромка, площадь фасадов."""
+    try:
+        result = api.parts_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_parts, json)
+
+
 # --- бриф и быстрая вилка ----------------------------------------------------
 
 brief_app = typer.Typer(help="Бриф заказа: сохранить, показать.", no_args_is_help=True)
