@@ -149,12 +149,31 @@ def _cross_refs(w: Workshop) -> list[str]:
             ids,
             "листовых материалах materials.yaml",
         ),
+        ("угловые_модули.карусель", w.construction.corner_rules.carousel, hw_ids, "позициях hardware.yaml"),
+        (
+            "угловые_модули.материал_заглушки",
+            w.construction.corner_rules.filler_material,
+            ids,
+            "листовых материалах materials.yaml",
+        ),
         *(
             (f"верхние_модули.{key}", ref, hw_ids, "позициях hardware.yaml")
             for key, ref in (
                 ("навес", w.construction.upper_rules.hanger),
                 ("подъёмник", w.construction.upper_rules.lift),
                 ("сушка", w.construction.upper_rules.dryer),
+            )
+        ),
+        *(
+            (
+                f"правила_пенала.{key}",
+                ref,
+                {item.id for item in w.appliances.items if item.type == kind},
+                f"технике типа {kind} в appliances.yaml",
+            )
+            for key, ref, kind in (
+                ("духовка", w.construction.tall_rules.oven, "oven"),
+                ("свч", w.construction.tall_rules.microwave, "microwave"),
             )
         ),
         (

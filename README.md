@@ -52,7 +52,7 @@ kitchen quick-estimate --meters 4.6             # вилка цены по prici
 kitchen parts --project project.json    # детали по модулям, фурнитура, кромка, фасады; без БД
 ```
 
-Расчёт поддерживает нижние шаблоны `base_door`, `base_sink`, `base_bottle`, `base_drawers` (три ящика) `dishwasher_panel`, а также верхние `wall_door`, `wall_lift`, `wall_hood`, `wall_dryer`. Формулы и правила конструкции — в `workshop/construction.yaml`. Ручные эталоны находятся в `tests/golden/`; добавленные правила помечены как мок и требуют проверки мастера.
+Расчёт поддерживает нижние шаблоны `base_door`, `base_sink`, `base_bottle`, `base_drawers` (три ящика) `dishwasher_panel`, а также верхние `wall_door`, `wall_lift`, `wall_hood`, `wall_dryer`, `base_corner`, `wall_corner`, `tall_oven`. Формулы и правила конструкции — в `workshop/construction.yaml`. Ручные эталоны находятся в `tests/golden/`; добавленные правила помечены как мок и требуют проверки мастера.
 
 ## Разработка
 

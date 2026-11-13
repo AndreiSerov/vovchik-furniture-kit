@@ -324,6 +324,18 @@ class Tandembox(Section):
 Steps = list[tuple[Num, Int]]
 
 
+class TallRules(Section):
+    oven: str = _f("духовка")
+    microwave: str = _f("свч")
+    drawer_facade_height: Int = _f("высота_фасада_ящика")
+    top_shelf_height: FormulaField = _f("высота_верхней_полки")
+
+    @model_validator(mode="after")
+    def _formula_vars(self) -> "TallRules":
+        _check_formula_vars([("высота_верхней_полки", self.top_shelf_height)], {"Z", "H"})
+        return self
+
+
 class UpperRules(Section):
     hanger: str = _f("навес")
     hangers: Int = _f("навесов")
@@ -333,6 +345,19 @@ class UpperRules(Section):
     hood: str = _f("вытяжка")
     hood_rail_min: Int = _f("мин_глубина_планки")
     hood_bottom: Literal["передняя планка, открытый проём сзади"] = _f("дно_вытяжки")
+
+
+class CornerRules(Section):
+    lower_offset: Int = _f("смещение_нижнего")
+    upper_offset: Int = _f("смещение_верхнего")
+    wall_tolerance: Int = _f("допуск_стены")
+    base_facade_width: Int = _f("ширина_фасада_нижнего")
+    upper_filler_width: Int = _f("ширина_заглушки_верхнего")
+    upper_depth: Int = _f("глубина_верхнего")
+    carousel: str = _f("карусель")
+    filler_screws: Int = _f("саморезов_заглушки")
+    filler_material: str = _f("материал_заглушки")
+    filler_edges: StrictBool = _f("кромить_заглушку")
 
 
 class Construction(Section):
@@ -356,7 +381,9 @@ class Construction(Section):
     sink: SinkRules = _f("мойка")
     bottle: BottleRules = _f("бутылочница")
     drawers: DrawerRules = _f("ящики")
+    tall_rules: TallRules = _f("правила_пенала")
     upper_rules: UpperRules = _f("верхние_модули")
+    corner_rules: CornerRules = _f("угловые_модули")
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
 

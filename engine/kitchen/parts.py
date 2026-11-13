@@ -189,7 +189,13 @@ def _whole(value: Num, what: str) -> int:
 
 
 def _module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
-    base = ws.construction.lower if row_kind == "lower" else ws.construction.upper
+    base = (
+        ws.construction.tall
+        if module.template == "tall_oven"
+        else ws.construction.lower
+        if row_kind == "lower"
+        else ws.construction.upper
+    )
     return ModuleDims(
         width=_whole(module.width, f"Ширина модуля {module.label}"),
         height=(
@@ -627,6 +633,7 @@ def build_wall_door(
     no_shelf: bool = False,
     no_bottom: bool = False,
     lift: bool = False,
+    no_doors: bool = False,
 ) -> TemplateOut:
     c = ws.construction
     t = c.case_thickness
@@ -650,6 +657,7 @@ def build_wall_door(
         upper_materials,
         upper_ws,
         no_shelf=no_shelf,
+        no_doors=no_doors,
         single_door=lift,
         no_hinges=lift,
         upper_carcass=True,
@@ -753,8 +761,100 @@ def build_wall_hood(
     return out
 
 
+def _build_corner(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop, *, upper: bool
+) -> TemplateOut:
+    """Прямой угловой корпус с одной дверью и неподвижной заглушкой."""
+    c = ws.construction
+    rules = c.corner_rules
+    gap = c.facades.gap
+    facade_width = dims.width - 3 * gap - rules.upper_filler_width if upper else rules.base_facade_width
+    filler_width = dims.width - 3 * gap - facade_width
+    if (
+        min(facade_width, filler_width, dims.height - 2 * gap) <= 0
+        or dims.width <= 2 * c.case_thickness
+        or dims.depth <= c.case_thickness
+        or dims.height <= 2 * c.case_thickness
+        or (not upper and dims.depth < c.lower.rail_width)
+    ):
+        raise OrderError(f"Модуль {module.label}: габариты не позволяют разместить заглушку и фасад.")
+    if upper:
+        out = build_wall_door(
+            module.model_copy(update={"shelves": 1}), dims, materials, ws, no_shelf=False, no_doors=True
+        )
+    else:
+        out = build_base_door(
+            module.model_copy(update={"shelves": 1}), dims, materials, ws, no_shelf=True, no_doors=True
+        )
+    if upper:
+        facade_h = _calc(module, dims, "высота фасада", c.facades.height_upper, H=dims.height, W=dims.width)
+    else:
+        facade_h = _calc(module, dims, "высота фасада", c.facades.height_lower, H=dims.height, W=dims.width)
+        out.hardware[rules.carousel] += 1
+    body = _material(ws.materials.sheets, rules.filler_material, "Материал заглушки", "листовые")
+    facade_id = materials.facades_upper if upper else materials.facades_lower
+    facade = _material(ws.materials.facades, facade_id, "Материал фасадов", "фасады")
+    out.parts.append(
+        make_part(
+            pid=f"{module.label}-загл",
+            module_label=module.label,
+            name="заглушка",
+            a=Span(facade_h, "z"),
+            b=Span(filler_width, "x"),
+            thickness=_required_thickness(body, "заглушки"),
+            material_id=body.id,
+            textured=bool(body.texture),
+            at=Position(x=gap, y=dims.depth, z=gap),
+            edges=dict.fromkeys(EDGE_SIDES, _edge_id(ws, body.id)) if rules.filler_edges else None,
+        )
+    )
+    out.parts.append(
+        make_part(
+            pid=f"{module.label}-фасад",
+            module_label=module.label,
+            name="фасад",
+            a=Span(facade_h, "z"),
+            b=Span(facade_width, "x"),
+            thickness=_required_thickness(facade, "фасадов"),
+            material_id=facade.id,
+            textured=False,
+            at=Position(x=2 * gap + filler_width, y=dims.depth, z=gap),
+            area=True,
+        )
+    )
+    hinges = steps_pick(c.hinges_by_facade_height, facade_h, "петли_по_высоте_фасада")
+    out.hardware[c.furniture.hinges] += hinges
+    out.hardware[c.furniture.plates] += hinges * c.plates.per_unit
+    out.hardware[c.furniture.screws] += hinges * c.screws_3_5x16.per_hinge + rules.filler_screws
+    out.hardware[materials.handles] += c.handles.per_unit
+    return out
+
+
+def build_base_corner(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+) -> TemplateOut:
+    return _build_corner(module, dims, materials, ws, upper=False)
+
+
+def build_wall_corner(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+) -> TemplateOut:
+    return _build_corner(module, dims, materials, ws, upper=True)
+
+
+def build_tall_oven(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+) -> TemplateOut:
+    from kitchen.tall import build_tall_oven as build
+
+    return build(module, dims, materials, ws, [])
+
+
 TEMPLATES = {
+    "tall_oven": Template(build_tall_oven, "tall"),
     "base_door": Template(build_base_door, "lower"),
+    "base_corner": Template(build_base_corner, "lower"),
+    "wall_corner": Template(build_wall_corner, "upper"),
     "wall_door": Template(build_wall_door, "upper"),
     "wall_lift": Template(build_wall_lift, "upper"),
     "wall_hood": Template(build_wall_hood, "upper"),
@@ -827,7 +927,7 @@ def _build_module(
         raise OrderError(
             f"Модуль {module.label}: неизвестный шаблон «{module.template}» (известные: {known})."
         )
-    if template.row_kind != row.kind:
+    if template.row_kind != "tall" and template.row_kind != row.kind:
         raise OrderError(
             f"Модуль {module.label}: шаблон {module.template} применяется в "
             f"{_ROW_RU[template.row_kind]}, а он в ряде «{row.kind}»."
@@ -867,7 +967,46 @@ def _build_module(
             raise OrderError(f"Модуль {module.label}: неподдерживаемое наполнение.")
         if module.without_back or module.corner or "shelves" in module.model_fields_set:
             raise OrderError(f"Модуль {module.label}: неподдерживаемые параметры.")
+    contents = module.contents
+    if module.template in ("base_corner", "wall_corner") and (
+        module.without_back
+        or "shelves" in module.model_fields_set
+        or (
+            contents
+            and (
+                contents.doors is not None
+                or contents.shelves is not None
+                or contents.drawers is not None
+                or contents.lift
+                or contents.inserts
+                not in (
+                    [],
+                    [ws.construction.corner_rules.carousel] if module.template == "base_corner" else [],
+                )
+            )
+        )
+    ):
+        raise OrderError(f"Модуль {module.label}: неподдерживаемое наполнение.")
+    if module.template == "tall_oven" and (
+        module.without_back
+        or module.corner
+        or "shelves" in module.model_fields_set
+        or (
+            contents
+            and (
+                contents.doors not in (None, 1)
+                or contents.shelves not in (None, 1)
+                or contents.drawers not in (None, 1)
+                or contents.lift
+                or contents.inserts
+            )
+        )
+    ):
+        raise OrderError(f"Модуль {module.label}: неподдерживаемое наполнение.")
     if module.template not in (
+        "tall_oven",
+        "base_corner",
+        "wall_corner",
         "base_sink",
         "base_bottle",
         "base_drawers",
@@ -883,13 +1022,23 @@ def _build_module(
         if override is not None:
             for key, value in override.model_dump(exclude_none=True).items():
                 if key == "facades":
-                    values["facades_lower" if row.kind == "lower" else "facades_upper"] = value
+                    values[
+                        "facades_lower"
+                        if row.kind == "lower" or module.template == "tall_oven"
+                        else "facades_upper"
+                    ] = value
                 elif key == "facade_color":
                     raise OrderError(f"Модуль {module.label}: цвет фасада ещё не поддерживается расчётом.")
                 else:
                     values[key] = value
     dims = _module_dims(module, row.kind, ws)
+    if module.template == "wall_corner" and module.depth is None:
+        dims.depth = ws.construction.corner_rules.upper_depth
     resolved_materials = ProjectMaterials.model_validate(values)
+    if module.template == "tall_oven":
+        from kitchen.tall import build_tall_oven as build
+
+        return build(module, dims, resolved_materials, ws, appliances)
     if module.template == "wall_hood":
         matching = [item for item in appliances if item.module == module.label and item.type == "hood"]
         if len(matching) > 1:
