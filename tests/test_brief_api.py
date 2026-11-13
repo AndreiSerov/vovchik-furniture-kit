@@ -85,13 +85,25 @@ def test_surname_match_is_exact_slug_not_substring_or_client_name(home, tmp_path
 
 
 @pytest.mark.parametrize(
-    "bad", ["2026-47-ivanov", "2026-0477-x", "petrov 2026-047", "2026-047-", "47", "2026/047"]
+    "bad",
+    [
+        "2026-47-ivanov",
+        "2026-0477-x",
+        "petrov 2026-047",
+        "2026-047-",
+        "47",
+        "2026/047",
+        "2026-047-petrov2",
+        "2026-047-2026-47-ivanov",
+    ],
 )
 def test_malformed_order_id_is_not_taken_for_a_surname(home, tmp_path, bad):
     with pytest.raises(OrderError, match="похоже на номер заказа, ожидалось ГГГГ-NNN-фамилия"):
         api.brief_save(bad, _brief(tmp_path))
     with pytest.raises(OrderError, match="похоже на номер заказа"):
         api.order_show(bad)  # тот же разбор запроса, что и в поиске заказа
+    with pytest.raises(OrderError, match="похоже на номер заказа"):
+        api.order_new(bad) if store.ID_RE.match(bad) else api.order_show(bad)
     api.order_new("2026-001-first")
     assert api.order_show("first").order.number == "2026-001"  # ничего лишнего не создано
 
@@ -262,3 +274,9 @@ def test_unknown_rounding_phrase_is_russian_load_error(home, phrase):
 def test_quick_estimate_needs_positive_meters(home, meters):
     with pytest.raises(KitchenError, match="больше нуля"):
         api.quick_estimate(meters)
+
+
+def test_exhausted_year_does_not_mask_duplicate_surname_error(home, tmp_path):
+    api.order_new("2026-999-sergeev")
+    with pytest.raises(OrderError, match="уже есть: 2026-999-sergeev"):
+        api.brief_save("sergeev", _brief(tmp_path))

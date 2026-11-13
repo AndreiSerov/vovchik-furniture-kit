@@ -519,16 +519,20 @@ def _resolve_for_brief(conn: sqlite3.Connection, query: str, client: str) -> tup
             return store.find_order(conn, query), False
         return _insert_order(conn, parsed.number, parsed.slug, client, "", ""), True
     same = conn.execute("SELECT * FROM orders WHERE slug = ? ORDER BY number", (parsed.slug,)).fetchall()
-    number = _next_number(conn)
     if same:
         listing = ", ".join(store.order_ref_of(r) for r in same)
-        raise OrderError(
-            [
-                f"Заказ с фамилией «{parsed.slug}» уже есть: {listing}.",
-                "Чтобы обновить его бриф: kitchen brief save <номер-фамилия из списка> brief.json.",
-                f"Чтобы завести новый: kitchen brief save {number}-{parsed.slug} brief.json.",
-            ]
-        )
+        problems = [
+            f"Заказ с фамилией «{parsed.slug}» уже есть: {listing}.",
+            "Чтобы обновить его бриф: kitchen brief save <номер-фамилия из списка> brief.json.",
+        ]
+        try:  # подсказка не должна заслонять главную ошибку
+            problems.append(
+                f"Чтобы завести новый: kitchen brief save {_next_number(conn)}-{parsed.slug} brief.json."
+            )
+        except OrderError:
+            pass
+        raise OrderError(problems)
+    number = _next_number(conn)
     return _insert_order(conn, number, parsed.slug, client, "", ""), True
 
 

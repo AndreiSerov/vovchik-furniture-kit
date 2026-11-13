@@ -182,6 +182,10 @@ def parse_order_id(text: str) -> tuple[str, str]:
     slug = slugify(m.group(2)) if m else ""
     if not m or not slug:
         raise OrderError(f"«{text}» — не номер заказа. Ожидалось ГГГГ-NNN-фамилия, например 2026-047-petrov.")
+    if any(c.isdigit() for c in slug):  # фамилия без цифр, как и в поиске
+        raise OrderError(
+            f"«{text}» похоже на номер заказа, ожидалось ГГГГ-NNN-фамилия, например 2026-047-petrov."
+        )
     return m.group(1), slug
 
 
