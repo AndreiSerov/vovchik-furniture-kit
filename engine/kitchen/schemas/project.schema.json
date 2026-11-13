@@ -1,0 +1,495 @@
+{
+  "$defs": {
+    "Appliance": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "width": {
+          "title": "Width",
+          "type": "number"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height"
+        },
+        "depth": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth"
+        },
+        "module": {
+          "title": "Module",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "width",
+        "module"
+      ],
+      "title": "Appliance",
+      "type": "object"
+    },
+    "Contents": {
+      "additionalProperties": false,
+      "properties": {
+        "doors": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Doors"
+        },
+        "shelves": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Shelves"
+        },
+        "drawers": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Drawers"
+        },
+        "inserts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Inserts",
+          "type": "array"
+        },
+        "lift": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lift"
+        }
+      },
+      "title": "Contents",
+      "type": "object"
+    },
+    "Corner": {
+      "additionalProperties": false,
+      "properties": {
+        "adjacent_wall": {
+          "title": "Adjacent Wall",
+          "type": "string"
+        },
+        "offset": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Offset"
+        }
+      },
+      "required": [
+        "adjacent_wall"
+      ],
+      "title": "Corner",
+      "type": "object"
+    },
+    "MaterialOverrides": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Body"
+        },
+        "facades": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Facades"
+        },
+        "facade_color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Facade Color"
+        },
+        "handles": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Handles"
+        },
+        "countertop": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Countertop"
+        }
+      },
+      "title": "MaterialOverrides",
+      "type": "object"
+    },
+    "ModuleSpec": {
+      "additionalProperties": false,
+      "description": "Модуль ряда; пенал указывается в одном ряду и занимает оба.",
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "template": {
+          "title": "Template",
+          "type": "string"
+        },
+        "width": {
+          "title": "Width",
+          "type": "number"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height"
+        },
+        "depth": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth"
+        },
+        "shelves": {
+          "default": 1,
+          "title": "Shelves",
+          "type": "integer"
+        },
+        "materials": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MaterialOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "contents": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Contents"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "without_back": {
+          "default": false,
+          "title": "Without Back",
+          "type": "boolean"
+        },
+        "corner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Corner"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "label",
+        "template",
+        "width"
+      ],
+      "title": "ModuleSpec",
+      "type": "object"
+    },
+    "ProjectMaterials": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "facades_lower": {
+          "title": "Facades Lower",
+          "type": "string"
+        },
+        "facades_upper": {
+          "title": "Facades Upper",
+          "type": "string"
+        },
+        "handles": {
+          "title": "Handles",
+          "type": "string"
+        },
+        "countertop": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Countertop"
+        },
+        "facades_lower_color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Facades Lower Color"
+        },
+        "facades_upper_color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Facades Upper Color"
+        }
+      },
+      "required": [
+        "body",
+        "facades_lower",
+        "facades_upper",
+        "handles"
+      ],
+      "title": "ProjectMaterials",
+      "type": "object"
+    },
+    "Row": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "lower",
+            "upper"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleSpec"
+          },
+          "title": "Modules",
+          "type": "array"
+        },
+        "materials": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MaterialOverrides"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "Row",
+      "type": "object"
+    },
+    "Wall": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "length": {
+          "title": "Length",
+          "type": "number"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/Row"
+          },
+          "title": "Rows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "label",
+        "length"
+      ],
+      "title": "Wall",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "order": {
+      "title": "Order",
+      "type": "string"
+    },
+    "version": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Version"
+    },
+    "ceiling_height": {
+      "title": "Ceiling Height",
+      "type": "number"
+    },
+    "walls": {
+      "items": {
+        "$ref": "#/$defs/Wall"
+      },
+      "title": "Walls",
+      "type": "array"
+    },
+    "materials": {
+      "$ref": "#/$defs/ProjectMaterials"
+    },
+    "led": {
+      "default": false,
+      "title": "Led",
+      "type": "boolean"
+    },
+    "appliances": {
+      "items": {
+        "$ref": "#/$defs/Appliance"
+      },
+      "title": "Appliances",
+      "type": "array"
+    }
+  },
+  "required": [
+    "order",
+    "ceiling_height",
+    "walls",
+    "materials"
+  ],
+  "title": "Project",
+  "type": "object"
+}

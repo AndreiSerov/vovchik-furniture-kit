@@ -153,6 +153,28 @@ def export(
     emit(result, lambda r: f"Заказ {r.order}: версия {r.version} проекта записана в {r.path}.", json)
 
 
+@app.command("diff")
+def diff(
+    order: OrderArg,
+    from_version: Annotated[str, typer.Argument(help="Исходная версия, например v1.")],
+    to_version: Annotated[str, typer.Argument(help="Новая версия, например v2.")],
+    json: JsonOpt = False,
+) -> None:
+    """Показать изменения модулей между версиями проекта."""
+
+    def version(value: str) -> int:
+        number = value.removeprefix("v")
+        if not number.isascii() or not number.isdigit() or int(number) < 1:
+            raise typer.BadParameter("Ожидается номер версии: v1, v2, …")
+        return int(number)
+
+    try:
+        result = api.diff_project(order, version(from_version), version(to_version))
+    except KitchenError as e:
+        fail(e)
+    emit(result, lambda r: "\n".join(r.changes) if r.changes else "Изменений модулей нет.", json)
+
+
 @app.command("log")
 def log(
     order: OrderArg,

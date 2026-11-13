@@ -502,5 +502,19 @@ def _build_module(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws:
             f"Модуль {module.label}: шаблон {module.template} применяется в "
             f"{_ROW_RU[template.row_kind]}, а он в ряде «{row.kind}»."
         )
+    if module.contents is not None or module.without_back or module.corner is not None:
+        raise OrderError(
+            f"Модуль {module.label}: наполнение или параметры модуля ещё не поддерживаются расчётом."
+        )
+    values = materials.model_dump()
+    for override in (row.materials, module.materials):
+        if override is not None:
+            for key, value in override.model_dump(exclude_none=True).items():
+                if key == "facades":
+                    values["facades_lower" if row.kind == "lower" else "facades_upper"] = value
+                elif key == "facade_color":
+                    raise OrderError(f"Модуль {module.label}: цвет фасада ещё не поддерживается расчётом.")
+                else:
+                    values[key] = value
     dims = _module_dims(module, row.kind, ws)
-    return template.build(module, dims, materials, ws)
+    return template.build(module, dims, ProjectMaterials.model_validate(values), ws)

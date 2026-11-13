@@ -66,7 +66,18 @@ def _api_json(result) -> dict:
 
 def _project_file(tmp_path, **extra):
     p = tmp_path / "project.json"
-    p.write_text(json.dumps({"order": "2026-047", **extra}), encoding="utf-8")
+    p.write_text(
+        json.dumps(
+            {
+                "order": "2026-047",
+                "ceiling_height": 2700,
+                "walls": [],
+                "materials": {"body": "a", "facades_lower": "b", "facades_upper": "c", "handles": "d"},
+                **extra,
+            }
+        ),
+        encoding="utf-8",
+    )
     return p
 
 

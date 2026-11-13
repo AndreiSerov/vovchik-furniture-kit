@@ -25,6 +25,7 @@ from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 __all__ = [
     "BriefSaveResult",
     "BriefShowResult",
+    "DiffResult",
     "EdgeTotals",
     "ExportResult",
     "FileSummary",
@@ -43,6 +44,7 @@ __all__ = [
     "brief_save",
     "brief_show",
     "check_workshop",
+    "diff_project",
     "export_project",
     "import_project",
     "load_workshop",
@@ -279,11 +281,7 @@ def _same_order(value: Any, ctx: ValidationContext) -> bool:
 
 
 def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
-    """Минимальная обёртка проекта до этапа 1: объект с полем `order` — номер заказа или `номер-фамилия`.
-
-    Шов для замены: тикет 06 подставит полную схему, тикет 10 — проверки правил (с мастерской из
-    контекста и предупреждениями).
-    """
+    """Проверить заказ и схему проекта; проверки конструкции добавит тикет 10."""
     if not isinstance(data, dict):
         return ValidationResult(["Проект должен быть JSON-объектом ({...}), а не списком или значением."])
     if "order" not in data:
@@ -291,6 +289,17 @@ def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
     value = data["order"]
     if not _same_order(value, ctx):
         return ValidationResult([f"Поле «order» = «{value}» не совпадает с заказом {ctx.order_ref}."])
+    try:
+        project = parse_project({k: v for k, v in data.items() if k != "version"})
+    except OrderError as e:
+        return ValidationResult(errors=e.problems)
+    seen = set()
+    for wall in project.walls:
+        for row in wall.rows:
+            for module in row.modules:
+                if module.label in seen:
+                    return ValidationResult(errors=[f"Метка модуля «{module.label}» не уникальна."])
+                seen.add(module.label)
     return ValidationResult()
 
 
@@ -394,6 +403,112 @@ def export_project(
         )
         return ExportResult(
             order=o.ref, version=found["version"], path=str(target), project=project, **_mock(o.home)
+        )
+
+
+class DiffResult(Result):
+    order: str
+    from_version: int
+    to_version: int
+    changes: list[str]
+
+
+def _modules(data: dict) -> dict[str, tuple[dict, str, str, int]]:
+    modules = {}
+    for wall in data.get("walls", []):
+        for row in wall.get("rows", []):
+            for index, module in enumerate(row.get("modules", [])):
+                modules[module["label"]] = (module, wall["label"], row["kind"], index)
+    return modules
+
+
+_DIFF_NAMES = {
+    "template": "шаблон",
+    "width": "ширина",
+    "height": "высота",
+    "depth": "глубина",
+    "shelves": "полки",
+    "doors": "двери",
+    "drawers": "ящики",
+    "materials": "материалы",
+    "body": "корпус",
+    "facades": "фасады",
+    "facade_color": "цвет фасада",
+    "handles": "ручки",
+    "countertop": "столешница",
+    "contents": "наполнение",
+    "inserts": "вставки",
+    "lift": "подъёмник",
+    "without_back": "без задней стенки",
+    "corner": "угол",
+    "adjacent_wall": "соседняя стена",
+    "offset": "угловое смещение",
+}
+
+
+def _value(value: Any) -> str:
+    if value is None:
+        return "не задано"
+    if isinstance(value, bool):
+        return "да" if value else "нет"
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
+def _changes(before: dict, after: dict, prefix: str = "") -> list[str]:
+    changes = []
+    for key in sorted(before.keys() | after.keys()):
+        if key == "label":
+            continue
+        left, right = before.get(key), after.get(key)
+        if left == right:
+            continue
+        name = f"{prefix}{_DIFF_NAMES.get(key, key)}"
+        if isinstance(left, dict) and isinstance(right, dict):
+            changes.extend(_changes(left, right, name + ": "))
+        else:
+            changes.append(f"{name} {_value(left)} → {_value(right)}")
+    return changes
+
+
+def diff_project(order: str, from_version: int, to_version: int, home: Path | None = None) -> DiffResult:
+    """Сравнить сохранённые версии проекта по меткам модулей."""
+    with _open_order(order, home) as o:
+        projects = []
+        for version in (from_version, to_version):
+            row = o.conn.execute(
+                "SELECT data FROM project_versions WHERE order_id = ? AND version = ?", (o.pk, version)
+            ).fetchone()
+            if not row:
+                raise OrderError(f"У заказа {o.ref} нет версии {version} проекта.")
+            data = json.loads(row["data"])
+            try:
+                parse_project(data)
+            except OrderError as e:
+                raise OrderError(
+                    [f"Версия {version} не соответствует текущей схеме проекта.", *e.problems]
+                ) from e
+            projects.append(data)
+        before, after = map(_modules, projects)
+        changes = []
+        for label in sorted(before.keys() | after.keys()):
+            if label not in before:
+                changes.append(f"{label}: добавлен модуль")
+            elif label not in after:
+                changes.append(f"{label}: удалён модуль")
+            else:
+                old, old_wall, old_row, old_pos = before[label]
+                new, new_wall, new_row, new_pos = after[label]
+                changes.extend(f"{label}: {line}" for line in _changes(old, new))
+                if (old_wall, old_row, old_pos) != (new_wall, new_row, new_pos):
+                    rows = {"lower": "нижний", "upper": "верхний"}
+                    changes.append(
+                        f"{label}: положение {old_wall}, {rows[old_row]}, {old_pos + 1} → "
+                        f"{new_wall}, {rows[new_row]}, {new_pos + 1}"
+                    )
+        return DiffResult(
+            order=o.ref, from_version=from_version, to_version=to_version, changes=changes, **_mock(o.home)
         )
 
 

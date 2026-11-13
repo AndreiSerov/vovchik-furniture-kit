@@ -28,6 +28,7 @@ kitchen order new 2026-047-petrov --client "Петров П. П." --phone ... --
 kitchen order show petrov                # найти заказ, показать карточку
 kitchen import petrov project.json       # новая версия, только если проект изменился
 kitchen export petrov [--version N] [--out файл]   # project.json с номером версии
+kitchen diff petrov v1 v2               # изменения модулей между версиями
 kitchen log petrov --kind done|decision|next|note "текст"
 kitchen status petrov                    # печатает и пишет orders/<заказ>/status.md (руками не править)
 ```
@@ -68,3 +69,10 @@ scripts/check           # ruff + pytest
 ```sh
 python3 skills/kitchen-brief/scripts/check_brief.py brief.json
 ```
+
+Схема файла проекта — `engine/kitchen/schemas/project.schema.json`. Импорт проверяет её;
+номер `version` из файла игнорируется, при экспорте его ставит движок. Пенал задаётся
+один раз в ряду своей стены. Для ряда и модуля можно указать `materials` с полями
+`body`, `facades`, `handles`, `countertop`: значения модуля перекрывают ряд, ряд — проект.
+Наполнение (`contents`), параметры угла и флаг `without_back` сохраняются при импорте;
+расчёт `base_door` пока явно отказывает при таких параметрах.

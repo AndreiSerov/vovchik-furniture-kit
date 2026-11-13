@@ -1,9 +1,6 @@
-"""Схема проекта: стены, ряды, модули, материалы по умолчанию.
+"""Схема project.json: стены, ряды, модули, материалы и техника.
 
-Минимум тикета 05 — ровно столько, сколько нужно проекту из одного модуля
-`base_door`; полная схема (техника, наполнение, пенал в обоих рядах, угловые
-модули, переопределения материалов) — тикет 06. Ключи `project.json` — английские
-(GLOSSARY.md), поэтому алиасы не нужны, а «неизвестный ключ» ловится `extra="forbid"`.
+Ключи английские (GLOSSARY.md); неизвестные ключи отклоняются.
 """
 
 from typing import Literal
@@ -21,46 +18,81 @@ class Section(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class MaterialOverrides(Section):
+    body: str | None = None
+    facades: str | None = None
+    facade_color: str | None = None
+    handles: str | None = None
+    countertop: str | None = None
+
+
+class Contents(Section):
+    doors: StrictInt | None = Field(default=None, ge=0)
+    shelves: StrictInt | None = Field(default=None, ge=0)
+    drawers: StrictInt | None = Field(default=None, ge=0)
+    inserts: list[str] = Field(default_factory=list)
+    lift: str | None = None
+
+
+class Corner(Section):
+    adjacent_wall: str
+    offset: Num | None = None
+
+
 class ModuleSpec(Section):
-    """Модуль ряда: метка, шаблон, ширина; высота и глубина — по ряду, если не заданы."""
+    """Модуль ряда; пенал указывается в одном ряду и занимает оба."""
 
     label: str
     template: str
     width: Num
-    height: Num | None = Field(default=None)
-    depth: Num | None = Field(default=None)
-    shelves: StrictInt = 1  # наполнение: несколько полок придёт с полной схемой (тикет 06)
+    height: Num | None = None
+    depth: Num | None = None
+    shelves: StrictInt = 1  # совместимость с проектами тикета 05
+    materials: MaterialOverrides | None = None
+    contents: Contents | None = None
+    without_back: bool = False
+    corner: Corner | None = None
 
 
 class Row(Section):
-    """Ряд модулей на стене, по порядку от начала стены."""
-
     kind: Literal["lower", "upper"]
     modules: list[ModuleSpec] = Field(default_factory=list)
+    materials: MaterialOverrides | None = None
 
 
 class Wall(Section):
-    """Стена помещения с меткой (`A`, `Б`)."""
-
     label: str
     length: Num
     rows: list[Row] = Field(default_factory=list)
 
 
 class ProjectMaterials(Section):
-    """Материалы по умолчанию на весь проект (id из materials.yaml и hardware.yaml)."""
-
     body: str
     facades_lower: str
     facades_upper: str
     handles: str
+    countertop: str | None = None
+    facades_lower_color: str | None = None
+    facades_upper_color: str | None = None
+
+
+class Appliance(Section):
+    type: str
+    width: Num
+    model: str | None = None
+    height: Num | None = None
+    depth: Num | None = None
+    module: str
 
 
 class Project(Section):
     order: str
+    version: StrictInt | None = Field(default=None, ge=1)
     ceiling_height: Num
     walls: list[Wall]
     materials: ProjectMaterials
+    led: bool = False
+    appliances: list[Appliance] = Field(default_factory=list)
 
 
 def parse_project(data: object) -> Project:
