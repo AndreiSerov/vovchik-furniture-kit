@@ -52,7 +52,7 @@ kitchen quick-estimate --meters 4.6             # вилка цены по prici
 kitchen parts --project project.json    # детали по модулям, фурнитура, кромка, фасады; без БД
 ```
 
-Расчёт поддерживает нижние шаблоны `base_door`, `base_sink`, `base_bottle`, `base_drawers` (три ящика) и `dishwasher_panel`. Формулы и правила конструкции — в `workshop/construction.yaml`. Ручные эталоны находятся в `tests/golden/`; добавленные правила помечены как мок и требуют проверки мастера.
+Расчёт поддерживает нижние шаблоны `base_door`, `base_sink`, `base_bottle`, `base_drawers` (три ящика) `dishwasher_panel`, а также верхние `wall_door`, `wall_lift`, `wall_hood`, `wall_dryer`. Формулы и правила конструкции — в `workshop/construction.yaml`. Ручные эталоны находятся в `tests/golden/`; добавленные правила помечены как мок и требуют проверки мастера.
 
 ## Разработка
 
@@ -76,3 +76,5 @@ python3 skills/kitchen-brief/scripts/check_brief.py brief.json
 `body`, `facades`, `handles`, `countertop`: значения модуля перекрывают ряд, ряд — проект.
 Наполнение (`contents`), параметры угла и флаг `without_back` сохраняются при импорте;
 расчёт `base_door` пока явно отказывает при таких параметрах. Для `base_sink` можно указать `without_back` и `contents.inserts`, для `base_bottle` — `contents.inserts`, для `base_drawers` — `contents.drawers: 3`. Несовместимые параметры отклоняются.
+
+Верхний модуль вытяжки использует нишу из `workshop/appliances.yaml`; вырез представляет открытый сзади проём с передней планкой. Условные размеры техники и правила требуют сверки мастером. Размер сушки задан в `construction.yaml`.

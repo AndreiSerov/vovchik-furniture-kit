@@ -2,7 +2,7 @@ import pytest
 from kitchen import api
 from kitchen.errors import WorkshopError
 
-ALL_FILES = {"equipment", "construction", "materials", "hardware", "labor", "pricing"}
+ALL_FILES = {"equipment", "construction", "materials", "hardware", "labor", "pricing", "appliances"}
 
 
 def test_valid_mock_workshop_loads(home):
@@ -94,7 +94,7 @@ def test_broken_yaml_syntax(home):
 def test_check_workshop_summary(home):
     r = api.check_workshop(home)
     assert r.valid is True and r.mock is True
-    assert len(r.mock_files) == 6
+    assert len(r.mock_files) == 7
     s = {f.file: f for f in r.files}
     assert s["materials.yaml"].counts == {"листовые": 3, "кромка": 2, "столешницы": 1, "фасады": 1}
     assert s["hardware.yaml"].counts == {"позиции": 19}
@@ -180,3 +180,37 @@ def test_root_needs_construction_yaml(tmp_path, monkeypatch):
 def test_wrong_type_error_shows_input_type(home):
     _break(home, "labor.yaml", "mock: true", 'mock: "true"')
     assert "«true» (строка) — ожидалось true или false" in _problems(home)
+
+
+def test_appliances_file_loads_with_dimensions_and_mock_flag(home):
+    w = api.load_workshop(home)
+    assert "appliances.yaml" in w.mock_files
+    items = {item.id: item for item in w.appliances.items}
+    assert set(items) == {"oven_60", "microwave", "dishwasher_45", "hood_60", "hob_60", "sink"}
+    hood = items["hood_60"]
+    assert (hood.type, hood.nominal_width, hood.width, hood.height, hood.depth) == (
+        "hood",
+        600,
+        560,
+        180,
+        280,
+    )
+    assert (hood.niche_width, hood.niche_height, hood.niche_depth) == (560, 180, 280)
+    summary = api.check_workshop(home)
+    assert next(f for f in summary.files if f.file == "appliances.yaml").counts == {"позиции": 6}
+
+
+def test_invalid_appliance_dimensions_report_file_and_key(home):
+    _break(home, "appliances.yaml", "ширина: 560", "ширина: ошибка")
+    text = _problems(home)
+    assert "appliances.yaml" in text and "ширина" in text and "ошибка" in text
+
+
+def test_appliances_mock_alone_marks_workshop_as_mock(home):
+    for p in (home / "workshop").glob("*.yaml"):
+        if p.name != "appliances.yaml":
+            p.write_text(
+                p.read_text(encoding="utf-8").replace("mock: true", "mock: false", 1), encoding="utf-8"
+            )
+    assert api.check_workshop(home).mock is True
+    assert api.load_workshop(home).mock_files == ["appliances.yaml"]

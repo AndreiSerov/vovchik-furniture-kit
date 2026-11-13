@@ -1,0 +1,213 @@
+{
+  "order": "2026-047-petrov",
+  "modules": [
+    {
+      "module": "В1",
+      "template": "wall_hood",
+      "parts": [
+        {
+          "id": "В1-бок-Л",
+          "module": "В1",
+          "name": "боковина",
+          "length": 720,
+          "width": 320,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "orientation": {
+            "length": "z",
+            "width": "y",
+            "thickness": "x"
+          }
+        },
+        {
+          "id": "В1-бок-П",
+          "module": "В1",
+          "name": "боковина",
+          "length": 720,
+          "width": 320,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 584,
+            "y": 0,
+            "z": 0
+          },
+          "orientation": {
+            "length": "z",
+            "width": "y",
+            "thickness": "x"
+          }
+        },
+        {
+          "id": "В1-крыш",
+          "module": "В1",
+          "name": "крыша",
+          "length": 568,
+          "width": 320,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 16,
+            "y": 0,
+            "z": 704
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        },
+        {
+          "id": "В1-зад",
+          "module": "В1",
+          "name": "задняя стенка",
+          "length": 716,
+          "width": 596,
+          "thickness": 3,
+          "material": "hdf_3_white",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 2,
+            "y": -3,
+            "z": 2
+          },
+          "orientation": {
+            "length": "z",
+            "width": "x",
+            "thickness": "y"
+          }
+        },
+        {
+          "id": "В1-фасад-Л",
+          "module": "В1",
+          "name": "фасад",
+          "length": 716,
+          "width": 297,
+          "thickness": 19,
+          "material": "mdf_enamel_matt",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 2,
+            "y": 320,
+            "z": 2
+          },
+          "orientation": {
+            "length": "z",
+            "width": "x",
+            "thickness": "y"
+          },
+          "area_m2": 0.212652
+        },
+        {
+          "id": "В1-фасад-П",
+          "module": "В1",
+          "name": "фасад",
+          "length": 716,
+          "width": 297,
+          "thickness": 19,
+          "material": "mdf_enamel_matt",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 301,
+            "y": 320,
+            "z": 2
+          },
+          "orientation": {
+            "length": "z",
+            "width": "x",
+            "thickness": "y"
+          },
+          "area_m2": 0.212652
+        },
+        {
+          "id": "В1-дно-выт-1",
+          "module": "В1",
+          "name": "деталь дна вытяжки",
+          "length": 568,
+          "width": 40,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 16,
+            "y": 280,
+            "z": 0
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        }
+      ]
+    }
+  ],
+  "hardware": {
+    "hinge_71B3550": 4,
+    "plate_173L6100": 4,
+    "hanger_camar807": 2,
+    "handle_profile": 2,
+    "confirmat_7x50": 6,
+    "confirmat_cap_white": 6,
+    "screw_3_5x16": 34
+  },
+  "edges": {
+    "edge_08_white": {
+      "clean_m": 2.576,
+      "with_allowance_m": 2.696,
+      "purchase_m": 3.0
+    }
+  },
+  "facade_area": 0.4253,
+  "warnings": []
+}

@@ -73,6 +73,7 @@ class WorkshopCheck(Result):
 _LIST_KEYS = {
     "materials.yaml": ["листовые", "кромка", "столешницы", "фасады"],
     "hardware.yaml": ["позиции"],
+    "appliances.yaml": ["позиции"],
     "labor.yaml": ["нормы_минут"],
 }
 

@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from kitchen.errors import WorkshopError
 from kitchen.models import (
+    Appliances,
     Construction,
     Equipment,
     Hardware,
@@ -26,6 +27,7 @@ FILES: tuple[str, ...] = (
     "hardware.yaml",
     "labor.yaml",
     "pricing.yaml",
+    "appliances.yaml",
 )
 
 NOT_FOUND = (
@@ -148,6 +150,20 @@ def _cross_refs(w: Workshop) -> list[str]:
             "листовых материалах materials.yaml",
         ),
         *(
+            (f"верхние_модули.{key}", ref, hw_ids, "позициях hardware.yaml")
+            for key, ref in (
+                ("навес", w.construction.upper_rules.hanger),
+                ("подъёмник", w.construction.upper_rules.lift),
+                ("сушка", w.construction.upper_rules.dryer),
+            )
+        ),
+        (
+            "верхние_модули.вытяжка",
+            w.construction.upper_rules.hood,
+            {item.id for item in w.appliances.items if item.type == "hood"},
+            "вытяжках appliances.yaml",
+        ),
+        *(
             (f"фурнитура.{key}", ref, hw_ids, "позициях hardware.yaml")
             for key, ref in (
                 ("петли", w.construction.furniture.hinges),
@@ -179,7 +195,7 @@ def _cross_refs(w: Workshop) -> list[str]:
     return probs
 
 
-M = TypeVar("M", Equipment, Construction, Materials, Hardware, Labor, Pricing)
+M = TypeVar("M", Equipment, Construction, Materials, Hardware, Labor, Pricing, Appliances)
 
 
 @dataclass
@@ -214,6 +230,7 @@ def load(home: Path) -> Loaded:
     hardware = parse("hardware.yaml", Hardware)
     labor = parse("labor.yaml", Labor)
     pricing = parse("pricing.yaml", Pricing)
+    appliances = parse("appliances.yaml", Appliances)
 
     # Файл, который не прочитался или не прошёл проверку, считаем моком, пока он явно не `mock: false`.
     mock_files = [
@@ -223,7 +240,16 @@ def load(home: Path) -> Loaded:
     ]
 
     workshop = None
-    if not problems and equipment and construction and materials and hardware and labor and pricing:
+    if (
+        not problems
+        and equipment
+        and construction
+        and materials
+        and hardware
+        and labor
+        and pricing
+        and appliances
+    ):
         workshop = Workshop(
             equipment=equipment,
             construction=construction,
@@ -231,6 +257,7 @@ def load(home: Path) -> Loaded:
             hardware=hardware,
             labor=labor,
             pricing=pricing,
+            appliances=appliances,
             mock_files=mock_files,
         )
         problems = _cross_refs(workshop)

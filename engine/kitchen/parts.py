@@ -271,6 +271,8 @@ def build_base_door(
     single_door: bool = False,
     no_shelf: bool = False,
     no_back: bool = False,
+    upper_carcass: bool = False,
+    no_bottom: bool = False,
 ) -> TemplateOut:
     """Нижний распашной: боковины на всю высоту, дно и 2 царги между боковинами,
     накладная задняя ХДФ, полки, двери по правилу ширины, петли и конфирматы по ступеням."""
@@ -310,20 +312,23 @@ def build_base_door(
             f"бок-{suffix}", "боковина", Span(H, "z"), Span(D, "y"), Position(x=x, y=0, z=0), c.edging.case
         )
 
-    # дно между боковинами
-    carcass("дно", "дно", Span(W - 2 * t, "x"), Span(D, "y"), Position(x=t, y=0, z=0), c.edging.case)
-
-    # 2 царги между боковинами у верха корпуса, плашмя: передняя (у фасада) и задняя
+    if not no_bottom:
+        carcass("дно", "дно", Span(W - 2 * t, "x"), Span(D, "y"), Position(x=t, y=0, z=0), c.edging.case)
     rail = c.lower.rail_width
-    for n, y in ((1, D - rail), (2, 0)):
+    if upper_carcass:
         carcass(
-            f"царга-{n}",
-            "царга",
-            Span(W - 2 * t, "x"),
-            Span(rail, "y"),
-            Position(x=t, y=y, z=H - t),
-            c.edging.rails,
+            "крыш", "крыша", Span(W - 2 * t, "x"), Span(D, "y"), Position(x=t, y=0, z=H - t), c.edging.case
         )
+    else:
+        for n, y in ((1, D - rail), (2, 0)):
+            carcass(
+                f"царга-{n}",
+                "царга",
+                Span(W - 2 * t, "x"),
+                Span(rail, "y"),
+                Position(x=t, y=y, z=H - t),
+                c.edging.rails,
+            )
 
     if not no_shelf:
         # полка с отступами от боковин и спереди
@@ -395,7 +400,7 @@ def build_base_door(
         hinges = steps_pick(c.hinges_by_facade_height, facade_h, "петли_по_высоте_фасада") * n_doors
         out.hardware[hw.hinges] += hinges
         out.hardware[hw.plates] += hinges * c.plates.per_unit
-    joints = [(D, 2)] + [(rail, 2)] * 2  # дно к обеим боковинам; каждая царга к обеим
+    joints = [(D, 2)] * (1 + int(not no_bottom)) if upper_carcass else [(D, 2)] + [(rail, 2)] * 2
     confirmats = sum(
         steps_pick(c.confirmats_by_joint_length, length, "конфирматы_по_длине_соединения") * count
         for length, count in joints
@@ -405,7 +410,8 @@ def build_base_door(
     if not no_shelf:
         out.hardware[hw.shelf_pins] += c.shelf.pins * module.shelves
     # ключи ножек «до_800»/«свыше_800» должны совпадать с порогом (DECISIONS, тикет 05)
-    out.hardware[hw.legs] += c.legs.up_to_800 if W <= c.legs.threshold else c.legs.over_800
+    if not upper_carcass:
+        out.hardware[hw.legs] += c.legs.up_to_800 if W <= c.legs.threshold else c.legs.over_800
     screws = c.screws_3_5x16.per_hinge * hinges
     if not no_back:
         perimeter = 2 * (back_h + back_w)
@@ -612,8 +618,105 @@ def build_base_drawers(
     return out
 
 
+def build_wall_door(
+    module: ModuleSpec,
+    dims: ModuleDims,
+    materials: ProjectMaterials,
+    ws: Workshop,
+    *,
+    no_shelf: bool = False,
+    no_bottom: bool = False,
+    lift: bool = False,
+) -> TemplateOut:
+    c = ws.construction
+    # Используем общую геометрию корпуса и фасадов, заменив царги крышей.
+    upper_facades = c.facades.model_copy(update={"height_lower": c.facades.height_upper})
+    upper_construction = c.model_copy(update={"facades": upper_facades})
+    upper_ws = ws.model_copy(update={"construction": upper_construction})
+    upper_materials = materials.model_copy(update={"facades_lower": materials.facades_upper})
+    out = build_base_door(
+        module,
+        dims,
+        upper_materials,
+        upper_ws,
+        no_shelf=no_shelf,
+        single_door=lift,
+        no_hinges=lift,
+        upper_carcass=True,
+        no_bottom=no_bottom,
+    )
+    out.hardware[c.upper_rules.hanger] += c.upper_rules.hangers
+    if lift:
+        out.hardware[c.upper_rules.lift] += 1
+    return out
+
+
+def build_wall_lift(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+) -> TemplateOut:
+    return build_wall_door(module, dims, materials, ws, lift=True)
+
+
+def build_wall_dryer(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+) -> TemplateOut:
+    if dims.width != ws.construction.upper_rules.dryer_width:
+        raise OrderError(
+            f"Модуль {module.label}: ширина сушки должна быть {ws.construction.upper_rules.dryer_width} мм."
+        )
+    out = build_wall_door(module, dims, materials, ws, no_shelf=True, no_bottom=True)
+    out.hardware[ws.construction.upper_rules.dryer] += 1
+    return out
+
+
+def build_wall_hood(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+) -> TemplateOut:
+    c = ws.construction
+    hood = next((item for item in ws.appliances.items if item.id == c.upper_rules.hood), None)
+    if hood is None or hood.type != "hood":
+        raise WorkshopError(f"appliances.yaml: вытяжка «{c.upper_rules.hood}» не найдена.")
+    t = c.case_thickness
+    opening_width = hood.niche_width
+    opening_depth = hood.niche_depth
+    free_width = dims.width - 2 * t - opening_width
+    front_depth = dims.depth - opening_depth
+    if front_depth < c.upper_rules.hood_rail_min:
+        raise OrderError(
+            f"Модуль {module.label}: глубина планки {front_depth} мм меньше допустимых {c.upper_rules.hood_rail_min} мм."
+        )
+    if free_width < 0 or hood.niche_height > dims.height - t:
+        raise OrderError(
+            f"Модуль {module.label}: ниша вытяжки {opening_width}×{opening_depth}×{hood.niche_height} не помещается в корпус."
+        )
+    out = build_wall_door(module, dims, materials, ws, no_shelf=True, no_bottom=True)
+    body = _material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
+    out.parts.append(
+        make_part(
+            pid=f"{module.label}-дно-выт-1",
+            module_label=module.label,
+            name="деталь дна вытяжки",
+            a=Span(dims.width - 2 * t, "x"),
+            b=Span(front_depth, "y"),
+            thickness=t,
+            material_id=body.id,
+            textured=bool(body.texture),
+            at=Position(x=t, y=opening_depth, z=0),
+            edges={c.edging.case.face: _edge_id(ws, body.id)},
+        )
+    )
+    added = 2 * steps_pick(c.confirmats_by_joint_length, front_depth, "конфирматы_по_длине_соединения")
+    out.hardware[c.furniture.confirmats] += added
+    out.hardware[c.furniture.caps] += added * c.caps.per_unit
+    return out
+
+
 TEMPLATES = {
     "base_door": Template(build_base_door, "lower"),
+    "wall_door": Template(build_wall_door, "upper"),
+    "wall_lift": Template(build_wall_lift, "upper"),
+    "wall_hood": Template(build_wall_hood, "upper"),
+    "wall_dryer": Template(build_wall_dryer, "upper"),
     "base_sink": Template(build_base_sink, "lower"),
     "base_bottle": Template(build_base_bottle, "lower"),
     "base_drawers": Template(build_base_drawers, "lower"),
@@ -704,7 +807,27 @@ def _build_module(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws:
             raise OrderError(
                 f"Модуль {module.label}: заданное наполнение или параметры не поддерживаются шаблоном."
             )
-    if module.template not in ("base_sink", "base_bottle", "base_drawers") and (
+    if module.template in ("wall_lift", "wall_dryer"):
+        contents = module.contents
+        if contents and (
+            contents.doors is not None
+            or contents.shelves is not None
+            or contents.drawers is not None
+            or (
+                contents.lift not in (None, ws.construction.upper_rules.lift)
+                if module.template == "wall_lift"
+                else contents.lift is not None
+            )
+            or (
+                contents.inserts not in ([], [ws.construction.upper_rules.dryer])
+                if module.template == "wall_dryer"
+                else bool(contents.inserts)
+            )
+        ):
+            raise OrderError(f"Модуль {module.label}: неподдерживаемое наполнение.")
+        if module.without_back or module.corner or "shelves" in module.model_fields_set:
+            raise OrderError(f"Модуль {module.label}: неподдерживаемые параметры.")
+    if module.template not in ("base_sink", "base_bottle", "base_drawers", "wall_lift", "wall_dryer") and (
         module.contents is not None or module.without_back or module.corner is not None
     ):
         raise OrderError(

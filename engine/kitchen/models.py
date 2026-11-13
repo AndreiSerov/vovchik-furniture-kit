@@ -236,6 +236,7 @@ class ThreeDrawers(Section):
 class Facades(Section):
     gap: Int = _f("зазор")
     height_lower: FormulaField = _f("высота_нижнего")
+    height_upper: FormulaField = _f("высота_верхнего")
     single_door_width: FormulaField = _f("одна_дверь_ширина")
     two_doors_if_wider_than: Num = _f("две_двери_если_ширина_больше")
     two_doors_width: FormulaField = _f("две_двери_ширина")
@@ -246,6 +247,7 @@ class Facades(Section):
         _check_formula_vars(
             [
                 ("высота_нижнего", self.height_lower),
+                ("высота_верхнего", self.height_upper),
                 ("одна_дверь_ширина", self.single_door_width),
                 ("две_двери_ширина", self.two_doors_width),
             ],
@@ -322,6 +324,17 @@ class Tandembox(Section):
 Steps = list[tuple[Num, Int]]
 
 
+class UpperRules(Section):
+    hanger: str = _f("навес")
+    hangers: Int = _f("навесов")
+    lift: str = _f("подъёмник")
+    dryer: str = _f("сушка")
+    dryer_width: Int = _f("ширина_сушки")
+    hood: str = _f("вытяжка")
+    hood_rail_min: Int = _f("мин_глубина_планки")
+    hood_bottom: Literal["передняя планка, открытый проём сзади"] = _f("дно_вытяжки")
+
+
 class Construction(Section):
     mock: StrictBool
     case_thickness: Int = _f("толщина_корпуса")
@@ -343,6 +356,7 @@ class Construction(Section):
     sink: SinkRules = _f("мойка")
     bottle: BottleRules = _f("бутылочница")
     drawers: DrawerRules = _f("ящики")
+    upper_rules: UpperRules = _f("верхние_модули")
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
 
@@ -500,6 +514,30 @@ class Pricing(Section):
     quick_estimate_per_m: tuple[Num, Num] = _f("быстрая_оценка_за_пог_м")
 
 
+class ApplianceItem(Section):
+    id: str
+    type: str = _f("тип")
+    nominal_width: Int = Field(alias="типоразмер", gt=0)
+    width: Int = Field(alias="ширина", gt=0)
+    height: Int = Field(alias="высота", gt=0)
+    depth: Int = Field(alias="глубина", gt=0)
+    niche_width: Int = Field(alias="ниша_ширина", gt=0)
+    niche_height: Int = Field(alias="ниша_высота", gt=0)
+    niche_depth: Int = Field(alias="ниша_глубина", gt=0)
+
+
+class Appliances(Section):
+    mock: StrictBool
+    items: list[ApplianceItem] = _f("позиции")
+
+    @model_validator(mode="after")
+    def unique_ids(self):
+        ids = [item.id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("id техники должны быть уникальны")
+        return self
+
+
 class Workshop(BaseModel):
     """Мастерская целиком. Заполняется загрузчиком, не из YAML напрямую."""
 
@@ -509,6 +547,7 @@ class Workshop(BaseModel):
     hardware: Hardware
     labor: Labor
     pricing: Pricing
+    appliances: Appliances
     mock_files: list[str]
 
     @property
