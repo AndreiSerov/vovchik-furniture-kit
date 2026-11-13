@@ -6,7 +6,7 @@
 
 - [x] 01 — Каркас и `check-workshop` (0.1, 0.2, 0.3) ([спека](docs/specs/stage-0-foundation.md))
 - [x] 02 — `scripts/link-skills` (0.1; `--hermes` — manual, не запускался) ([спека](docs/specs/stage-0-foundation.md))
-- [ ] 03 — Хранилище заказов (0.4) ([спека](docs/specs/stage-0-foundation.md))
+- [x] 03 — Хранилище заказов (0.4) ([спека](docs/specs/stage-0-foundation.md))
 - [ ] 04 — Бриф в БД и быстрая вилка (0.5) ([спека](docs/specs/stage-0-foundation.md))
 
 ## Этап 1. Модуль → детали

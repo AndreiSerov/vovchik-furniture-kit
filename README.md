@@ -19,6 +19,20 @@ kitchen check-workshop  # сводка по данным мастерской; -
 
 `KITCHEN_HOME` — папка, где лежит `workshop/`. Без неё `kitchen` ищет корень репозитория вверх от текущей папки. Пока в `workshop/` моки, любой вывод помечен «МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА»; что заменить — в `MOCKS.md`.
 
+## Заказы
+
+Заказы, версии проекта и журнал лежат в SQLite `$KITCHEN_HOME/orders/kitchen.db` (другой путь — `KITCHEN_DB`); папка `orders/` не в git. Заказ находится по номеру (`2026-047`), `номер-фамилия` или части фамилии, кириллицей или латиницей.
+
+```sh
+kitchen order new 2026-047-petrov --client "Петров П. П." --phone ... --address ...
+kitchen import petrov project.json       # новая версия, только если проект изменился
+kitchen export petrov [--version N] [--out файл]   # project.json с номером версии
+kitchen log petrov --kind done|decision|next|note "текст"
+kitchen status petrov                    # печатает и пишет orders/<заказ>/status.md (руками не править)
+```
+
+До этапа 1 импорт проверяет только обёртку: JSON-объект с полем `order`. Поле `version` в файле игнорируется.
+
 ## Разработка
 
 ```sh

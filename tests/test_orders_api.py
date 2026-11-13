@@ -1,0 +1,236 @@
+import json
+
+import pytest
+from kitchen import api
+from kitchen.errors import OrderError
+
+
+def _project(tmp_path, order="2026-047", name="project.json", **extra):
+    p = tmp_path / name
+    p.write_text(json.dumps({"order": order, "walls": [], **extra}, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+@pytest.fixture
+def order(home):
+    api.order_new("2026-047-petrov", client="Петров П. П.", phone="+7 900 000-00-00", address="Москва")
+    return "2026-047-petrov"
+
+
+# --- заказы и поиск ---------------------------------------------------------
+
+
+def test_order_new_creates_db_and_order(home):
+    r = api.order_new("2026-047-petrov", client="Петров П. П.")
+    assert r.created and r.order.id == "2026-047-petrov" and r.order.number == "2026-047"
+    assert (home / "orders" / "kitchen.db").is_file()
+    assert r.mock is True  # мастерская пока из моков
+
+
+def test_order_new_transliterates_cyrillic_surname(home):
+    assert api.order_new("2026-048-Щербаков").order.id == "2026-048-shcherbakov"
+
+
+def test_order_new_duplicate_number_rejected(order):
+    with pytest.raises(OrderError, match="2026-047"):
+        api.order_new("2026-047-ivanov")
+
+
+@pytest.mark.parametrize("bad", ["petrov", "2026-47-petrov", "2026-047-", "2026-047"])
+def test_order_new_bad_id(home, bad):
+    with pytest.raises(OrderError, match="ГГГГ-NNN-фамилия"):
+        api.order_new(bad)
+
+
+@pytest.mark.parametrize("q", ["2026-047", "2026-047-petrov", "2026-047-Петров", "petr", "Петров", "ТРО"])
+def test_lookup_finds_order(order, q):
+    assert api.order_show(q).order.id == "2026-047-petrov"
+
+
+def test_lookup_ambiguous_lists_candidates(order):
+    api.order_new("2026-048-petrenko")
+    with pytest.raises(OrderError) as e:
+        api.order_show("petr")
+    assert "2026-047-petrov" in e.value.problems[0] and "2026-048-petrenko" in e.value.problems[0]
+
+
+def test_lookup_not_found(order):
+    with pytest.raises(OrderError, match="не найден"):
+        api.order_show("sidorov")
+
+
+def test_kitchen_db_override(home, tmp_path, monkeypatch):
+    db = tmp_path / "elsewhere" / "my.db"
+    monkeypatch.setenv("KITCHEN_DB", str(db))
+    api.order_new("2026-047-petrov")
+    assert db.is_file() and not (home / "orders" / "kitchen.db").exists()
+
+
+def test_schema_version_stored_and_newer_db_rejected(home):
+    import sqlite3
+
+    api.order_new("2026-047-petrov")
+    db = home / "orders" / "kitchen.db"
+    conn = sqlite3.connect(db)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    conn.execute("PRAGMA user_version = 99")
+    conn.commit()
+    conn.close()
+    with pytest.raises(OrderError, match="новой версией"):
+        api.order_show("petrov")
+
+
+# --- импорт и экспорт -------------------------------------------------------
+
+
+def test_import_creates_v1(order, tmp_path):
+    r = api.import_project(order, _project(tmp_path))
+    assert r.changed and r.version == 1 and r.previous_version is None
+
+
+def test_reimport_same_is_unchanged(order, tmp_path):
+    api.import_project(order, _project(tmp_path))
+    r = api.import_project(order, _project(tmp_path))
+    assert not r.changed and r.version == 1
+
+
+def test_key_order_and_whitespace_do_not_make_a_version(order, tmp_path):
+    api.import_project(order, _project(tmp_path))
+    p = tmp_path / "other.json"
+    p.write_text('{ "walls": [],\n  "order": "2026-047" }', encoding="utf-8")
+    assert not api.import_project(order, p).changed
+
+
+def test_changed_project_is_v2(order, tmp_path):
+    api.import_project(order, _project(tmp_path))
+    r = api.import_project(order, _project(tmp_path, walls=[{"label": "А"}]))
+    assert r.changed and r.version == 2 and r.previous_version == 1
+
+
+def test_version_field_in_file_is_ignored(order, tmp_path):
+    r = api.import_project(order, _project(tmp_path, version=17))
+    assert r.version == 1
+    assert not api.import_project(order, _project(tmp_path, version=3)).changed
+
+
+def test_order_may_be_full_id(order, tmp_path):
+    assert api.import_project(order, _project(tmp_path, order="2026-047-petrov")).version == 1
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("{ не json", "не JSON"),
+        ("[1, 2]", "объект"),
+        ('{"walls": []}', "order"),
+        ('{"order": "2026-999"}', "2026-999"),
+    ],
+)
+def test_invalid_import_rejected_and_current_version_intact(order, tmp_path, content, message):
+    api.import_project(order, _project(tmp_path))
+    bad = tmp_path / "bad.json"
+    bad.write_text(content, encoding="utf-8")
+    with pytest.raises(OrderError) as e:
+        api.import_project(order, bad)
+    assert message in "\n".join(e.value.problems)
+    assert api.export_project(order).version == 1
+
+
+def test_import_missing_file(order, tmp_path):
+    with pytest.raises(OrderError, match="не найден"):
+        api.import_project(order, tmp_path / "nope.json")
+
+
+def test_validator_is_a_seam(order, tmp_path):
+    def strict(data, order_number):
+        return ["нужны стены"] if not data.get("walls") else []
+
+    with pytest.raises(OrderError, match="нужны стены"):
+        api.import_project(order, _project(tmp_path), validate=strict)
+
+
+def test_export_has_version_and_roundtrips_without_new_version(order, tmp_path):
+    api.import_project(order, _project(tmp_path))
+    out = tmp_path / "exported.json"
+    r = api.export_project(order, out=out)
+    assert json.loads(out.read_text(encoding="utf-8")) == {"order": "2026-047", "walls": [], "version": 1}
+    assert r.version == 1 and r.path == str(out)
+    assert not api.import_project(order, out).changed
+
+
+def test_export_default_path_and_specific_version(order, home, tmp_path):
+    api.import_project(order, _project(tmp_path))
+    api.import_project(order, _project(tmp_path, walls=[1]))
+    r = api.export_project(order, version=1)
+    assert r.version == 1 and r.project["walls"] == []
+    assert r.path == str(home / "orders" / "2026-047-petrov" / "project.json")
+    assert (home / "orders" / "2026-047-petrov" / "project.json").is_file()
+    assert api.export_project(order).version == 2
+
+
+def test_export_unknown_version_and_no_project(order, tmp_path):
+    with pytest.raises(OrderError, match="проекта ещё нет"):
+        api.export_project(order)
+    api.import_project(order, _project(tmp_path))
+    with pytest.raises(OrderError, match="версии 5"):
+        api.export_project(order, version=5)
+
+
+# --- журнал и статус --------------------------------------------------------
+
+
+def test_log_rejects_unknown_kind(order):
+    with pytest.raises(OrderError, match="done"):
+        api.log_add(order, "oops", "текст")
+
+
+def test_log_records_project_version(order, tmp_path):
+    assert api.log_add(order, "note", "до проекта").entry.project_version is None
+    api.import_project(order, _project(tmp_path))
+    assert api.log_add(order, "done", "после").entry.project_version == 1
+
+
+def test_status_has_all_sections_and_writes_file(order, home, tmp_path):
+    api.log_add(order, "decision", "фасады белые матовые")
+    api.log_add(order, "done", "замер сделан")
+    api.log_add(order, "next", "старое дело")
+    api.log_add(order, "next", "заказать фасады")
+    api.import_project(order, _project(tmp_path))
+    r = api.status(order)
+    text = (home / "orders" / "2026-047-petrov" / "status.md").read_text(encoding="utf-8")
+    assert r.path == str(home / "orders" / "2026-047-petrov" / "status.md")
+    assert "Сгенерировано" in text and "Не правьте" in text
+    for section in ("## Этап", "## Версия проекта", "## Решения клиента", "## Сделано", "## Дальше"):
+        assert section in text
+    assert "фасады белые матовые" in text and "замер сделан" in text and "заказать фасады" in text
+    assert "версия 1" in text.lower()
+    assert r.stage == "Проект" and r.project_version == 1
+    assert text.index("заказать фасады") < text.index("старое дело")  # свежее выше
+    import re
+
+    assert re.search(r"\d{4}-\d{2}-\d{2}.*замер сделан", text)
+
+
+def test_status_stage_rule(order, tmp_path):
+    assert api.status(order).stage == "Новый заказ"
+    api.import_project(order, _project(tmp_path))
+    assert api.status(order).stage == "Проект"
+
+
+def test_status_empty_sections_say_so(order):
+    text = api.status(order).text
+    assert "Проекта ещё нет" in text and "Пока ничего" in text
+
+
+# --- мок --------------------------------------------------------------------
+
+
+def test_results_carry_mock_flag_when_workshop_is_mock(order, tmp_path):
+    assert api.import_project(order, _project(tmp_path)).mock is True
+    assert api.status(order).mock_files
+
+
+def test_no_mock_when_workshop_is_not_mock(home):
+    for p in (home / "workshop").glob("*.yaml"):
+        p.write_text(p.read_text(encoding="utf-8").replace("mock: true", "mock: false"), encoding="utf-8")
+    assert api.order_new("2026-047-petrov").mock is False

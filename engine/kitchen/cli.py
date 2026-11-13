@@ -5,6 +5,7 @@
 """
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Annotated, NoReturn, TypeVar
 
 import typer
@@ -67,3 +68,110 @@ def check_workshop(json: JsonOpt = False) -> None:
     except WorkshopError as e:
         fail(e)
     emit(result, _render_check, json, ok=result.valid)
+
+
+# --- заказы ------------------------------------------------------------------
+
+order_app = typer.Typer(help="Заказы: завести, найти.", no_args_is_help=True)
+app.add_typer(order_app, name="order")
+
+OrderArg = Annotated[
+    str, typer.Argument(help="Номер, номер-фамилия или часть фамилии (кириллицей или латиницей).")
+]
+
+
+def _render_order(r: api.OrderResult) -> str:
+    o = r.order
+    head = f"Заказ {o.id} заведён." if r.created else f"Заказ {o.id}."
+    rows = [("Клиент", o.client), ("Телефон", o.phone), ("Адрес", o.address)]
+    return "\n".join([head, *[f"  {k}: {v}" for k, v in rows if v]])
+
+
+@order_app.command("new")
+def order_new(
+    order: Annotated[str, typer.Argument(help="Номер-фамилия: 2026-047-petrov.")],
+    client: Annotated[str, typer.Option("--client", help="ФИО клиента.")] = "",
+    phone: Annotated[str, typer.Option("--phone", help="Телефон.")] = "",
+    address: Annotated[str, typer.Option("--address", help="Адрес объекта.")] = "",
+    json: JsonOpt = False,
+) -> None:
+    """Завести заказ."""
+    try:
+        result = api.order_new(order, client=client, phone=phone, address=address)
+    except WorkshopError as e:
+        fail(e)
+    emit(result, _render_order, json)
+
+
+@order_app.command("show")
+def order_show(order: OrderArg, json: JsonOpt = False) -> None:
+    """Найти заказ и показать его карточку."""
+    try:
+        result = api.order_show(order)
+    except WorkshopError as e:
+        fail(e)
+    emit(result, _render_order, json)
+
+
+def _render_import(r: api.ImportResult) -> str:
+    if not r.changed:
+        return f"Заказ {r.order}: без изменений, текущая версия проекта — {r.version}."
+    return f"Заказ {r.order}: принята версия {r.version} проекта."
+
+
+@app.command("import")
+def import_(
+    order: OrderArg,
+    project: Annotated[Path, typer.Argument(help="Файл project.json.")],
+    json: JsonOpt = False,
+) -> None:
+    """Импортировать проект: новая версия появляется, только если проект изменился."""
+    try:
+        result = api.import_project(order, project)
+    except WorkshopError as e:
+        fail(e)
+    emit(result, _render_import, json)
+
+
+@app.command("export")
+def export(
+    order: OrderArg,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="Куда писать (по умолчанию orders/<заказ>/project.json).")
+    ] = None,
+    version: Annotated[
+        int | None, typer.Option("--version", help="Номер версии (по умолчанию текущая).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Записать project.json версии проекта (с номером версии)."""
+    try:
+        result = api.export_project(order, version=version, out=out)
+    except WorkshopError as e:
+        fail(e)
+    emit(result, lambda r: f"Заказ {r.order}: версия {r.version} проекта записана в {r.path}.", json)
+
+
+@app.command("log")
+def log(
+    order: OrderArg,
+    text: Annotated[str, typer.Argument(help="Текст записи.")],
+    kind: Annotated[str, typer.Option("--kind", help="done, decision, next или note.")] = "note",
+    json: JsonOpt = False,
+) -> None:
+    """Добавить запись в журнал заказа."""
+    try:
+        result = api.log_add(order, kind, text)
+    except WorkshopError as e:
+        fail(e)
+    emit(result, lambda r: f"Заказ {r.order}: записано ({r.entry.kind}): {r.entry.text}", json)
+
+
+@app.command("status")
+def status(order: OrderArg, json: JsonOpt = False) -> None:
+    """Собрать и напечатать status.md заказа (файл orders/<заказ>/status.md перезаписывается)."""
+    try:
+        result = api.status(order)
+    except WorkshopError as e:
+        fail(e)
+    emit(result, lambda r: f"{r.text}\nФайл: {r.path}", json)
