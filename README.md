@@ -4,9 +4,20 @@
 
 ## Состав
 
+- `engine/kitchen/` — движок и CLI `kitchen`; `workshop/` — данные мастерской (моки); `PROGRESS.md`, `DECISIONS.md`, `MOCKS.md`.
 - `skills/kitchen-brief/` — скилл Claude: разбор переписки с клиентом кухни или интервью, бриф к замеру, противоречия и вопросы клиенту. Пороги и цены салона — в `references/settings.json`.
 
-## Запуск
+## Установка
+
+```sh
+uv tool install -e .    # команда kitchen в системе
+export KITCHEN_HOME=/путь/к/папке/с/workshop   # не нужно внутри репозитория
+kitchen check-workshop  # сводка по данным мастерской; --json для агентов
+```
+
+`KITCHEN_HOME` — папка, где лежит `workshop/`. Без неё `kitchen` ищет корень репозитория вверх от текущей папки. Пока в `workshop/` моки, любой вывод помечен «МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА»; что заменить — в `MOCKS.md`.
+
+## Разработка
 
 ```sh
 uv sync                 # зависимости для разработки
@@ -18,12 +29,4 @@ scripts/check           # ruff + pytest
 
 ```sh
 python3 skills/kitchen-brief/scripts/check_brief.py brief.json
-```
-
-## Сборка скилла для Claude
-
-Архив для загрузки (Settings → Capabilities → Skills) — zip папки `skills/kitchen-brief/` без `evals/`:
-
-```sh
-mkdir -p dist && (cd skills && zip -r ../dist/kitchen-brief.zip kitchen-brief -x 'kitchen-brief/evals/*' '*/__pycache__/*')
 ```

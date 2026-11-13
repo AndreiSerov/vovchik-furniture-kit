@@ -21,5 +21,8 @@ dist/
 .pytest_cache/
 .ruff_cache/
 
+### Orders (client data, ADR 0001) ###
+orders/
+
 ### IDE ###
 .idea/
