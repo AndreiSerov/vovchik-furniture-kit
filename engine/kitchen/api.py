@@ -418,7 +418,10 @@ def _modules(data: dict) -> dict[str, tuple[dict, str, str, int]]:
     for wall in data.get("walls", []):
         for row in wall.get("rows", []):
             for index, module in enumerate(row.get("modules", [])):
-                modules[module["label"]] = (module, wall["label"], row["kind"], index)
+                label = module["label"]
+                if not isinstance(label, str) or label in modules or row["kind"] not in ("lower", "upper"):
+                    raise ValueError("повторная метка или неверный ряд")
+                modules[label] = (module, wall["label"], row["kind"], index)
     return modules
 
 
@@ -465,8 +468,12 @@ def _changes(before: dict, after: dict, prefix: str = "") -> list[str]:
         if left == right:
             continue
         name = f"{prefix}{_DIFF_NAMES.get(key, key)}"
-        if isinstance(left, dict) and isinstance(right, dict):
-            changes.extend(_changes(left, right, name + ": "))
+        if (
+            (isinstance(left, dict) or isinstance(right, dict))
+            and (left is None or isinstance(left, dict))
+            and (right is None or isinstance(right, dict))
+        ):
+            changes.extend(_changes(left or {}, right or {}, name + ": "))
         else:
             changes.append(f"{name} {_value(left)} → {_value(right)}")
     return changes
@@ -484,13 +491,13 @@ def diff_project(order: str, from_version: int, to_version: int, home: Path | No
                 raise OrderError(f"У заказа {o.ref} нет версии {version} проекта.")
             data = json.loads(row["data"])
             try:
-                parse_project(data)
-            except OrderError as e:
+                projects.append(_modules(data))
+            except (TypeError, KeyError, ValueError, AttributeError) as e:
                 raise OrderError(
-                    [f"Версия {version} не соответствует текущей схеме проекта.", *e.problems]
+                    f"Версия {version} не соответствует текущей схеме проекта: "
+                    "невозможно определить модули, стены или ряды."
                 ) from e
-            projects.append(data)
-        before, after = map(_modules, projects)
+        before, after = projects
         changes = []
         for label in sorted(before.keys() | after.keys()):
             if label not in before:

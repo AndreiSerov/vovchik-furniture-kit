@@ -15,7 +15,7 @@ __all__ = ["ModuleSpec", "Project", "ProjectMaterials", "Row", "Wall", "parse_pr
 
 
 class Section(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
 
 class MaterialOverrides(Section):

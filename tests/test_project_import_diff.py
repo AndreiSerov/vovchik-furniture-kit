@@ -147,3 +147,55 @@ def test_diff_gives_readable_error_for_old_incomplete_project(home, tmp_path):
     api.import_project("petrov", write(p, project()))
     with pytest.raises(OrderError, match="Версия 1 не соответствует"):
         api.diff_project("petrov", 1, 2)
+
+
+@pytest.mark.parametrize("field,value", [("ceiling_height", "2700"), ("led", "false")])
+def test_import_rejects_strings_for_number_and_boolean(home, tmp_path, field, value):
+    api.order_new("2026-047-petrov")
+    data = project()
+    data[field] = value
+    with pytest.raises(OrderError):
+        api.import_project("petrov", write(tmp_path / "p.json", data))
+
+
+@pytest.mark.parametrize("field,value", [("width", "600"), ("without_back", "false")])
+def test_import_rejects_strings_in_module(home, tmp_path, field, value):
+    api.order_new("2026-047-petrov")
+    data = project()
+    data["walls"][0]["rows"][0]["modules"][0][field] = value
+    with pytest.raises(OrderError):
+        api.import_project("petrov", write(tmp_path / "p.json", data))
+
+
+def test_diff_compares_older_minimal_version(home, tmp_path):
+    api.order_new("2026-047-petrov")
+    old = {
+        "order": "2026-047",
+        "walls": [
+            {
+                "label": "A",
+                "rows": [
+                    {"kind": "lower", "modules": [{"label": "Н1", "template": "base_corner", "width": 400}]}
+                ],
+            }
+        ],
+    }
+    p = write(tmp_path / "p.json", old)
+    api.import_project("petrov", p, validate=lambda data, ctx: api.ValidationResult())
+    api.import_project("petrov", write(p, project()))
+    assert any("Н1: ширина 400 → 600" in c for c in api.diff_project("petrov", 1, 2).changes)
+
+
+def test_diff_names_added_nested_fields_in_russian(home, tmp_path):
+    api.order_new("2026-047-petrov")
+    old = project()
+    module = old["walls"][0]["rows"][0]["modules"][0]
+    del module["contents"]
+    del module["corner"]
+    p = write(tmp_path / "p.json", old)
+    api.import_project("petrov", p)
+    api.import_project("petrov", write(p, project()))
+    changes = "\n".join(api.diff_project("petrov", 1, 2).changes)
+    assert "наполнение: двери не задано → 1" in changes
+    assert "угол: соседняя стена не задано → Б" in changes
+    assert '"doors"' not in changes and '"adjacent_wall"' not in changes
