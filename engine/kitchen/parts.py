@@ -18,7 +18,7 @@ from kitchen import formulas
 from kitchen.errors import OrderError, WorkshopError
 from kitchen.formulas import FormulaError, InexactDivisionError
 from kitchen.models import EdgeRule, Num, Workshop
-from kitchen.project import ModuleSpec, Project, ProjectMaterials, Row
+from kitchen.project import Appliance, ModuleSpec, Project, ProjectMaterials, Row
 
 __all__ = [
     "TEMPLATES",
@@ -629,6 +629,16 @@ def build_wall_door(
     lift: bool = False,
 ) -> TemplateOut:
     c = ws.construction
+    t = c.case_thickness
+    if (
+        dims.width <= 2 * t + 2 * c.shelf.side_gap
+        or dims.depth <= c.shelf.front_gap
+        or dims.height <= 2 * t
+        or (not no_shelf and not (t <= c.shelf.height <= dims.height - 2 * t))
+    ):
+        raise OrderError(
+            f"Модуль {module.label}: габариты {dims.width}×{dims.height}×{dims.depth} не позволяют разместить детали."
+        )
     # Используем общую геометрию корпуса и фасадов, заменив царги крышей.
     upper_facades = c.facades.model_copy(update={"height_lower": c.facades.height_upper})
     upper_construction = c.model_copy(update={"facades": upper_facades})
@@ -664,38 +674,70 @@ def build_wall_dryer(
         raise OrderError(
             f"Модуль {module.label}: ширина сушки должна быть {ws.construction.upper_rules.dryer_width} мм."
         )
-    out = build_wall_door(module, dims, materials, ws, no_shelf=True, no_bottom=True)
+    out = build_wall_door(
+        module,
+        dims,
+        materials,
+        ws,
+        no_shelf=True,
+        no_bottom=True,
+        lift=bool(module.contents and module.contents.lift),
+    )
     out.hardware[ws.construction.upper_rules.dryer] += 1
     return out
 
 
 def build_wall_hood(
-    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+    module: ModuleSpec,
+    dims: ModuleDims,
+    materials: ProjectMaterials,
+    ws: Workshop,
+    appliance: Appliance | None = None,
 ) -> TemplateOut:
     c = ws.construction
     hood = next((item for item in ws.appliances.items if item.id == c.upper_rules.hood), None)
     if hood is None or hood.type != "hood":
         raise WorkshopError(f"appliances.yaml: вытяжка «{c.upper_rules.hood}» не найдена.")
     t = c.case_thickness
-    opening_width = hood.niche_width
-    opening_depth = hood.niche_depth
+    project_width = _whole(appliance.width, "Ширина вытяжки") if appliance else hood.nominal_width
+    opening_width = hood.niche_width if project_width == hood.nominal_width else project_width
+    opening_depth = (
+        _whole(appliance.depth, "Глубина вытяжки")
+        if appliance and appliance.depth is not None
+        else hood.niche_depth
+    )
+    opening_height = (
+        _whole(appliance.height, "Высота вытяжки")
+        if appliance and appliance.height is not None
+        else hood.niche_height
+    )
+    if min(opening_width, opening_depth, opening_height) <= 0:
+        raise OrderError(f"Модуль {module.label}: размеры вытяжки должны быть положительными.")
     free_width = dims.width - 2 * t - opening_width
     front_depth = dims.depth - opening_depth
     if front_depth < c.upper_rules.hood_rail_min:
         raise OrderError(
             f"Модуль {module.label}: глубина планки {front_depth} мм меньше допустимых {c.upper_rules.hood_rail_min} мм."
         )
-    if free_width < 0 or hood.niche_height > dims.height - t:
+    if free_width < 0 or opening_height > dims.height - t:
         raise OrderError(
-            f"Модуль {module.label}: ниша вытяжки {opening_width}×{opening_depth}×{hood.niche_height} не помещается в корпус."
+            f"Модуль {module.label}: ниша вытяжки {opening_width}×{opening_depth}×{opening_height} не помещается в корпус."
         )
-    out = build_wall_door(module, dims, materials, ws, no_shelf=True, no_bottom=True)
+    out = build_wall_door(
+        module,
+        dims,
+        materials,
+        ws,
+        no_shelf=True,
+        no_bottom=True,
+        lift=bool(module.contents and module.contents.lift),
+    )
     body = _material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
     out.parts.append(
         make_part(
             pid=f"{module.label}-дно-выт-1",
             module_label=module.label,
-            name="деталь дна вытяжки",
+            name="передняя планка дна вытяжки",
             a=Span(dims.width - 2 * t, "x"),
             b=Span(front_depth, "y"),
             thickness=t,
@@ -749,7 +791,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     for wall in project.walls:
         for row in wall.rows:
             for module in row.modules:
-                out = _build_module(module, row, project.materials, ws)
+                out = _build_module(module, row, project.materials, ws, project.appliances)
                 for part in out.parts:
                     if part.id in seen:
                         raise OrderError(
@@ -775,7 +817,9 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     )
 
 
-def _build_module(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws: Workshop) -> TemplateOut:
+def _build_module(
+    module: ModuleSpec, row: Row, materials: ProjectMaterials, ws: Workshop, appliances: list[Appliance]
+) -> TemplateOut:
     """Один модуль → результат шаблона: выбор шаблона, габариты, ряд."""
     template = TEMPLATES.get(module.template)
     if template is None:
@@ -807,17 +851,13 @@ def _build_module(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws:
             raise OrderError(
                 f"Модуль {module.label}: заданное наполнение или параметры не поддерживаются шаблоном."
             )
-    if module.template in ("wall_lift", "wall_dryer"):
+    if module.template in ("wall_lift", "wall_dryer", "wall_hood"):
         contents = module.contents
         if contents and (
             contents.doors is not None
             or contents.shelves is not None
             or contents.drawers is not None
-            or (
-                contents.lift not in (None, ws.construction.upper_rules.lift)
-                if module.template == "wall_lift"
-                else contents.lift is not None
-            )
+            or contents.lift not in (None, ws.construction.upper_rules.lift)
             or (
                 contents.inserts not in ([], [ws.construction.upper_rules.dryer])
                 if module.template == "wall_dryer"
@@ -827,9 +867,14 @@ def _build_module(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws:
             raise OrderError(f"Модуль {module.label}: неподдерживаемое наполнение.")
         if module.without_back or module.corner or "shelves" in module.model_fields_set:
             raise OrderError(f"Модуль {module.label}: неподдерживаемые параметры.")
-    if module.template not in ("base_sink", "base_bottle", "base_drawers", "wall_lift", "wall_dryer") and (
-        module.contents is not None or module.without_back or module.corner is not None
-    ):
+    if module.template not in (
+        "base_sink",
+        "base_bottle",
+        "base_drawers",
+        "wall_lift",
+        "wall_dryer",
+        "wall_hood",
+    ) and (module.contents is not None or module.without_back or module.corner is not None):
         raise OrderError(
             f"Модуль {module.label}: наполнение или параметры модуля ещё не поддерживаются расчётом."
         )
@@ -844,4 +889,10 @@ def _build_module(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws:
                 else:
                     values[key] = value
     dims = _module_dims(module, row.kind, ws)
-    return template.build(module, dims, ProjectMaterials.model_validate(values), ws)
+    resolved_materials = ProjectMaterials.model_validate(values)
+    if module.template == "wall_hood":
+        matching = [item for item in appliances if item.module == module.label and item.type == "hood"]
+        if len(matching) > 1:
+            raise OrderError(f"Модуль {module.label}: указано несколько вытяжек.")
+        return build_wall_hood(module, dims, resolved_materials, ws, matching[0] if matching else None)
+    return template.build(module, dims, resolved_materials, ws)

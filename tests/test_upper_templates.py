@@ -51,7 +51,7 @@ def test_wall_hood_opening_uses_workshop_niche(home, base_door_project):
     upper_project(base_door_project, "wall_hood")
     result = api.parts_from_project(base_door_project, home)
     parts = result.modules[0].parts
-    assert len([p for p in parts if p.name == "деталь дна вытяжки"]) == 1
+    assert len([p for p in parts if p.name == "передняя планка дна вытяжки"]) == 1
     assert not any(p.name in ("дно", "полка") for p in parts)
 
 
@@ -111,3 +111,61 @@ def test_invalid_upper_hardware_reference_reported_at_workshop_load(home):
     )
     result = api.check_workshop(home)
     assert any("missing_hanger" in problem for problem in result.errors)
+
+
+@pytest.mark.parametrize(
+    "template,width,contents",
+    [
+        ("wall_hood", 600, {"lift": "aventos_hks"}),
+        ("wall_dryer", 750, {"lift": "aventos_hks", "inserts": ["dryer_750"]}),
+    ],
+)
+def test_hood_and_dryer_can_have_lift(home, base_door_project, template, width, contents):
+    upper_project(base_door_project, template, width, contents)
+    result = api.parts_from_project(base_door_project, home)
+    assert len([part for part in result.modules[0].parts if part.name == "фасад"]) == 1
+    assert result.hardware["aventos_hks"] == 1
+    assert "hinge_71B3550" not in result.hardware
+
+
+def test_upper_rejects_impossible_geometry(home, base_door_project):
+    from kitchen.errors import OrderError
+
+    upper_project(base_door_project, "wall_door", width=20)
+    project = json.loads(base_door_project.read_text())
+    project["walls"][0]["rows"][0]["modules"][0].update(height=200, depth=10)
+    base_door_project.write_text(json.dumps(project, ensure_ascii=False))
+    with pytest.raises(OrderError, match="В1.*габарит"):
+        api.parts_from_project(base_door_project, home)
+
+
+def test_hood_uses_project_appliance_dimensions(home, base_door_project):
+    upper_project(base_door_project, "wall_hood")
+    project = json.loads(base_door_project.read_text())
+    project["appliances"] = [{"type": "hood", "width": 500, "height": 150, "depth": 240, "module": "В1"}]
+    base_door_project.write_text(json.dumps(project, ensure_ascii=False))
+    result = api.parts_from_project(base_door_project, home)
+    rail = next(p for p in result.modules[0].parts if p.name == "передняя планка дна вытяжки")
+    assert rail.width == 80
+    assert rail.position.y == 240
+
+
+def test_hood_rejects_nonpositive_project_appliance_dimensions(home, base_door_project):
+    from kitchen.errors import OrderError
+
+    upper_project(base_door_project, "wall_hood")
+    project = json.loads(base_door_project.read_text())
+    project["appliances"] = [{"type": "hood", "width": 500, "height": 150, "depth": -10, "module": "В1"}]
+    base_door_project.write_text(json.dumps(project, ensure_ascii=False))
+    with pytest.raises(OrderError, match="В1.*положительн"):
+        api.parts_from_project(base_door_project, home)
+
+
+def test_hood_nominal_width_uses_niche_from_workshop(home, base_door_project):
+    upper_project(base_door_project, "wall_hood")
+    project = json.loads(base_door_project.read_text())
+    project["appliances"] = [{"type": "hood", "width": 600, "module": "В1"}]
+    base_door_project.write_text(json.dumps(project, ensure_ascii=False))
+    result = api.parts_from_project(base_door_project, home)
+    rail = next(p for p in result.modules[0].parts if p.name == "передняя планка дна вытяжки")
+    assert rail.width == 40
