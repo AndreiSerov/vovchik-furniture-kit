@@ -336,11 +336,22 @@ def test_unrecognised_dimensions_string_is_a_warning(home):
     assert f.level == "warning" and "большая" in f.message
 
 
-def test_dimensions_string_formats():
-    parse = brief_mod.parse_dimensions
-    assert parse("450x820x560") == (450, 820, 560)
-    assert parse("450 х 820 × 560 мм") == (450, 820, 560)
-    assert parse("") is None and parse("450") is None
+@pytest.mark.parametrize("dimensions", ["450x820x560", "450 х 820 × 560 мм", "450×820×560"])
+def test_dimensions_string_formats_are_recognised(home, dimensions):
+    save_brief(home, [dw(dimensions=dimensions)])
+    assert findings(project_dw(home), home, "brief_dimensions") == []
+
+
+@pytest.mark.parametrize("dimensions", ["450", "450x820"])
+def test_incomplete_dimensions_string_is_a_warning(home, dimensions):
+    save_brief(home, [dw(dimensions=dimensions)])
+    [f] = findings(project_dw(home), home, "brief_dimensions")
+    assert f.level == "warning" and dimensions in f.message
+
+
+def test_empty_dimensions_string_is_not_a_finding(home):
+    save_brief(home, [dw(dimensions="")])
+    assert findings(project_dw(home), home, "brief_dimensions") == []
 
 
 def test_brief_schema_has_body_and_niche_dimensions(repo):
