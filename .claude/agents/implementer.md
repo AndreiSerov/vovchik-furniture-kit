@@ -15,6 +15,6 @@ When the ticket leaves a decision open, follow the project's rule for ambiguity 
 
 Edit files as `docs/agents/agreements.md` says under Editing files: Edit for a targeted change, `sd` for a text pattern across files, `ast-grep` for a structural change, each previewed first. Send independent tool calls together in one response. While you work, run only the tests you touched, with `-x`. Commit when they are green: the commit hook runs `scripts/check` and shows you any failure.
 
-Before handing back, go through `docs/agents/self-check.md` if the project has one, and list in your report which checks you ran. Finish with the commit hash, the result of `scripts/check`, and anything marked `manual` that you could not run.
+Turn every acceptance check the ticket lists into a test before handing back. Finish with the commit hash, the result of `scripts/check`, and anything marked `manual` that you could not run.
 
 When a review comes back, fix every finding in the message, blocking or not, in one commit, and turn each reproduction the reviewer gave into a test first.
