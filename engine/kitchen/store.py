@@ -250,3 +250,17 @@ def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
         listing = ", ".join(order_ref_of(r) for r in hits)
         raise OrderError(f"«{query}» подходит к нескольким заказам: {listing}. Уточните номер.")
     return hits[0]
+
+
+# --- выводы -----------------------------------------------------------------
+
+
+def register_output(
+    conn: sqlite3.Connection, order_pk: int, kind: str, path: str, source_version: int
+) -> None:
+    """Записывает вывод с версией-источником. Тот же файл пересчитывают на месте: прежняя запись заменяется."""
+    conn.execute("DELETE FROM outputs WHERE order_id = ? AND path = ?", (order_pk, path))
+    conn.execute(
+        "INSERT INTO outputs (order_id, kind, path, source_version, created_at) VALUES (?, ?, ?, ?, ?)",
+        (order_pk, kind, path, source_version, now()),
+    )

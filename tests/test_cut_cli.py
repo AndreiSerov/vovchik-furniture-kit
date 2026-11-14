@@ -16,7 +16,7 @@ def test_cut_order_contract(home):
     api.import_project("2026-047-petrov", FIXTURES / "petrov_project.json", home=home)
     r = runner.invoke(app, ["cut", "petrov", "--json"])
     assert r.exit_code == 0, r.output
-    assert json.loads(r.output) == json.loads(api.cut_from_order("petrov", home).model_dump_json())
+    assert json.loads(r.output) == json.loads(api.cut_and_save("petrov", home).model_dump_json())
     t = runner.invoke(app, ["cut", "2026-047-petrov"])
     assert t.exit_code == 0, t.output
     lines = t.output.strip().splitlines()
@@ -24,6 +24,14 @@ def test_cut_order_contract(home):
     assert "версия 1" in t.output and "ldsp_16_white" in t.output and "Лист 1" in t.output
     assert "78.1%" in t.output and "Н1-бок-Л" in t.output and "Рез 1" in t.output
     assert "Столешница" in t.output and "2200" in t.output
+    assert "cutting-map.pdf" in t.output and (home / "orders/2026-047-petrov/out/cutting-map.pdf").exists()
+
+
+def test_cut_project_file_writes_no_pdf(home, base_door_project):
+    """Черновик из файла не привязан к заказу в БД: PDF и записи вывода нет."""
+    r = runner.invoke(app, ["cut", "--project", str(base_door_project), "--json"])
+    assert r.exit_code == 0, r.output
+    assert json.loads(r.output)["output"] is None and not (home / "orders").exists()
 
 
 def test_cut_needs_exactly_one_source(home, base_door_project):

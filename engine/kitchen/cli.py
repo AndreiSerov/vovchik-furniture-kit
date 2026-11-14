@@ -308,6 +308,8 @@ def _render_cut(r: api.CutResult) -> str:
         lines.append(
             f"Столешница {t.item} — {t.name}: листов {t.sheet_count} ({t.sheet_length} мм), куски, мм: {sheets}"
         )
+    if r.output:
+        lines.append(f"Карта раскроя PDF: {r.output.file} (версия проекта {r.output.source_version})")
     if r.warnings:
         lines.append("Предупреждения: " + "; ".join(r.warnings))
     return "\n".join(lines)
@@ -324,11 +326,11 @@ def cut(
     ] = None,
     json: JsonOpt = False,
 ) -> None:
-    """Раскрой: гильотинная укладка деталей по листам с порядком резов, столешница линейно."""
+    """Раскрой: гильотинная укладка по листам с порядком резов, столешница линейно. Заказ — ещё и PDF карты."""
     try:
         if (order is None) == (project is None):
             raise InputError("Укажите либо заказ (kitchen cut petrov), либо файл: --project project.json.")
-        result = api.cut_from_order(order) if order is not None else api.cut_from_project(project)
+        result = api.cut_and_save(order) if order is not None else api.cut_from_project(project)
     except KitchenError as e:
         fail(e)
     emit(result, _render_cut, json)

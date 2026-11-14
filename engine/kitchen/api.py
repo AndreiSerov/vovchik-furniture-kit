@@ -6,7 +6,7 @@ import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import tzinfo
+from datetime import date, tzinfo
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
@@ -19,6 +19,7 @@ from kitchen.checks import Finding
 from kitchen.checks import check_project as run_checks
 from kitchen.common import CommonItem, CountertopCut, compute_common, plan_countertop
 from kitchen.cutting import MaterialCut, cut_parts
+from kitchen.cutting_pdf import write_cutting_map
 from kitchen.errors import InputError, OrderError
 from kitchen.models import Workshop
 from kitchen.parts import EdgeTotals, ModuleParts, compute_parts
@@ -42,6 +43,7 @@ __all__ = [
     "ModuleParts",
     "OrderInfo",
     "OrderResult",
+    "OutputInfo",
     "PartsResult",
     "PartsSource",
     "QuickEstimate",
@@ -53,9 +55,13 @@ __all__ = [
     "brief_show",
     "check_project",
     "check_workshop",
+    "cut_and_save",
+    "cut_from_order",
+    "cut_from_project",
     "diff_project",
     "export_project",
     "import_project",
+    "list_outputs",
     "load_workshop",
     "log_add",
     "order_new",
@@ -886,6 +892,18 @@ def parts_from_order(order: str, home: Path | None = None) -> PartsResult:
 # --- раскрой ------------------------------------------------------------------
 
 
+class OutputInfo(BaseModel):
+    """Вывод заказа: файл в `orders/<заказ>/out/` и версия проекта, из которой он посчитан."""
+
+    kind: str  # cutting
+    path: str  # относительно KITCHEN_HOME, как в БД
+    file: str  # полный путь
+    source_version: int
+    created_at: str | None = (
+        None  # время записи в БД; в результате команды не заполняется (вывод детерминирован)
+    )
+
+
 class CutResult(Result):
     """Раскрой листовых деталей по материалам, с порядком резов; версия-источник."""
 
@@ -897,6 +915,7 @@ class CutResult(Result):
     materials: list[MaterialCut]
     countertop: CountertopCut | None  # линейный раскрой столешницы; нет столешницы в проекте — `None`
     warnings: list[str]
+    output: OutputInfo | None = None  # PDF карты раскроя; только после `cut_and_save`
 
 
 def _build_cut(
@@ -944,6 +963,51 @@ def cut_from_order(order: str, home: Path | None = None) -> CutResult:
     home = home or resolve_home()
     project, source, latest, warnings = _order_project(order, home)
     return _build_cut(project, home, source, latest, warnings)
+
+
+CUTTING_PDF = "cutting-map.pdf"
+
+
+def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -> CutResult:
+    """`kitchen cut <заказ>`: раскрой текущей версии, PDF карты в `orders/<заказ>/out/`, запись в БД."""
+    home = home or resolve_home()
+    result = cut_from_order(order, home)
+    version = result.source.version
+    if version is None:  # заказ из БД всегда с версией
+        raise OrderError(f"У заказа {result.source.order} нет версии проекта.")  # pragma: no cover
+    rel = f"orders/{result.source.order}/out/{CUTTING_PDF}"
+    write_cutting_map(
+        home / rel,
+        result.materials,
+        kerf=result.kerf,
+        trim=result.trim,
+        order=result.source.order,
+        version=version,
+        mock=result.mock,
+        on=on or store.today(),
+    )
+    with _open_order(order, home) as o:
+        store.register_output(o.conn, o.pk, "cutting", rel, version)
+        o.changed = True
+    output = OutputInfo(kind="cutting", path=rel, file=str(home / rel), source_version=version)
+    return result.model_copy(update={"output": output})
+
+
+def list_outputs(order: str, home: Path | None = None) -> list[OutputInfo]:
+    """Выводы заказа из БД с версиями-источниками, по времени записи."""
+    home = home or resolve_home()
+    with _open_order(order, home) as o:
+        rows = o.conn.execute("SELECT * FROM outputs WHERE order_id = ? ORDER BY id", (o.pk,)).fetchall()
+    return [
+        OutputInfo(
+            kind=r["kind"],
+            path=r["path"],
+            file=str(home / r["path"]),
+            source_version=r["source_version"],
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
 
 
 # --- проверки проекта ---------------------------------------------------------
