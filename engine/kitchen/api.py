@@ -260,6 +260,7 @@ class ValidationContext:
     order_ref: str  # номер-фамилия
     order_number: str  # ГГГГ-NNN
     workshop: Workshop | None = None
+    workshop_problems: list[str] = field(default_factory=list)  # почему мастерская не загрузилась
 
 
 @dataclass
@@ -306,8 +307,13 @@ def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
                 if module.label in seen:
                     return ValidationResult(errors=[f"Метка модуля «{module.label}» не уникальна."])
                 seen.add(module.label)
-    if ctx.workshop is None:  # данные мастерской не загрузились: проверки конструкции невозможны
-        return ValidationResult()
+    if ctx.workshop is None:  # без мастерской проект не проверить, а непроверенный не принимаем
+        return ValidationResult(
+            errors=[
+                "Мастерская не загрузилась, проект проверить нельзя (см. kitchen check-workshop):",
+                *ctx.workshop_problems,
+            ]
+        )
     findings = run_checks(project, ctx.workshop)
     return ValidationResult(
         errors=[f.message for f in findings if f.level == "error"],
@@ -352,7 +358,7 @@ def import_project(
         loaded = load(home)
         mock = _mock_of(loaded)
         current = _current_version(o.conn, o.pk)
-        ctx = ValidationContext(o.ref, o.row["number"], loaded.workshop)
+        ctx = ValidationContext(o.ref, o.row["number"], loaded.workshop, loaded.problems)
         checked = validate(data, ctx)
         if checked.errors:
             tail = "Проект отклонён, текущая версия не изменена." if current else "Проект отклонён."

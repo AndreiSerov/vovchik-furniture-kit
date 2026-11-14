@@ -21,6 +21,7 @@ from kitchen.models import EdgeRule, Num, Workshop
 from kitchen.project import Appliance, ModuleSpec, Project, ProjectMaterials, Row
 
 __all__ = [
+    "BACK_PANEL",
     "TEMPLATES",
     "EdgeTotals",
     "ModuleDims",
@@ -31,10 +32,13 @@ __all__ = [
     "Position",
     "Span",
     "Template",
+    "build_module",
     "compute_parts",
+    "module_dims",
 ]
 
 EDGE_SIDES = ("L1", "L2", "W1", "W2")
+BACK_PANEL = "задняя стенка"  # деталь, по которой находится корпус без задней стенки
 
 Axis = Literal["x", "y", "z"]
 
@@ -188,7 +192,7 @@ def _whole(value: Num, what: str) -> int:
     raise OrderError(f"{what} — {value}, а ожидалось целое число миллиметров.")
 
 
-def _module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
+def module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
     base = (
         ws.construction.tall
         if module.template == "tall_oven"
@@ -359,7 +363,7 @@ def build_base_door(
             make_part(
                 pid=f"{module.label}-зад",
                 module_label=module.label,
-                name="задняя стенка",
+                name=BACK_PANEL,
                 a=Span(back_h, "z"),
                 b=Span(back_w, "x"),
                 thickness=hdf_t,
@@ -463,6 +467,8 @@ class Template:
 
     build: Callable[[ModuleSpec, ModuleDims, ProjectMaterials, Workshop], TemplateOut]
     row_kind: str  # lower | upper | tall
+    carcass: bool = True  # False: только фасад между соседними модулями (ПММ)
+    drawers: bool = False  # ящики на направляющих: проверяется внутренняя глубина
 
 
 def build_base_sink(
@@ -851,7 +857,7 @@ def build_tall_oven(
 
 
 TEMPLATES = {
-    "tall_oven": Template(build_tall_oven, "tall"),
+    "tall_oven": Template(build_tall_oven, "tall", drawers=True),
     "base_door": Template(build_base_door, "lower"),
     "base_corner": Template(build_base_corner, "lower"),
     "wall_corner": Template(build_wall_corner, "upper"),
@@ -861,8 +867,8 @@ TEMPLATES = {
     "wall_dryer": Template(build_wall_dryer, "upper"),
     "base_sink": Template(build_base_sink, "lower"),
     "base_bottle": Template(build_base_bottle, "lower"),
-    "base_drawers": Template(build_base_drawers, "lower"),
-    "dishwasher_panel": Template(build_dishwasher_panel, "lower"),
+    "base_drawers": Template(build_base_drawers, "lower", drawers=True),
+    "dishwasher_panel": Template(build_dishwasher_panel, "lower", carcass=False),
 }
 
 _ROW_RU = {"lower": "нижнем ряду", "upper": "верхнем ряду", "tall": "пенале"}
@@ -897,7 +903,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
                         raise OrderError(
                             f"Модуль {module.label}: соседняя стена «{adjacent}» должна существовать и отличаться от стены «{wall.label}»."
                         )
-                out = _build_module(module, row, project.materials, ws, project.appliances)
+                out = build_module(module, row, project.materials, ws, project.appliances)
                 for part in out.parts:
                     if part.id in seen:
                         raise OrderError(
@@ -923,7 +929,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     )
 
 
-def _build_module(
+def build_module(
     module: ModuleSpec, row: Row, materials: ProjectMaterials, ws: Workshop, appliances: list[Appliance]
 ) -> TemplateOut:
     """Один модуль → результат шаблона: выбор шаблона, габариты, ряд."""
@@ -1041,7 +1047,7 @@ def _build_module(
                     raise OrderError(f"Модуль {module.label}: цвет фасада ещё не поддерживается расчётом.")
                 else:
                     values[key] = value
-    dims = _module_dims(module, row.kind, ws)
+    dims = module_dims(module, row.kind, ws)
     if module.template == "wall_corner" and module.depth is None:
         dims.depth = ws.construction.corner_rules.upper_depth
     resolved_materials = ProjectMaterials.model_validate(values)

@@ -9,14 +9,15 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from kitchen import formulas
 from kitchen.errors import KitchenError, WorkshopError
 from kitchen.models import Workshop
-from kitchen.parts import ModuleDims, TemplateOut, _build_module, _module_dims
+from kitchen.parts import TEMPLATES, ModuleDims, TemplateOut, build_module, module_dims
 from kitchen.project import ModuleSpec, Project
 
 __all__ = ["Finding", "check_project"]
 
-_KIND_RU = {"lower": "нижнего", "upper": "верхнего"}
+_KIND_RU = {"lower": "нижний", "upper": "верхний"}
 
 
 class Finding(BaseModel):
@@ -74,9 +75,9 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
                         level="error",
                         subject=wall.label,
                         message=(
-                            f"Стена {wall.label}: ряд {_KIND_RU[row.kind]} занимает {_num(total)} мм "
-                            f"(модули, угловые смещения, пенал), а длина стены {_num(wall.length)} мм "
-                            f"(допуск {rules.wall_tolerance} мм)."
+                            f"Стена {wall.label}: {_KIND_RU[row.kind]} ряд занимает {_num(total)} мм "
+                            f"(модули, угловые смещения, пенал), а длина стены {_num(wall.length)} мм: "
+                            f"разница {_num(abs(total - wall.length))} мм (допуск {rules.wall_tolerance} мм)."
                         ),
                         value=total,
                         limit=wall.length,
@@ -85,15 +86,10 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
     return found
 
 
-# Шаблоны с ящиками на направляющих и шаблон без корпуса (только фасад между соседними модулями).
-_DRAWER_TEMPLATES = ("base_drawers", "tall_oven")
-_NO_CARCASS_TEMPLATES = ("dishwasher_panel",)
-
-
 def _drawer_depth(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -> Finding | None:
     """Внутренняя глубина — глубина корпуса: задняя стенка накладная, фасад снаружи."""
     guide = ws.construction.tandembox.guide_length
-    if module.template not in _DRAWER_TEMPLATES or dims.depth >= guide:
+    if not TEMPLATES[module.template].drawers or dims.depth >= guide:
         return None
     return Finding(
         code="drawer_depth",
@@ -107,30 +103,41 @@ def _drawer_depth(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -> Finding
     )
 
 
-def _appliance_dims(appliance, ws: Workshop) -> tuple[float, float | None, float | None] | None:
-    """Габариты техники: из проекта, недостающие — из appliances.yaml (корпус прибора, не ниша)."""
-    candidates = [i for i in ws.appliances.items if i.type == appliance.type]
-    item = next((i for i in candidates if i.nominal_width == appliance.width), None) or (
-        candidates[0] if candidates else None
+def _appliance_niche(appliance, ws: Workshop) -> tuple[float, float | None, float | None, bool]:
+    """Что требуется от ниши: габариты из проекта, недостающие — ниша из appliances.yaml.
+    Позиция каталога выбирается по типу и типоразмеру (ширине); если такого типоразмера нет,
+    подстановки нет: известное проверяется, неизвестное названо в предупреждении (последнее
+    значение — «чего-то не хватает»)."""
+    item = next(
+        (i for i in ws.appliances.items if i.type == appliance.type and i.nominal_width == appliance.width),
+        None,
     )
     if item is None:
-        if appliance.height is None or appliance.depth is None:
-            return None
-        return appliance.width, appliance.height, appliance.depth
-    # ширина, равная типоразмеру, — это «60-сантиметровая», а не размер корпуса
-    width = item.width if appliance.width == item.nominal_width else appliance.width
+        return (
+            appliance.width,
+            appliance.height,
+            appliance.depth,
+            appliance.height is None or appliance.depth is None,
+        )
     return (
-        width,
-        appliance.height if appliance.height is not None else item.height,
-        appliance.depth if appliance.depth is not None else item.depth,
+        item.niche_width,
+        appliance.height if appliance.height is not None else item.niche_height,
+        appliance.depth if appliance.depth is not None else item.niche_depth,
+        False,
+    )
+
+
+def _inner_width(dims: ModuleDims, ws: Workshop) -> int:
+    """Внутренняя ширина корпуса — по формуле мастерской (`ящики.внутренняя_ширина`)."""
+    return int(
+        formulas.evaluate(ws.construction.drawers.inner_width, W=dims.width, T=ws.construction.case_thickness)
     )
 
 
 def _niches(project: Project, ws: Workshop, dims: dict[str, tuple[ModuleSpec, ModuleDims]]) -> list[Finding]:
-    """Ниша модуля ≥ габаритов техники. Ниша — внутренняя ширина и глубина корпуса; у модуля
-    без корпуса (ПММ) — ширина модуля, а высота — высота ряда с ножками."""
+    """Ниша модуля ≥ требований ниши техники. Ниша модуля — внутренняя ширина и глубина корпуса;
+    у модуля без корпуса (ПММ) — ширина модуля, а высота — высота ряда плюс ножки."""
     found: list[Finding] = []
-    t = ws.construction.case_thickness
     for a in project.appliances:
         if a.module not in dims:
             found.append(
@@ -143,25 +150,25 @@ def _niches(project: Project, ws: Workshop, dims: dict[str, tuple[ModuleSpec, Mo
             )
             continue
         module, d = dims[a.module]
-        have = _appliance_dims(a, ws)
-        if have is None:
+        width, height, depth, incomplete = _appliance_niche(a, ws)
+        if incomplete:
             found.append(
                 Finding(
                     code="appliance_no_data",
                     level="warning",
                     subject=a.module,
                     message=(
-                        f"Техника «{a.type}» в модуле {a.module}: нет габаритов в проекте и позиции в appliances.yaml, "
-                        "нишу не проверить."
+                        f"Техника «{a.type}» шириной {_num(a.width)} мм в модуле {a.module}: такого типоразмера нет "
+                        "в appliances.yaml, а высота или глубина не указаны, поэтому нишу можно проверить только "
+                        "по известным габаритам."
                     ),
                 )
             )
-            continue
-        bare = module.template in _NO_CARCASS_TEMPLATES
+        bare = not TEMPLATES[module.template].carcass
         limits = (
-            ("ширина", have[0], d.width if bare else d.width - 2 * t),
-            ("высота", have[1], d.height + ws.construction.legs.height if bare else None),
-            ("глубина", have[2], d.depth),
+            ("ширина", width, d.width if bare else _inner_width(d, ws)),
+            ("высота", height, d.height + ws.construction.legs.height if bare else None),
+            ("глубина", depth, d.depth),
         )
         for name, value, limit in limits:
             if value is None or limit is None or value <= limit:
@@ -172,8 +179,8 @@ def _niches(project: Project, ws: Workshop, dims: dict[str, tuple[ModuleSpec, Mo
                     level="error",
                     subject=a.module,
                     message=(
-                        f"Модуль {a.module}: {name} техники «{a.type}» {_num(value)} мм не помещается "
-                        f"в нишу {_num(limit)} мм."
+                        f"Модуль {a.module}: {name} ниши под «{a.type}» {_num(value)} мм не помещается "
+                        f"в модуль ({_num(limit)} мм)."
                     ),
                     value=_num(value),
                     limit=_num(limit),
@@ -195,7 +202,7 @@ def _build(project: Project, ws: Workshop, found: list[Finding]):
     built: dict[str, TemplateOut] = {}
     for row, module in _modules(project):
         try:
-            d = _module_dims(module, row.kind, ws)
+            d = module_dims(module, row.kind, ws)
         except KitchenError as e:
             found.append(_build_failure(module, e))
             continue
@@ -205,7 +212,7 @@ def _build(project: Project, ws: Workshop, found: list[Finding]):
             found.append(depth)
             continue  # расчёт упёрся бы в ту же глубину
         try:
-            built[module.label] = _build_module(module, row, project.materials, ws, project.appliances)
+            built[module.label] = build_module(module, row, project.materials, ws, project.appliances)
         except KitchenError as e:
             found.append(_build_failure(module, e))
     return dims, built
@@ -266,7 +273,7 @@ def _sheet_fit(built: dict[str, TemplateOut], ws: Workshop) -> list[Finding]:
     return found
 
 
-def _no_back(built: dict[str, TemplateOut]) -> list[Finding]:
+def _no_back(built: dict[str, TemplateOut], dims: dict[str, tuple[ModuleSpec, ModuleDims]]) -> list[Finding]:
     """Корпус без задней стенки. Модуль без корпуса (только фасад) не в счёт."""
     return [
         Finding(
@@ -287,5 +294,5 @@ def check_project(project: Project, ws: Workshop) -> list[Finding]:
     dims, built = _build(project, ws, found)
     found += _niches(project, ws, dims)
     found += _sheet_fit(built, ws)
-    found += _no_back(built)
+    found += _no_back(built, dims)
     return found

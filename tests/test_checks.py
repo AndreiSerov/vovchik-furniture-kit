@@ -41,6 +41,7 @@ def test_row_sum_fires_with_value_and_limit(home, tmp_path):
     [f] = findings(path, home, "row_sum")
     assert (f.level, f.subject, f.value, f.limit) == ("error", "A", 1200, 2800)
     assert "1200" in f.message and "2800" in f.message
+    assert "нижний ряд" in f.message and "1600" in f.message  # разница 2800 − 1200
 
 
 def test_row_sum_passes_when_equal(home):
@@ -149,12 +150,20 @@ def test_niche_checks_height_and_depth(home):
 
 def test_niche_passes_with_catalog_dimensions(home):
     path = with_appliances(single(home, "dishwasher_panel", 450), dishwasher())
-    assert findings(path, home, "niche_too_small") == []  # ширина 450 — типоразмер, берётся корпус 448
+    assert findings(path, home, "niche_too_small") == []  # ширина 450 — типоразмер, берётся ниша каталога
+    assert findings(path, home, "appliance_module") == []
+
+
+def test_standard_hob_over_standard_module_is_not_an_error(home):
+    # варочная 60 (корпус 590, ниша в столешнице 560×490) над модулем 600 (внутри 568×560)
+    for template in ("base_door", "base_drawers"):
+        path = with_appliances(single(home, template), {"type": "hob", "width": 600, "module": "Н1"})
+        assert [f for f in api.check_project(path, home).findings if f.level == "error"] == []
 
 
 def test_niche_falls_back_to_appliances_yaml(home):
     a = home / "workshop/appliances.yaml"
-    a.write_text(a.read_text().replace("высота: 815", "высота: 900"))
+    a.write_text(a.read_text().replace("ниша_высота: 820", "ниша_высота: 900"))
     path = with_appliances(single(home, "dishwasher_panel", 450), dishwasher())
     [f] = findings(path, home, "niche_too_small")
     assert (f.value, f.limit) == (900, 820)
@@ -297,3 +306,22 @@ def test_unknown_appliance_without_dimensions_is_a_warning(home):
     assert (f.level, f.subject) == ("warning", "Н1")
     path = with_appliances(single(home, "base_door"), {**fridge, "height": 1800, "depth": 550})
     assert findings(path, home, "appliance_no_data") == []
+
+
+def test_width_matching_no_catalog_size_is_not_silently_substituted(home):
+    oven = {"type": "oven", "width": 700, "module": "Н1"}
+    [f] = findings(with_appliances(single(home, "base_door"), oven), home, "appliance_no_data")
+    assert f.level == "warning" and "700" in f.message
+    full = {**oven, "height": 600, "depth": 550}
+    assert findings(with_appliances(single(home, "base_door"), full), home, "appliance_no_data") == []
+
+
+def test_import_rejects_when_workshop_did_not_load(home):
+    api.order_new("2026-047-petrov", client="Петров П. П.", phone="+7 900 000-00-00", address="Москва")
+    path = single(home, "base_door")
+    c = home / "workshop/construction.yaml"
+    c.write_text(c.read_text().replace("толщина_корпуса: 16", "толщина_корпуса: abc"))
+    with pytest.raises(OrderError) as e:
+        api.import_project("petrov", path)
+    assert "Мастерская" in "\n".join(e.value.problems)
+    assert not api.status("petrov").project_version

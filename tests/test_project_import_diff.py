@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 import pytest
 from kitchen import api
@@ -61,12 +62,10 @@ def project():
 
 
 def schema_import(order, path):
-    """Импорт со схемой, но без проверок конструкции (1.6): фикстура ниже — про схему и diff, не про раскрой."""
-
-    def schema_only(data, ctx):
-        return api.validate_wrapper(data, api.ValidationContext(ctx.order_ref, ctx.order_number, None))
-
-    return api.import_project(order, path, validate=schema_only)
+    """Импорт без проверок конструкции (1.6): фикстура ниже — про схему и diff, не про раскрой.
+    Схема и прочие проверки обёртки работают как обычно; подменяются только проверки конструкции."""
+    with patch.object(api, "run_checks", lambda project, workshop: []):
+        return api.import_project(order, path)
 
 
 def write(path, data):
