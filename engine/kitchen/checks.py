@@ -15,13 +15,16 @@ from kitchen.brief import appliances as brief_appliances
 from kitchen.errors import KitchenError, WorkshopError
 from kitchen.models import Workshop
 from kitchen.parts import (
+    APPLIANCE_ROWS,
     BACK_PANEL,
     TEMPLATES,
     ModuleDims,
     TemplateOut,
+    accepts,
     build_module,
     built_niche,
     module_dims,
+    niche_item,
 )
 from kitchen.project import ModuleSpec, Project
 
@@ -113,7 +116,7 @@ def _drawer_depth(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -> Finding
     )
 
 
-def _pair(project: Project, brief: list[BriefAppliance], found: list[Finding]):
+def _pair(project: Project, brief: list[BriefAppliance], ws: Workshop, found: list[Finding]):
     """Сверка состава. В каждом виде техники сначала сопоставление по модели, затем по порядку.
     Возвращает прибор проекта → прибор брифа (или `None`)."""
     paired: dict[int, BriefAppliance | None] = {}
@@ -156,7 +159,7 @@ def _pair(project: Project, brief: list[BriefAppliance], found: list[Finding]):
         for b in items:
             if not b.built_in:
                 continue
-            if any(b.type in t.appliances for t in TEMPLATES.values()):
+            if any(accepts(name, b.type, ws) for name in TEMPLATES):
                 found.append(
                     Finding(
                         code="appliance_unbound",
@@ -175,17 +178,6 @@ def _pair(project: Project, brief: list[BriefAppliance], found: list[Finding]):
                     )
                 )
     return paired
-
-
-def _template_item(module: ModuleSpec, appliance, ws: Workshop):
-    """Позиция каталога, по которой шаблон модуля строит нишу под прибор (пенал, вытяжка), иначе `None`."""
-    rules = ws.construction
-    wanted = {
-        ("tall_oven", "oven"): rules.tall_rules.oven,
-        ("tall_oven", "microwave"): rules.tall_rules.microwave,
-        ("wall_hood", "hood"): rules.upper_rules.hood,
-    }.get((module.template, appliance.type))
-    return next((i for i in ws.appliances.items if i.id == wanted), None) if wanted else None
 
 
 def _built_niche(appliance, module: ModuleSpec, d: ModuleDims, item, ws: Workshop):
@@ -212,6 +204,7 @@ def _niches(
     ws: Workshop,
     dims: dict[str, tuple[ModuleSpec, ModuleDims]],
     brief: list[BriefAppliance] | None,
+    failed: set[str],
 ) -> list[Finding]:
     """Требования из брифа (размеры встраивания, иначе типовая ниша каталога) против ниши,
     которую строит модуль. Размеры корпуса прибора с нишей не сравниваются."""
@@ -227,7 +220,7 @@ def _niches(
         )
         paired: dict[int, BriefAppliance | None] = {id(a): None for a in project.appliances}
     else:
-        paired = _pair(project, brief, found)
+        paired = _pair(project, brief, ws, found)
         found += [
             Finding(
                 code="brief_dimensions", level="warning", subject=b.label, message=f"Бриф, «{b.label}»: {w}."
@@ -247,21 +240,33 @@ def _niches(
             )
             continue
         module, d = dims[a.module]
-        if a.type not in TEMPLATES[module.template].appliances:
+        template = TEMPLATES[module.template]
+        if template.row_kind not in APPLIANCE_ROWS.get(a.type, (template.row_kind,)):
             found.append(
                 Finding(
                     code="appliance_wrong_module",
                     level="error",
                     subject=a.module,
-                    message=f"Модуль {a.module}: шаблон {module.template} не принимает технику «{a.type}».",
+                    message=f"Модуль {a.module}: шаблон {module.template} не подходит для техники «{a.type}» (другой ряд).",
                 )
             )
             continue
+        if not accepts(module.template, a.type, ws):
+            found.append(
+                Finding(
+                    code="appliance_no_niche",
+                    level="warning",
+                    subject=a.module,
+                    message=f"Модуль {a.module}: шаблон {module.template} не строит нишу под «{a.type}» — проверьте вручную.",
+                )
+            )
         b = paired[id(a)]
-        item = _template_item(module, a, ws)
+        item = niche_item(module.template, a.type, ws)
         try:
             built = _built_niche(a, module, d, item, ws)
-        except KitchenError:  # дробные или неверные размеры уже названы ошибкой расчёта модуля
+        except KitchenError as e:  # дробные размеры техники; расчёт модуля мог не запускаться
+            if a.module not in failed:  # иначе тот же сбой уже назван при расчёте модуля
+                found.append(Finding(code="appliance_size", level="error", subject=a.module, message=str(e)))
             continue
         # требование: размеры встраивания из брифа, недостающие — типовая ниша каталога
         width = (b.width if b and b.width else None) or a.width
@@ -298,15 +303,17 @@ def _niches(
                     ),
                 )
             )
-        if b and any(asked) and (a.height is None or a.depth is None):
+        # шаблон строит нишу по прибору из проекта, а бриф говорит другое: пусть мастер перенесёт в проект
+        differs = any(x is not None and x != y for x, y in zip(asked, built, strict=True))
+        if b and item is not None and differs:
             found.append(
                 Finding(
                     code="niche_not_in_project",
                     level="warning",
                     subject=a.module,
                     message=(
-                        f"Модуль {a.module}, «{b.label}»: размеры встраивания есть в брифе, а в проекте нет — "
-                        "перенесите размеры встраивания из брифа в проект."
+                        f"Модуль {a.module}, «{b.label}»: размеры встраивания в брифе отличаются от ниши, "
+                        "которую строит модуль, — перенесите размеры встраивания из брифа в проект."
                     ),
                 )
             )
@@ -431,7 +438,8 @@ def check_project(project: Project, ws: Workshop, brief: dict | None = None) -> 
     """Все проверки проекта, ошибки и предупреждения вместе. `brief` — последний бриф заказа (или `None`)."""
     found = _row_sums(project, ws)
     dims, built = _build(project, ws, found)
-    found += _niches(project, ws, dims, None if brief is None else brief_appliances(brief))
+    failed = {f.subject for f in found if f.code == "module_build"}
+    found += _niches(project, ws, dims, None if brief is None else brief_appliances(brief), failed)
     found += _sheet_fit(built, ws)
     found += _no_back(built, dims)
     return found

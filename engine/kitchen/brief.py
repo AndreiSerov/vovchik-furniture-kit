@@ -111,16 +111,6 @@ def _appliance(item: dict[str, Any], type_: str, label: str, built_in: bool) -> 
     )
 
 
-def appliance_types() -> set[str]:
-    """Виды техники, которые знает бриф: перечень из схемы и вытяжка из объекта `appliances.hood`."""
-    schema = json.loads(_checker().SCHEMA_PATH.read_text(encoding="utf-8"))
-    text = schema["sections"]["appliances"]["fields"]["items"]["item"]["type"]
-    kinds = {
-        m.group(1) for part in text.split("enum:", 1)[1].split(",") if (m := re.match(r"\s*([a-z_]+)", part))
-    }
-    return {k.strip() for k in kinds} | {"hood"}
-
-
 def appliances(brief: dict[str, Any]) -> list[BriefAppliance]:
     """Техника брифа: список `appliances.items` и встраиваемая вытяжка из `appliances.hood`."""
     cb = _checker()

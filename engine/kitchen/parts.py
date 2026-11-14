@@ -21,6 +21,7 @@ from kitchen.models import ApplianceItem, EdgeRule, Num, Workshop
 from kitchen.project import Appliance, ModuleSpec, Project, ProjectMaterials, Row
 
 __all__ = [
+    "APPLIANCE_ROWS",
     "BACK_PANEL",
     "TEMPLATES",
     "EdgeTotals",
@@ -32,10 +33,12 @@ __all__ = [
     "Position",
     "Span",
     "Template",
+    "accepts",
     "build_module",
     "built_niche",
     "compute_parts",
     "module_dims",
+    "niche_item",
 ]
 
 EDGE_SIDES = ("L1", "L2", "W1", "W2")
@@ -484,7 +487,7 @@ class Template:
     row_kind: str  # lower | upper | tall
     carcass: bool = True  # False: только фасад между соседними модулями (ПММ)
     drawers: bool = False  # ящики на направляющих: проверяется внутренняя глубина
-    appliances: tuple[str, ...] = ()  # виды техники, которые шаблон принимает (привязка из проекта)
+    appliances: tuple[str, ...] = ()  # виды техники, под которые шаблон строит нишу
 
 
 def build_base_sink(
@@ -725,7 +728,7 @@ def build_wall_hood(
     appliance: Appliance | None = None,
 ) -> TemplateOut:
     c = ws.construction
-    hood = next((item for item in ws.appliances.items if item.id == c.upper_rules.hood), None)
+    hood = niche_item("wall_hood", "hood", ws)
     if hood is None or hood.type != "hood":
         raise WorkshopError(f"appliances.yaml: вытяжка «{c.upper_rules.hood}» не найдена.")
     t = c.case_thickness
@@ -863,7 +866,7 @@ def build_tall_oven(
 
 TEMPLATES = {
     "tall_oven": Template(build_tall_oven, "tall", drawers=True, appliances=("oven", "microwave")),
-    "base_door": Template(build_base_door, "lower", appliances=("hob",)),
+    "base_door": Template(build_base_door, "lower"),
     "base_corner": Template(build_base_corner, "lower"),
     "wall_corner": Template(build_wall_corner, "upper"),
     "wall_door": Template(build_wall_door, "upper"),
@@ -872,9 +875,40 @@ TEMPLATES = {
     "wall_dryer": Template(build_wall_dryer, "upper"),
     "base_sink": Template(build_base_sink, "lower", appliances=("sink",)),
     "base_bottle": Template(build_base_bottle, "lower"),
-    "base_drawers": Template(build_base_drawers, "lower", drawers=True, appliances=("hob",)),
+    "base_drawers": Template(build_base_drawers, "lower", drawers=True),
     "dishwasher_panel": Template(build_dishwasher_panel, "lower", carcass=False, appliances=("dishwasher",)),
 }
+
+# Явная несовместимость вида техники с рядом модуля: вытяжка только вверху, остальное только внизу
+# (духовка ещё и в пенале). Что не названо (СВЧ, холодильник…), не ограничено.
+APPLIANCE_ROWS = {
+    "hood": ("upper",),
+    "oven": ("lower", "tall"),
+    "dishwasher": ("lower",),
+    "hob": ("lower",),
+    "sink": ("lower",),
+}
+
+
+def niche_item(template: str, appliance_type: str, ws: Workshop) -> ApplianceItem | None:
+    """Позиция каталога, по которой шаблон строит нишу под прибор (пенал, вытяжка), иначе `None`.
+    Одна функция для шаблонов и проверок."""
+    c = ws.construction
+    wanted = {
+        ("tall_oven", "oven"): c.tall_rules.oven,
+        ("tall_oven", "microwave"): c.tall_rules.microwave,
+        ("wall_hood", "hood"): c.upper_rules.hood,
+    }.get((template, appliance_type))
+    return next((i for i in ws.appliances.items if i.id == wanted), None) if wanted else None
+
+
+def accepts(template: str, appliance_type: str, ws: Workshop) -> bool:
+    """Принимает ли шаблон прибор: строит под него нишу или это техника «в столешницу»
+    и шаблон — нижний корпусной модуль."""
+    t = TEMPLATES[template]
+    on_top = appliance_type in ws.construction.countertop_appliances
+    return appliance_type in t.appliances or (on_top and t.carcass and t.row_kind == "lower")
+
 
 _ROW_RU = {"lower": "нижнем ряду", "upper": "верхнем ряду", "tall": "пенале"}
 

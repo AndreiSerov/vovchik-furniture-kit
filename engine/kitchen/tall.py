@@ -17,6 +17,7 @@ from kitchen.parts import (
     build_base_door,
     built_niche,
     make_part,
+    niche_item,
     steps_pick,
 )
 from kitchen.project import Appliance, ModuleSpec, ProjectMaterials
@@ -33,11 +34,10 @@ def build_tall_oven(
     rules = c.tall_rules
     W, H, D = dims.width, dims.height, dims.depth
     t, gap = c.case_thickness, c.facades.gap
-    appliances = {a.id: a for a in ws.appliances.items}
-    try:
-        oven, microwave = appliances[rules.oven], appliances[rules.microwave]
-    except KeyError as e:
-        raise OrderError(f"Модуль {module.label}: техника {e.args[0]} отсутствует в appliances.yaml.") from e
+    oven, microwave = niche_item("tall_oven", "oven", ws), niche_item("tall_oven", "microwave", ws)
+    for item, id_ in ((oven, rules.oven), (microwave, rules.microwave)):
+        if item is None:
+            raise OrderError(f"Модуль {module.label}: техника {id_} отсутствует в appliances.yaml.")
 
     def niche(item):
         matches = [a for a in project_appliances if a.module == module.label and a.type == item.type]

@@ -30,6 +30,24 @@ Num = Annotated[float, BeforeValidator(_not_bool)]
 Int = Annotated[int, BeforeValidator(_not_bool)]
 
 
+# Виды техники, которые знает движок: перечень брифа (тест сверяет с его схемой) и вытяжка из `appliances.hood`.
+APPLIANCE_KINDS = frozenset(
+    {
+        "sink",
+        "hob",
+        "cooker",
+        "oven",
+        "microwave",
+        "dishwasher",
+        "washing_machine",
+        "coffee_machine",
+        "wine_cooler",
+        "other",
+        "hood",
+    }
+)
+
+
 class Section(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 

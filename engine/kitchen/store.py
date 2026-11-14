@@ -15,7 +15,7 @@ from kitchen.workshop import resolve_home
 SCHEMA_VERSION = 3
 
 # Миграции: номер схемы -> скрипт (операторы через «;», без «;» внутри комментариев).
-# Добавить v3: написать _SCHEMA_V3, внести в MIGRATIONS и поднять SCHEMA_VERSION.
+# Добавить v4: написать _SCHEMA_V4, внести в MIGRATIONS и поднять SCHEMA_VERSION.
 _SCHEMA_V1 = """
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY,

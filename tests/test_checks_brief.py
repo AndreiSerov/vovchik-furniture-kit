@@ -6,9 +6,10 @@ import pytest
 from kitchen import api
 from kitchen import brief as brief_mod
 from kitchen.errors import OrderError
+from kitchen.models import APPLIANCE_KINDS
 
 from tests.test_check_brief import c, sergey
-from tests.test_checks import findings, single, with_appliances
+from tests.test_checks import findings, make_project, single, with_appliances
 
 ORDER = "2026-047-petrov"
 
@@ -103,12 +104,49 @@ def test_appliance_no_template_accepts_is_a_warning(home):
     assert findings(single(home, "base_door"), home, "appliance_unbound") == []
 
 
-def test_appliance_in_module_of_wrong_template_is_an_error(home):
-    save_brief(home, [oven()])
-    path = with_appliances(single(home, "base_door"), {"type": "oven", "width": 600, "module": "Н1"})
-    [f] = findings(path, home, "appliance_wrong_module")
+def test_incompatible_appliance_and_module_is_an_error(home):
+    save_brief(home, [oven()], hood={"kind": "built_in"})
+    hood_below = with_appliances(single(home, "base_door"), {"type": "hood", "width": 600, "module": "Н1"})
+    [f] = findings(hood_below, home, "appliance_wrong_module")
     assert (f.level, f.subject) == ("error", "Н1")
+    oven_above = with_appliances(
+        single(home, "wall_door", row="upper"), {"type": "oven", "width": 600, "module": "В1"}
+    )
+    assert [f.subject for f in findings(oven_above, home, "appliance_wrong_module")] == ["В1"]
     assert findings(project_oven(home), home, "appliance_wrong_module") == []
+
+
+def test_oven_under_hob_in_base_door_is_a_warning_not_an_error(home):
+    save_brief(home, [oven(), {"type": "hob", "built_in": True, "model": "Hob"}])
+    path = with_appliances(
+        single(home, "base_door"),
+        {"type": "hob", "width": 600, "module": "Н1"},
+        {"type": "oven", "width": 600, "module": "Н1"},
+    )
+    assert errors(path, home) == []
+    [f] = findings(path, home, "appliance_no_niche")
+    assert (
+        f.level == "warning" and "не строит нишу под «oven»" in f.message and "проверьте вручную" in f.message
+    )
+    # варочная — на столешнице, шаблон ей ничего не строит и не жалуется
+    assert all("hob" not in f.message for f in findings(path, home, "appliance_no_niche"))
+
+
+def test_hob_over_base_corner_is_allowed(home):
+    save_brief(home, [{"type": "hob", "built_in": True, "model": "Hob"}])
+    corner = {"label": "Н1", "template": "base_corner", "width": 1050, "corner": {"adjacent_wall": "Б"}}
+    walls = [("A", 1050, [("lower", [corner])]), ("Б", 1800, [])]
+    path = with_appliances(
+        make_project(home / "p.json", walls), {"type": "hob", "width": 600, "module": "Н1"}
+    )
+    assert errors(path, home) == []
+    assert findings(path, home, "appliance_no_niche") == []
+
+
+def test_no_template_warning_is_not_given_when_a_template_exists_or_not_built_in(home):
+    save_brief(home, [dw(), {"type": "coffee_machine", "built_in": False}])
+    assert findings(single(home, "base_door"), home, "appliance_no_template") == []
+    assert len(findings(single(home, "base_door"), home, "appliance_unbound")) == 1  # ПММ — другое
 
 
 def test_count_per_type_is_compared(home):
@@ -181,12 +219,22 @@ def test_built_niche_comes_from_the_project(home):
     assert (f.value, f.limit) == (620, 610)
 
 
-def test_niche_in_brief_but_not_in_project_is_a_warning(home):
-    save_brief(home, [oven(**niche(560, 590, 550))])
+def test_niche_in_brief_differing_from_built_is_a_warning_to_carry_into_project(home):
+    save_brief(home, [oven(**niche(560, 585, 550))])  # пенал строит по каталогу 590
     [f] = findings(project_oven(home), home, "niche_not_in_project")
     assert f.level == "warning" and "перенесите размеры встраивания из брифа в проект" in f.message
-    full = project_oven(home, height=590, depth=550)
-    assert findings(full, home, "niche_not_in_project") == []
+    carried = project_oven(home, height=585, depth=550)
+    assert findings(carried, home, "niche_not_in_project") == []
+
+
+def test_niche_in_brief_equal_to_catalog_needs_no_carrying(home):
+    save_brief(home, [oven(**niche(560, 590, 550))])
+    assert findings(project_oven(home), home, "niche_not_in_project") == []
+
+
+def test_dishwasher_panel_builds_no_niche_from_project_so_no_carry_warning(home):
+    save_brief(home, [dw(**niche(450, 800, 500))])
+    assert findings(project_dw(home), home, "niche_not_in_project") == []
 
 
 def test_dishwasher_niche_against_module_space(home):
@@ -353,3 +401,44 @@ def test_petrov_brief_fixture_has_all_appliances_with_niches(repo, home):
     for a in items:
         if a.type in ("oven", "microwave", "dishwasher", "hood"):
             assert None not in (a.niche_width, a.niche_height, a.niche_depth), a.type
+
+
+# --- виды техники: константа движка, а не файл скилла -------------------------------------
+
+
+def test_engine_appliance_kinds_cover_brief_schema(repo):
+    import re
+
+    schema = json.loads((repo / "skills/kitchen-brief/references/brief_schema.json").read_text())
+    text = schema["sections"]["appliances"]["fields"]["items"]["item"]["type"]
+    in_schema = {
+        m.group(1) for part in text.split("enum:", 1)[1].split(",") if (m := re.match(r"\s*([a-z_]+)", part))
+    }
+    assert in_schema and in_schema <= APPLIANCE_KINDS and "hood" in APPLIANCE_KINDS
+
+
+def test_workshop_loads_without_the_skill_schema(home, monkeypatch):
+    monkeypatch.setattr(brief_mod, "SKILL", home / "no-skill")
+    assert api.check_workshop(home).valid
+
+
+# --- размеры техники, которые не удалось прочитать ----------------------------------------------
+
+
+def test_unreadable_appliance_size_is_named_even_when_module_was_not_built(home):
+    save_brief(home, [oven()])
+    path = with_appliances(
+        single(home, "tall_oven", 600, depth=450),
+        {"type": "oven", "width": 600, "height": 590.5, "module": "Н1"},
+    )
+    assert findings(path, home, "drawer_depth") and findings(path, home, "module_build") == []
+    [f] = findings(path, home, "appliance_size")
+    assert f.level == "error" and f.subject == "Н1"
+
+
+def test_unreadable_appliance_size_is_not_repeated_when_module_build_names_it(home):
+    save_brief(home, [oven()])
+    path = with_appliances(
+        project_oven(home), {"type": "oven", "width": 600, "height": 590.5, "module": "Н1"}
+    )
+    assert findings(path, home, "module_build") and findings(path, home, "appliance_size") == []

@@ -8,9 +8,9 @@ from typing import TypeVar
 import yaml
 from pydantic import ValidationError
 
-from kitchen.brief import appliance_types
 from kitchen.errors import WorkshopError
 from kitchen.models import (
+    APPLIANCE_KINDS,
     Appliances,
     Construction,
     Equipment,
@@ -137,7 +137,7 @@ def _cross_refs(w: Workshop) -> list[str]:
     edge_ids = {m.id for m in w.materials.edges}
     hw_ids = {i.id for i in w.hardware.items}
     probs = []
-    kinds = appliance_types()
+    kinds = APPLIANCE_KINDS
     probs += [
         f"construction.yaml: техника_в_столешницу: неизвестный вид «{kind}» (бриф знает: {', '.join(sorted(kinds))})."
         for kind in w.construction.countertop_appliances

@@ -282,3 +282,34 @@ def test_exhausted_year_does_not_mask_duplicate_surname_error(home, tmp_path):
     api.order_new("2026-999-sergeev")
     with pytest.raises(OrderError, match="уже есть: 2026-999-sergeev"):
         api.brief_save("sergeev", _brief(tmp_path))
+
+
+def test_version_made_on_v2_database_reports_no_brief_after_migration(home):
+    import hashlib
+
+    from tests.test_checks import single
+
+    path = single(home, "base_door")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    text = api._canonical(data)
+    db = home / "orders" / "kitchen.db"
+    db.parent.mkdir()
+    conn = sqlite3.connect(db)
+    for number in (1, 2):
+        for statement in store.MIGRATIONS[number].split(";"):
+            if statement.strip():
+                conn.execute(statement)
+    conn.execute(
+        "INSERT INTO orders (number, slug, client, created_at, updated_at)"
+        " VALUES ('2026-047', 'petrov', 'Петров', '2026-11-01T00:00:00+00:00', '2026-11-01T00:00:00+00:00')"
+    )
+    conn.execute(
+        "INSERT INTO project_versions (order_id, version, data, content_hash, created_at)"
+        " VALUES (1, 1, ?, ?, '2026-11-01T00:00:00+00:00')",
+        (text, hashlib.sha256(text.encode("utf-8")).hexdigest()),
+    )
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+    again = api.import_project("petrov", path)
+    assert not again.changed and again.version == 1 and again.brief_id is None
