@@ -144,7 +144,9 @@ def test_upper_rejects_impossible_geometry(home, base_door_project):
 def test_hood_uses_project_appliance_dimensions(home, base_door_project):
     upper_project(base_door_project, "wall_hood")
     project = json.loads(base_door_project.read_text())
-    project["appliances"] = [{"type": "hood", "width": 500, "height": 150, "depth": 240, "module": "В1"}]
+    project["appliances"] = [
+        {"type": "hood", "width": 500, "niche_height": 150, "niche_depth": 240, "module": "В1"}
+    ]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
     result = api.parts_from_project(base_door_project, home)
     rail = next(p for p in result.modules[0].parts if p.name == "передняя планка дна вытяжки")
@@ -157,7 +159,9 @@ def test_hood_rejects_nonpositive_project_appliance_dimensions(home, base_door_p
 
     upper_project(base_door_project, "wall_hood")
     project = json.loads(base_door_project.read_text())
-    project["appliances"] = [{"type": "hood", "width": 500, "height": 150, "depth": -10, "module": "В1"}]
+    project["appliances"] = [
+        {"type": "hood", "width": 500, "niche_height": 150, "niche_depth": -10, "module": "В1"}
+    ]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
     with pytest.raises(OrderError, match="В1.*положительн"):
         api.parts_from_project(base_door_project, home)

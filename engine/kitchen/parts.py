@@ -222,17 +222,20 @@ def module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
 
 
 def built_niche(appliance: Appliance | None, item: ApplianceItem) -> tuple[int, int, int]:
-    """Ниша (ширина, высота, глубина), которую шаблон строит под прибор: размеры из проекта,
-    недостающие — ниша из `appliances.yaml`; ширина, равная типоразмеру, даёт нишу каталога.
+    """Ниша (ширина, высота, глубина), которую шаблон строит под прибор: размеры ниши из проекта
+    (`niche_*`), недостающие — ниша из `appliances.yaml`. Габариты корпуса прибора на нишу не влияют.
     Одна функция для шаблонов пенала и вытяжки и для проверок."""
     if appliance is None:
         return item.niche_width, item.niche_height, item.niche_depth
-    width = _whole(appliance.width, "Ширина техники")
-    if width == item.nominal_width:
-        width = item.niche_width
-    height = _whole(appliance.height, "Высота техники") if appliance.height is not None else item.niche_height
-    depth = _whole(appliance.depth, "Глубина техники") if appliance.depth is not None else item.niche_depth
-    return width, height, depth
+
+    def pick(value, default: int, what: str) -> int:
+        return _whole(value, what) if value is not None else default
+
+    return (
+        pick(appliance.niche_width, item.niche_width, "Ширина ниши техники"),
+        pick(appliance.niche_height, item.niche_height, "Высота ниши техники"),
+        pick(appliance.niche_depth, item.niche_depth, "Глубина ниши техники"),
+    )
 
 
 def _material(items: list, material_id: str, what: str, kind: str):

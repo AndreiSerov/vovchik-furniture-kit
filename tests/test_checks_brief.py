@@ -213,9 +213,9 @@ def test_brief_niche_taller_than_tall_module_builds_is_an_error(home):
 def test_built_niche_comes_from_the_project(home):
     save_brief(home, [oven(**niche(560, 600, 550))])
     # в проекте ниша 610 высотой — именно её строит шаблон
-    assert findings(project_oven(home, height=610), home, "niche_too_small") == []
+    assert findings(project_oven(home, niche_height=610), home, "niche_too_small") == []
     save_brief(home, [oven(**niche(560, 620, 550))], name="b2.json")
-    [f] = findings(project_oven(home, height=610), home, "niche_too_small")
+    [f] = findings(project_oven(home, niche_height=610), home, "niche_too_small")
     assert (f.value, f.limit) == (620, 610)
 
 
@@ -223,7 +223,7 @@ def test_niche_in_brief_differing_from_built_is_a_warning_to_carry_into_project(
     save_brief(home, [oven(**niche(560, 585, 550))])  # пенал строит по каталогу 590
     [f] = findings(project_oven(home), home, "niche_not_in_project")
     assert f.level == "warning" and "перенесите размеры встраивания из брифа в проект" in f.message
-    carried = project_oven(home, height=585, depth=550)
+    carried = project_oven(home, niche_height=585, niche_depth=550)
     assert findings(carried, home, "niche_not_in_project") == []
 
 
@@ -429,7 +429,7 @@ def test_unreadable_appliance_size_is_named_even_when_module_was_not_built(home)
     save_brief(home, [oven()])
     path = with_appliances(
         single(home, "tall_oven", 600, depth=450),
-        {"type": "oven", "width": 600, "height": 590.5, "module": "Н1"},
+        {"type": "oven", "width": 600, "niche_height": 590.5, "module": "Н1"},
     )
     assert findings(path, home, "drawer_depth") and findings(path, home, "module_build") == []
     [f] = findings(path, home, "appliance_size")
@@ -439,6 +439,6 @@ def test_unreadable_appliance_size_is_named_even_when_module_was_not_built(home)
 def test_unreadable_appliance_size_is_not_repeated_when_module_build_names_it(home):
     save_brief(home, [oven()])
     path = with_appliances(
-        project_oven(home), {"type": "oven", "width": 600, "height": 590.5, "module": "Н1"}
+        project_oven(home), {"type": "oven", "width": 600, "niche_height": 590.5, "module": "Н1"}
     )
     assert findings(path, home, "module_build") and findings(path, home, "appliance_size") == []

@@ -37,7 +37,7 @@ def test_tall_oven_manual_golden(home, base_door_project):
 def test_tall_oven_project_microwave_dimensions_change_niche(home, base_door_project):
     project = json.loads(base_door_project.read_text(encoding="utf-8"))
     project["walls"][0]["rows"][0]["modules"] = [{"label": "П1", "template": "tall_oven", "width": 600}]
-    project["appliances"] = [{"type": "microwave", "width": 600, "height": 420, "module": "П1"}]
+    project["appliances"] = [{"type": "microwave", "width": 600, "niche_height": 420, "module": "П1"}]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     result = api.parts_from_project(base_door_project, home)
     by_id = {p.id: p for p in result.modules[0].parts}
@@ -97,8 +97,38 @@ def test_tall_upper_row_uses_module_facade_override(home, base_door_project):
 def test_tall_odd_niche_height_places_shelf_on_whole_mm(home, base_door_project):
     project = json.loads(base_door_project.read_text())
     project["walls"][0]["rows"][0]["modules"] = [{"label": "П1", "template": "tall_oven", "width": 600}]
-    project["appliances"] = [{"type": "microwave", "module": "П1", "width": 600, "height": 381}]
+    project["appliances"] = [{"type": "microwave", "module": "П1", "width": 600, "niche_height": 381}]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
     result = api.parts_from_project(base_door_project, home)
     shelf = next(part for part in result.modules[0].parts if part.name == "полка")
     assert shelf.position.z == 1700
+
+
+def _tall_with_appliances(base_door_project, appliances):
+    project = json.loads(base_door_project.read_text(encoding="utf-8"))
+    project["walls"][0]["rows"][0]["modules"] = [{"label": "П1", "template": "tall_oven", "width": 600}]
+    project["appliances"] = appliances
+    base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+
+
+def test_tall_oven_real_body_dimensions_do_not_change_niche(home, base_door_project):
+    # Габариты корпуса прибора (595x595x567) — не ниша: ниша духовки берётся из каталога (560x590x550),
+    # детали те же, что у пенала без техники проекта.
+    _tall_with_appliances(base_door_project, [])
+    expected = api.parts_from_project(base_door_project, home).modules[0].parts
+    _tall_with_appliances(
+        base_door_project, [{"type": "oven", "width": 595, "height": 595, "depth": 567, "module": "П1"}]
+    )
+    findings = api.check_project(base_door_project, home).findings
+    assert [f for f in findings if f.code == "module_build"] == []
+    parts = api.parts_from_project(base_door_project, home).modules[0].parts
+    assert [(p.id, p.position.z) for p in parts] == [(p.id, p.position.z) for p in expected]
+
+
+def test_tall_oven_niche_comes_from_project_niche_fields(home, base_door_project):
+    _tall_with_appliances(
+        base_door_project,
+        [{"type": "microwave", "width": 600, "niche_height": 420, "module": "П1"}],
+    )
+    by_id = {p.id: p for p in api.parts_from_project(base_door_project, home).modules[0].parts}
+    assert by_id["П1-перег-2"].position.z == 1324

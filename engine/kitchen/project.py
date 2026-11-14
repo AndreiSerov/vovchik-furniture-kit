@@ -77,10 +77,13 @@ class ProjectMaterials(Section):
 
 class Appliance(Section):
     type: str
-    width: Num
+    width: Num  # габариты корпуса прибора (справочно): на нишу не влияют
     model: str | None = None
     height: Num | None = None
     depth: Num | None = None
+    niche_width: Num | None = None  # размеры ниши (встраивания): строит модуль, недостающие — из каталога
+    niche_height: Num | None = None
+    niche_depth: Num | None = None
     module: str
 
 

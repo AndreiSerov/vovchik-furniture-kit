@@ -47,6 +47,42 @@
           "default": null,
           "title": "Depth"
         },
+        "niche_width": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Niche Width"
+        },
+        "niche_height": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Niche Height"
+        },
+        "niche_depth": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Niche Depth"
+        },
         "module": {
           "title": "Module",
           "type": "string"

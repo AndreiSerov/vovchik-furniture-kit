@@ -135,16 +135,22 @@
   "appliances": [
     {
       "type": "oven",
-      "width": 560,
-      "height": 590,
-      "depth": 550,
+      "width": 595,
+      "height": 595,
+      "depth": 567,
+      "niche_width": 560,
+      "niche_height": 590,
+      "niche_depth": 550,
       "module": "П1"
     },
     {
       "type": "microwave",
-      "width": 560,
-      "height": 380,
-      "depth": 350,
+      "width": 594,
+      "height": 390,
+      "depth": 360,
+      "niche_width": 560,
+      "niche_height": 380,
+      "niche_depth": 350,
       "module": "П1"
     },
     {
@@ -164,9 +170,12 @@
     },
     {
       "type": "hood",
-      "width": 560,
-      "height": 180,
-      "depth": 280,
+      "width": 598,
+      "height": 190,
+      "depth": 290,
+      "niche_width": 560,
+      "niche_height": 180,
+      "niche_depth": 280,
       "module": "В1"
     }
   ]
