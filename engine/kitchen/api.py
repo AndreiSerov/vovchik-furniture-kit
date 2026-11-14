@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 
 from kitchen import brief as brief_check
 from kitchen import store
+from kitchen.checks import Finding
+from kitchen.checks import check_project as run_checks
 from kitchen.errors import InputError, OrderError
 from kitchen.models import Workshop
 from kitchen.parts import EdgeTotals, ModuleParts, compute_parts
@@ -25,10 +27,12 @@ from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 __all__ = [
     "BriefSaveResult",
     "BriefShowResult",
+    "CheckResult",
     "DiffResult",
     "EdgeTotals",
     "ExportResult",
     "FileSummary",
+    "Finding",
     "ImportResult",
     "LogEntry",
     "LogResult",
@@ -43,6 +47,7 @@ __all__ = [
     "WorkshopCheck",
     "brief_save",
     "brief_show",
+    "check_project",
     "check_workshop",
     "diff_project",
     "export_project",
@@ -282,7 +287,7 @@ def _same_order(value: Any, ctx: ValidationContext) -> bool:
 
 
 def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
-    """Проверить заказ и схему проекта; проверки конструкции добавит тикет 10."""
+    """Проверить заказ, схему и конструкцию проекта (`kitchen.checks`): ошибки отклоняют импорт."""
     if not isinstance(data, dict):
         return ValidationResult(["Проект должен быть JSON-объектом ({...}), а не списком или значением."])
     if "order" not in data:
@@ -301,7 +306,13 @@ def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
                 if module.label in seen:
                     return ValidationResult(errors=[f"Метка модуля «{module.label}» не уникальна."])
                 seen.add(module.label)
-    return ValidationResult()
+    if ctx.workshop is None:  # данные мастерской не загрузились: проверки конструкции невозможны
+        return ValidationResult()
+    findings = run_checks(project, ctx.workshop)
+    return ValidationResult(
+        errors=[f.message for f in findings if f.level == "error"],
+        warnings=[f.message for f in findings if f.level == "warning"],
+    )
 
 
 def _canonical(data: dict) -> str:
@@ -741,6 +752,37 @@ def parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
         edges=computed.edges,
         facade_area=computed.facade_area,
         warnings=computed.warnings,
+        mock=workshop.is_mock,
+        mock_files=workshop.mock_files,
+    )
+
+
+# --- проверки проекта ---------------------------------------------------------
+
+
+class CheckResult(Result):
+    """Находки проверок проекта: ошибки отклоняют импорт, предупреждения идут в журнал."""
+
+    order: str
+    findings: list[Finding]
+
+    @property
+    def errors(self) -> list[Finding]:
+        return [f for f in self.findings if f.level == "error"]
+
+    @property
+    def warnings(self) -> list[Finding]:
+        return [f for f in self.findings if f.level == "warning"]
+
+
+def check_project(path: Path, home: Path | None = None) -> CheckResult:
+    """`проверки проекта` из файла без БД: все находки сразу."""
+    home = home or resolve_home()
+    project = parse_project(_read_json(Path(path), "Файл проекта"))
+    workshop = load_workshop(home)
+    return CheckResult(
+        order=project.order,
+        findings=run_checks(project, workshop),
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,
     )

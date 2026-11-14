@@ -60,6 +60,15 @@ def project():
     }
 
 
+def schema_import(order, path):
+    """Импорт со схемой, но без проверок конструкции (1.6): фикстура ниже — про схему и diff, не про раскрой."""
+
+    def schema_only(data, ctx):
+        return api.validate_wrapper(data, api.ValidationContext(ctx.order_ref, ctx.order_number, None))
+
+    return api.import_project(order, path, validate=schema_only)
+
+
 def write(path, data):
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     return path
@@ -68,11 +77,11 @@ def write(path, data):
 def test_full_project_import_and_schema_rejection(home, tmp_path):
     api.order_new("2026-047-petrov")
     p = write(tmp_path / "project.json", project())
-    assert api.import_project("petrov", p).version == 1
+    assert schema_import("petrov", p).version == 1
     bad = project()
     bad["walls"][0]["rows"][0]["modules"][0]["width"] = "not a number"
     with pytest.raises(OrderError):
-        api.import_project("petrov", write(p, bad))
+        schema_import("petrov", write(p, bad))
     assert api.export_project("petrov").version == 1
 
 
@@ -87,13 +96,13 @@ def test_diff_reports_width_and_added_removed_modules(home, tmp_path):
     api.order_new("2026-047-petrov")
     old = project()
     p = write(tmp_path / "project.json", old)
-    api.import_project("petrov", p)
+    schema_import("petrov", p)
     new = project()
     modules = new["walls"][0]["rows"][0]["modules"]
     modules[0]["width"] = 650
     modules.pop()
     modules.append({"label": "Н2", "template": "base_door", "width": 400})
-    api.import_project("petrov", write(p, new))
+    schema_import("petrov", write(p, new))
     result = api.diff_project("petrov", 1, 2)
     assert any("Н1" in s and "ширина 600 → 650" in s for s in result.changes)
     assert any("П1" in s and "удалён" in s for s in result.changes)
@@ -109,14 +118,14 @@ def test_duplicate_module_labels_are_rejected(home, tmp_path):
     modules = data["walls"][0]["rows"][0]["modules"]
     modules.append(dict(modules[0]))
     with pytest.raises(OrderError, match="Н1"):
-        api.import_project("petrov", write(tmp_path / "p.json", data))
+        schema_import("petrov", write(tmp_path / "p.json", data))
 
 
 def test_import_ignores_any_supplied_version(home, tmp_path):
     api.order_new("2026-047-petrov")
     data = project()
     data["version"] = "ignored"
-    assert api.import_project("petrov", write(tmp_path / "p.json", data)).version == 1
+    assert schema_import("petrov", write(tmp_path / "p.json", data)).version == 1
 
 
 def test_parts_rejects_unsupported_contents(home, base_door_project):
@@ -144,7 +153,7 @@ def test_diff_gives_readable_error_for_old_incomplete_project(home, tmp_path):
     api.order_new("2026-047-petrov")
     p = write(tmp_path / "p.json", {"order": "2026-047", "walls": [1]})
     api.import_project("petrov", p, validate=lambda data, ctx: api.ValidationResult())
-    api.import_project("petrov", write(p, project()))
+    schema_import("petrov", write(p, project()))
     with pytest.raises(OrderError, match="Версия 1 не соответствует"):
         api.diff_project("petrov", 1, 2)
 
@@ -155,7 +164,7 @@ def test_import_rejects_strings_for_number_and_boolean(home, tmp_path, field, va
     data = project()
     data[field] = value
     with pytest.raises(OrderError):
-        api.import_project("petrov", write(tmp_path / "p.json", data))
+        schema_import("petrov", write(tmp_path / "p.json", data))
 
 
 @pytest.mark.parametrize("field,value", [("width", "600"), ("without_back", "false")])
@@ -164,7 +173,7 @@ def test_import_rejects_strings_in_module(home, tmp_path, field, value):
     data = project()
     data["walls"][0]["rows"][0]["modules"][0][field] = value
     with pytest.raises(OrderError):
-        api.import_project("petrov", write(tmp_path / "p.json", data))
+        schema_import("petrov", write(tmp_path / "p.json", data))
 
 
 def test_diff_compares_older_minimal_version(home, tmp_path):
@@ -182,7 +191,7 @@ def test_diff_compares_older_minimal_version(home, tmp_path):
     }
     p = write(tmp_path / "p.json", old)
     api.import_project("petrov", p, validate=lambda data, ctx: api.ValidationResult())
-    api.import_project("petrov", write(p, project()))
+    schema_import("petrov", write(p, project()))
     assert any("Н1: ширина 400 → 600" in c for c in api.diff_project("petrov", 1, 2).changes)
 
 
@@ -193,8 +202,8 @@ def test_diff_names_added_nested_fields_in_russian(home, tmp_path):
     del module["contents"]
     del module["corner"]
     p = write(tmp_path / "p.json", old)
-    api.import_project("petrov", p)
-    api.import_project("petrov", write(p, project()))
+    schema_import("petrov", p)
+    schema_import("petrov", write(p, project()))
     changes = "\n".join(api.diff_project("petrov", 1, 2).changes)
     assert "наполнение: двери не задано → 1" in changes
     assert "угол: соседняя стена не задано → Б" in changes

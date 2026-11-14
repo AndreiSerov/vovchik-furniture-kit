@@ -16,7 +16,7 @@
 - [x] 07 — Нижние шаблоны (1.4) ([спека](docs/specs/stage-1-modules-to-parts.md))
 - [x] 08 — Верхние шаблоны и `appliances.yaml` (1.4) ([спека](docs/specs/stage-1-modules-to-parts.md))
 - [x] 09 — Угловые и пенал (1.5) ([спека](docs/specs/stage-1-modules-to-parts.md))
-- [ ] 10 — Проверки проекта (1.6) ([спека](docs/specs/stage-1-modules-to-parts.md))
+- [x] 10 — Проверки проекта (1.6) ([спека](docs/specs/stage-1-modules-to-parts.md))
 - [ ] 11 — Заказ Петрова целиком (1.7) ([спека](docs/specs/stage-1-modules-to-parts.md))
 
 ## Этап 2. Раскрой, кромка, закупка
