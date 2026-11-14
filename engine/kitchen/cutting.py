@@ -167,13 +167,10 @@ def _layouts(
                 yield f"{algo.__name__}/{sort_name}/{mode}", _placed(packer)
 
 
-def cut_order(
-    placements: list[Placement], size: tuple[int, int], kerf: int, trim: int, min_strip: int = 0
-) -> list[Cut]:
+def cut_order(placements: list[Placement], size: tuple[int, int], kerf: int, trim: int) -> list[Cut]:
     """Порядок резов листа: рекурсивно ищем сквозной рез куска (от края до края), делим, повторяем.
     Сначала отрезаем отход вокруг деталей куска (`trim`), затем делим детали (`separate`); левый/верхний
-    кусок режем раньше правого/нижнего. Полоса отхода у края куска тоньше `min_strip` не режется: деталь
-    прилегает к краю куска с допуском (DECISIONS.md). Раскладка без сквозного реза — ошибка движка."""
+    кусок режем раньше правого/нижнего. Раскладка без сквозного реза — ошибка движка."""
     cuts: list[Cut] = []
 
     def add(direction: Literal["vertical", "horizontal"], position: int, start: int, end: int, kind) -> None:
@@ -209,19 +206,15 @@ def cut_order(
     def walk(items: list[Placement], x0: int, y0: int, x1: int, y1: int) -> None:
         minx, maxx = min(r.x for r in items), max(r.x + r.w for r in items)
         miny, maxy = min(r.y for r in items), max(r.y + r.h for r in items)
-        # Полоса тоньше min_strip у края куска не режется: край куска остаётся прежним, деталь идёт с допуском.
-        if minx - x0 >= max(min_strip, 1):
+        if minx > x0:
             add("vertical", minx - kerf, y0, y1, "trim")
-            x0 = minx
-        if x1 - maxx >= max(min_strip, 1):
+        if maxx < x1:
             add("vertical", maxx, y0, y1, "trim")
-            x1 = maxx
-        if miny - y0 >= max(min_strip, 1):
-            add("horizontal", miny - kerf, x0, x1, "trim")
-            y0 = miny
-        if y1 - maxy >= max(min_strip, 1):
-            add("horizontal", maxy, x0, x1, "trim")
-            y1 = maxy
+        if miny > y0:
+            add("horizontal", miny - kerf, minx, maxx, "trim")
+        if maxy < y1:
+            add("horizontal", maxy, minx, maxx, "trim")
+        x0, y0, x1, y1 = minx, miny, maxx, maxy
         if len(items) == 1:
             return
         e = through(items, x0, x1, vertical=True)
@@ -272,7 +265,6 @@ def _cut_material(sheet: SheetMaterial, parts: list[Part], ws: Workshop) -> Mate
     kerf = round(ws.equipment.saw.kerf)
     trim = round(ws.equipment.sheet.perimeter_trim)
     max_cut = round(ws.equipment.saw.max_cut_length)
-    min_strip = round(ws.equipment.saw.min_waste_strip)
     size = _material_axes(sheet)
     field = (size[0] - 2 * trim, size[1] - 2 * trim)
     textured = bool(sheet.texture)
@@ -302,7 +294,7 @@ def _cut_material(sheet: SheetMaterial, parts: list[Part], ws: Workshop) -> Mate
             _real(r, by_id[r.id], kerf, trim) for r in sorted(rects, key=lambda r: (r.y, r.x, r.id))
         ]
         area = sum(pl.w * pl.h for pl in placements)
-        cuts = cut_order(placements, size, kerf, trim, min_strip)
+        cuts = cut_order(placements, size, kerf, trim)
         too_long = [c for c in cuts if c.length > max_cut]
         if too_long:
             raise OrderError(

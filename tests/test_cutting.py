@@ -9,7 +9,7 @@ from kitchen.errors import OrderError
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ORDER = "2026-047-petrov"
-KERF, TRIM, MIN_STRIP = 4, 10, 3  # из workshop/equipment.yaml (мок)
+KERF, TRIM = 4, 10  # из workshop/equipment.yaml (мок)
 
 
 def set_sheet(home, size):
@@ -127,9 +127,7 @@ def replay_cuts(placements, cuts, size):
             p for p in pieces if p[0] <= pl.x and p[1] <= pl.y and pl.x + pl.w <= p[2] and pl.y + pl.h <= p[3]
         ]
         assert len(inside) == 1, pl.part
-        # деталь может прилегать к краю куска с допуском: полоса тоньше `мин_полоса_отхода` не режется
-        extra_w, extra_h = inside[0][2] - inside[0][0] - pl.w, inside[0][3] - inside[0][1] - pl.h
-        assert 0 <= extra_w <= 2 * (MIN_STRIP - 1) and 0 <= extra_h <= 2 * (MIN_STRIP - 1), pl.part
+        assert (inside[0][2] - inside[0][0], inside[0][3] - inside[0][1]) == (pl.w, pl.h), pl.part
     for p in pieces:
         n = sum(
             p[0] <= pl.x and pl.x + pl.w <= p[2] and p[1] <= pl.y and pl.y + pl.h <= p[3] for pl in placements
@@ -160,26 +158,20 @@ def test_gap_not_larger_than_kerf_still_gets_a_trim_cut():
         assert replay_cuts(placements, cuts, (300, 200)) == len(placements), placements
 
 
-def test_strip_thinner_than_threshold_gets_no_cut_but_threshold_strip_does():
-    """Полоса у края куска тоньше `мин_полоса_отхода` (3 мм) станку не нужна; от порога и до пропила — режется."""
+def test_part_two_mm_from_field_edge_comes_out_exactly_nominal():
+    """Полоса тоньше пропила у края поля (2 мм) всё равно режется: иначе деталь выйдет больше номинала."""
     from kitchen.cutting import Placement, cut_order
 
-    def one(w):
-        return [Placement(part="a", x=10, y=10, w=w, h=100, rotated=False)]
-
-    size = (2800, 2070)  # поле до x = 2790
-    thin = [c for c in cut_order(one(2778), size, KERF, TRIM, MIN_STRIP) if c.direction == "vertical"]
-    assert thin == []
-    edge = [c for c in cut_order(one(2777), size, KERF, TRIM, MIN_STRIP) if c.direction == "vertical"]
-    assert [(c.position, c.kind) for c in edge] == [(2787, "trim")]  # ровно 3 мм: режется
-    left = [
-        c
-        for c in cut_order(
-            [Placement(part="a", x=12, y=10, w=100, h=100, rotated=False)], size, KERF, TRIM, MIN_STRIP
-        )
-        if c.direction == "vertical" and c.position < 100
-    ]
-    assert left == []  # слева 2 мм от края поля
+    size = (2800, 2070)  # поле: x 10…2790, y 10…2060
+    for pl in (
+        Placement(part="a", x=12, y=10, w=100, h=100, rotated=False),  # слева 2 мм
+        Placement(part="a", x=10, y=10, w=2778, h=100, rotated=False),  # справа 2 мм
+        Placement(part="a", x=10, y=12, w=100, h=100, rotated=False),  # сверху 2 мм
+        Placement(part="a", x=10, y=10, w=100, h=2048, rotated=False),  # снизу 2 мм
+    ):
+        cuts = cut_order([pl], size, KERF, TRIM)
+        assert cuts, pl
+        assert replay_cuts([pl], cuts, size) == 1  # проигрыватель строгий: деталь ровно своего размера
 
 
 def test_cut_order_is_guillotine_and_frees_every_part(home):
