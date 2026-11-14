@@ -93,28 +93,36 @@ def test_part_larger_than_working_field_is_an_error(home):
         api.cut_from_project(write_project(home, lambda p: None), home)
 
 
-def replay(sheet, size):
-    """Независимый проигрыватель резов: каждый рез идёт от края до края куска; в конце в каждом куске
-    не больше одной детали и деталь лежит в нём целиком. Возвращает число кусков с деталями."""
+def replay_cuts(placements, cuts, size):
+    """Независимый проигрыватель резов: каждый рез идёт от края до края куска (пропил может лечь на уже
+    существующий пропил); в конце каждая деталь лежит в своём куске ровно по размеру, куски без деталей —
+    отход. Возвращает число кусков с деталями."""
     pieces = [(TRIM, TRIM, size[0] - TRIM, size[1] - TRIM)]  # x0, y0, x1, y1
-    for n, cut in enumerate(sheet.cuts, 1):
+    for n, cut in enumerate(cuts, 1):
         assert cut.number == n and cut.length == cut.end - cut.start
         for i, (x0, y0, x1, y1) in enumerate(pieces):
             if cut.direction == "vertical":
-                hit = x0 <= cut.position < x1 and (cut.start, cut.end) == (y0, y1)
+                hit = cut.position < x1 and cut.position + KERF > x0 and (cut.start, cut.end) == (y0, y1)
             else:
-                hit = y0 <= cut.position < y1 and (cut.start, cut.end) == (x0, x1)
+                hit = cut.position < y1 and cut.position + KERF > y0 and (cut.start, cut.end) == (x0, x1)
             if hit:
                 break
         else:
             pytest.fail(f"рез {n} {cut} не идёт от края до края ни одного куска")
         pieces.pop(i)
         if cut.direction == "vertical":
-            pieces += [(x0, y0, cut.position, y1), (min(cut.position + KERF, x1), y0, x1, y1)]
+            halves = [
+                (x0, y0, max(x0, cut.position), y1),
+                (max(x0, min(cut.position + KERF, x1)), y0, x1, y1),
+            ]
         else:
-            pieces += [(x0, y0, x1, cut.position), (x0, min(cut.position + KERF, y1), x1, y1)]
+            halves = [
+                (x0, y0, x1, max(y0, cut.position)),
+                (x0, max(y0, min(cut.position + KERF, y1)), x1, y1),
+            ]
+        pieces += [h for h in halves if h[2] > h[0] and h[3] > h[1]]
     holders = 0
-    for pl in sheet.placements:
+    for pl in placements:
         inside = [
             p for p in pieces if p[0] <= pl.x and p[1] <= pl.y and pl.x + pl.w <= p[2] and pl.y + pl.h <= p[3]
         ]
@@ -122,12 +130,32 @@ def replay(sheet, size):
         assert (inside[0][2] - inside[0][0], inside[0][3] - inside[0][1]) == (pl.w, pl.h), pl.part
     for p in pieces:
         n = sum(
-            p[0] <= pl.x and pl.x + pl.w <= p[2] and p[1] <= pl.y and pl.y + pl.h <= p[3]
-            for pl in sheet.placements
+            p[0] <= pl.x and pl.x + pl.w <= p[2] and p[1] <= pl.y and pl.y + pl.h <= p[3] for pl in placements
         )
         assert n <= 1
         holders += n
     return holders
+
+
+def replay(sheet, size):
+    return replay_cuts(sheet.placements, sheet.cuts, size)
+
+
+def test_gap_not_larger_than_kerf_still_gets_a_trim_cut():
+    """Зазор перед деталью 1…пропил (здесь 4 мм после реза): деталь всё равно освобождается резом."""
+    from kitchen.cutting import Placement, cut_order
+
+    def pl(name, x, y, w, h):
+        return Placement(part=name, x=x, y=y, w=w, h=h, rotated=False)
+
+    for placements in (
+        [pl("a", 10, 10, 100, 100), pl("b", 118, 10, 50, 100)],
+        [pl("a", 14, 14, 100, 100)],
+        [pl("a", 12, 10, 100, 100)],
+        [pl("a", 10, 10, 100, 100), pl("b", 10, 117, 100, 50)],
+    ):
+        cuts = cut_order(placements, (300, 200), KERF, TRIM)
+        assert replay_cuts(placements, cuts, (300, 200)) == len(placements), placements
 
 
 def test_cut_order_is_guillotine_and_frees_every_part(home):
@@ -219,3 +247,76 @@ def test_no_project_yet_is_an_error(home):
     api.order_new(ORDER, home=home)
     with pytest.raises(OrderError, match="проекта ещё нет"):
         api.cut_from_order(ORDER, home)
+
+
+def test_sheet_trimming_cut_is_checked_against_machine_maximum(home):
+    path = home / "workshop/equipment.yaml"
+    path.write_text(path.read_text().replace("макс_длина_реза: 3200", "макс_длина_реза: 2790"))
+    with pytest.raises(OrderError, match=r"подрезка листа 2800 мм.*2790"):
+        api.cut_from_project(write_project(home, lambda p: None), home)
+
+
+def test_every_candidate_layout_replays_as_guillotine(home):
+    """Все раскладки всех эвристик `_layouts` (не только выбранные) режутся и проигрываются: Петров и
+    наборы случайных размеров с фиксированным seed."""
+    import random
+
+    from kitchen import cutting
+    from kitchen.parts import compute_parts
+    from kitchen.project import parse_project
+    from kitchen.workshop import load_workshop
+
+    ws = load_workshop(home)
+    modules = compute_parts(
+        parse_project(json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))), ws
+    ).modules
+    template = modules[0].parts[0]
+    sets = []
+    for material in ("ldsp_16_white", "hdf_3_white"):
+        sets.append({p.id: p for m in modules for p in m.parts if p.material == material})
+    rng = random.Random(12)
+    for _ in range(12):
+        parts = {}
+        for i in range(rng.randint(3, 20)):
+            a = rng.choice([rng.randint(40, 2700), rng.choice([100, 320, 560, 568, 596, 716, 720])])
+            b = rng.randint(40, min(a, 2000))
+            parts[f"p{i:02}"] = template.model_copy(update={"id": f"p{i:02}", "length": a, "width": b})
+        sets.append(parts)
+    size, field = (2800, 2070), (2780, 2050)
+    checked = 0
+    for parts in sets:
+        for name, layout in cutting._layouts(parts, field, KERF, True):
+            for rects in layout:
+                placements = [cutting._real(r, parts[r.id], KERF, TRIM) for r in rects]
+                cuts = cutting.cut_order(placements, size, KERF, TRIM)
+                assert replay_cuts(placements, cuts, size) == len(placements), name
+                checked += 1
+    assert checked > 5000
+
+
+def test_output_is_identical_across_hash_seeds(home):
+    import os
+    import subprocess
+    import sys
+
+    path = write_project(home, lambda p: None)
+    outs = []
+    for seed in ("0", "1"):
+        env = {**os.environ, "PYTHONHASHSEED": seed, "KITCHEN_HOME": str(home)}
+        r = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from kitchen.cli import app; app()",
+                "cut",
+                "--project",
+                str(path),
+                "--json",
+            ],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        outs.append(r.stdout)
+    assert outs[0] == outs[1] and '"materials"' in outs[0]

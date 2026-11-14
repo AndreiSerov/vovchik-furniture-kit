@@ -13,12 +13,13 @@ from kitchen import formulas
 from kitchen.brief import BriefAppliance
 from kitchen.brief import appliances as brief_appliances
 from kitchen.errors import KitchenError, WorkshopError
-from kitchen.models import Workshop
+from kitchen.models import SheetMaterial, Workshop
 from kitchen.parts import (
     APPLIANCE_ROWS,
     BACK_PANEL,
     TEMPLATES,
     ModuleDims,
+    Part,
     TemplateOut,
     accepts,
     build_module,
@@ -28,7 +29,7 @@ from kitchen.parts import (
 )
 from kitchen.project import ModuleSpec, Project
 
-__all__ = ["Finding", "check_project"]
+__all__ = ["Finding", "along_texture", "check_project", "part_fit_findings"]
 
 _KIND_RU = {"lower": "нижний", "upper": "верхний"}
 
@@ -371,7 +372,7 @@ def _build_failure(module: ModuleSpec, error: KitchenError) -> Finding:
     )
 
 
-def _along_texture(sheet, ws_sheet: tuple[float, float]) -> tuple[float, float]:
+def along_texture(sheet, ws_sheet: tuple[float, float]) -> tuple[float, float]:
     """(вдоль текстуры, поперёк) для листа с текстурой «вдоль N»."""
     match = re.fullmatch(r"вдоль\s+(\d+)", sheet.texture.strip()) if isinstance(sheet.texture, str) else None
     if match is None or float(match.group(1)) not in ws_sheet:
@@ -383,41 +384,45 @@ def _along_texture(sheet, ws_sheet: tuple[float, float]) -> tuple[float, float]:
     return along, ws_sheet[1] if along == ws_sheet[0] else ws_sheet[0]
 
 
-def _sheet_fit(built: dict[str, TemplateOut], ws: Workshop) -> list[Finding]:
+def part_fit_findings(part: Part, sheet: SheetMaterial, ws: Workshop) -> list[Finding]:
     """Деталь в рабочем поле листа (лист минус обрезка с двух сторон). Текстурная — без поворота."""
-    sheets = {m.id: m for m in ws.materials.sheets}
     trim = 2 * ws.equipment.sheet.perimeter_trim
-    found: list[Finding] = []
-    for out in built.values():
-        for part in out.parts:
-            sheet = sheets.get(part.material)
-            if sheet is None:  # фасады и столешница — не листовые детали
-                continue
-            if part.texture:
-                along, across = (v - trim for v in _along_texture(sheet, sheet.sheet))
-                limits = (("длина (вдоль текстуры)", part.length, along), ("ширина", part.width, across))
-            else:
-                big, small = (v - trim for v in sorted(sheet.sheet, reverse=True))
-                limits = (("длина", part.length, big), ("ширина", part.width, small))
-                if part.length <= big and part.width <= small:
-                    continue
-            for name, value, limit in limits:
-                if value > limit:
-                    found.append(
-                        Finding(
-                            code="part_exceeds_sheet",
-                            level="error",
-                            subject=part.id,
-                            message=(
-                                f"Деталь {part.id}: {name} {_num(value)} мм не помещается в рабочее поле листа "
-                                f"{_num(limit)} мм (лист {sheet.sheet[0]:g}×{sheet.sheet[1]:g} минус обрезка "
-                                f"по {ws.equipment.sheet.perimeter_trim:g} мм с каждой стороны)."
-                            ),
-                            value=value,
-                            limit=limit,
-                        )
-                    )
-    return found
+    if part.texture:
+        along, across = (v - trim for v in along_texture(sheet, sheet.sheet))
+        limits = (("длина (вдоль текстуры)", part.length, along), ("ширина", part.width, across))
+    else:
+        big, small = (v - trim for v in sorted(sheet.sheet, reverse=True))
+        limits = (("длина", part.length, big), ("ширина", part.width, small))
+        if part.length <= big and part.width <= small:
+            return []
+    return [
+        Finding(
+            code="part_exceeds_sheet",
+            level="error",
+            subject=part.id,
+            message=(
+                f"Деталь {part.id}: {name} {_num(value)} мм не помещается в рабочее поле листа "
+                f"{_num(limit)} мм (лист {sheet.sheet[0]:g}×{sheet.sheet[1]:g} минус обрезка "
+                f"по {ws.equipment.sheet.perimeter_trim:g} мм с каждой стороны)."
+            ),
+            value=value,
+            limit=limit,
+        )
+        for name, value, limit in limits
+        if value > limit
+    ]
+
+
+def _sheet_fit(built: dict[str, TemplateOut], ws: Workshop) -> list[Finding]:
+    """Все листовые детали проекта в рабочем поле листа."""
+    sheets = {m.id: m for m in ws.materials.sheets}
+    return [
+        f
+        for out in built.values()
+        for part in out.parts
+        if part.material in sheets  # фасады и столешница — не листовые детали
+        for f in part_fit_findings(part, sheets[part.material], ws)
+    ]
 
 
 def _no_back(built: dict[str, TemplateOut], dims: dict[str, tuple[ModuleSpec, ModuleDims]]) -> list[Finding]:

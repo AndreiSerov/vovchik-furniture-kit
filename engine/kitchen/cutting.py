@@ -41,12 +41,12 @@ from rectpack import (
     newPacker,
 )
 
-from kitchen.checks import _along_texture
+from kitchen.checks import along_texture, part_fit_findings
 from kitchen.errors import KitchenError, OrderError
 from kitchen.models import SheetMaterial, Workshop
 from kitchen.parts import ModuleParts, Part
 
-__all__ = ["CutCut", "MaterialCut", "Placement", "SheetCut", "cut_order", "cut_parts"]
+__all__ = ["Cut", "MaterialCut", "Placement", "SheetCut", "cut_order", "cut_parts"]
 
 
 class Placement(BaseModel):
@@ -60,7 +60,7 @@ class Placement(BaseModel):
     rotated: bool  # длина детали лежит вдоль y (только нетекстурные)
 
 
-class CutCut(BaseModel):
+class Cut(BaseModel):
     """Рез. `vertical` — линия `x = position` (рез идёт вдоль y), `horizontal` — линия `y = position`.
     Пропил занимает `position … position + kerf`; рез идёт от `start` до `end` вдоль линии."""
 
@@ -76,7 +76,7 @@ class CutCut(BaseModel):
 class SheetCut(BaseModel):
     number: int
     placements: list[Placement]
-    cuts: list[CutCut]
+    cuts: list[Cut]
     parts_area_m2: float
     utilization: float  # доля площади листа, занятая деталями
 
@@ -116,7 +116,14 @@ _ALGOS = [
     GuillotineBssfSas,
     GuillotineBssfSlas,
 ]
-_SORTS = [SORT_AREA, SORT_PERI, SORT_DIFF, SORT_SSIDE, SORT_LSIDE, SORT_RATIO]
+_SORTS = [
+    ("area", SORT_AREA),
+    ("peri", SORT_PERI),
+    ("diff", SORT_DIFF),
+    ("ssize", SORT_SSIDE),
+    ("lside", SORT_LSIDE),
+    ("ratio", SORT_RATIO),
+]
 _SORT_NAMES = {
     id(s): n for s, n in zip(_SORTS, ["area", "peri", "diff", "ssize", "lside", "ratio"], strict=True)
 }
@@ -132,7 +139,7 @@ class _Rect:
     id: str
 
 
-def _placed(packer, parts: dict[str, Part]) -> list[list[_Rect]]:
+def _placed(packer) -> list[list[_Rect]]:
     sheets: dict[int, list[_Rect]] = {}
     for bin_index, x, y, w, h, rid in packer.rect_list():
         sheets.setdefault(bin_index, []).append(_Rect(int(x), int(y), int(w), int(h), rid))
@@ -145,7 +152,7 @@ def _layouts(
     """Все раскладки по всем гильотинным эвристикам; увеличенные на пропил прямоугольники."""
     ordered = sorted(parts.values(), key=lambda p: p.id)
     for algo in _ALGOS:
-        for sort in _SORTS:
+        for sort_name, sort in _SORTS:
             for mode in _MODES:
                 packer = newPacker(
                     mode=PackingMode.Offline,
@@ -160,18 +167,18 @@ def _layouts(
                 packer.pack()
                 if len(packer.rect_list()) != len(ordered):
                     continue
-                yield f"{algo.__name__}/{_SORT_NAMES[id(sort)]}/{mode}", _placed(packer, parts)
+                yield f"{algo.__name__}/{sort_name}/{mode}", _placed(packer)
 
 
-def cut_order(placements: list[Placement], size: tuple[int, int], kerf: int, trim: int) -> list[CutCut]:
+def cut_order(placements: list[Placement], size: tuple[int, int], kerf: int, trim: int) -> list[Cut]:
     """Порядок резов листа: рекурсивно ищем сквозной рез куска (от края до края), делим, повторяем.
     Сначала отрезаем отход вокруг деталей куска (`trim`), затем делим детали (`separate`); левый/верхний
     кусок режем раньше правого/нижнего. Раскладка без сквозного реза — ошибка движка."""
-    cuts: list[CutCut] = []
+    cuts: list[Cut] = []
 
     def add(direction: Literal["vertical", "horizontal"], position: int, start: int, end: int, kind) -> None:
         cuts.append(
-            CutCut(
+            Cut(
                 number=len(cuts) + 1,
                 direction=direction,
                 position=position,
@@ -196,11 +203,11 @@ def cut_order(placements: list[Placement], size: tuple[int, int], kerf: int, tri
     def walk(items: list[Placement], x0: int, y0: int, x1: int, y1: int) -> None:
         minx, maxx = min(r.x for r in items), max(r.x + r.w for r in items)
         miny, maxy = min(r.y for r in items), max(r.y + r.h for r in items)
-        if minx - kerf > x0:
+        if minx > x0:
             add("vertical", minx - kerf, y0, y1, "trim")
         if maxx < x1:
             add("vertical", maxx, y0, y1, "trim")
-        if miny - kerf > y0:
+        if miny > y0:
             add("horizontal", miny - kerf, minx, maxx, "trim")
         if maxy < y1:
             add("horizontal", maxy, minx, maxx, "trim")
@@ -216,7 +223,7 @@ def cut_order(placements: list[Placement], size: tuple[int, int], kerf: int, tri
         e = through(items, y0, y1, vertical=False)
         if e is None:
             raise KitchenError(
-                "Ошибка движка: раскладка листа не режется гильотинно (нет сквозного реза у детали "
+                "Ошибка движка: детали листа не режутся гильотинно (нет сквозного реза у детали "
                 + ", ".join(r.part for r in items[:4])
                 + ")."
             )
@@ -236,7 +243,7 @@ def _real(rect: _Rect, part: Part, kerf: int, trim: int) -> Placement:
     return Placement(part=part.id, x=rect.x + trim, y=rect.y + trim, w=w, h=h, rotated=rotated)
 
 
-def _score(layout: list[list[_Rect]], field: tuple[int, int], parts: dict[str, Part], kerf: int):
+def _score(layout: list[list[_Rect]], parts: dict[str, Part]):
     """Меньше листов, затем больше площадь деталей на последнем листе (спека 2.1)."""
     last = sum(parts[r.id].length * parts[r.id].width for r in layout[-1])
     return (len(layout), -last)
@@ -246,7 +253,7 @@ def _material_axes(sheet: SheetMaterial) -> tuple[int, int]:
     """Размер листа по осям раскроя: x — вдоль текстуры; у нетекстурного — как записано в materials.yaml."""
     a, b = sheet.sheet
     if isinstance(sheet.texture, str):
-        along, across = _along_texture(sheet, sheet.sheet)
+        along, across = along_texture(sheet, sheet.sheet)
         return round(along), round(across)
     return round(a), round(b)
 
@@ -257,20 +264,20 @@ def _cut_material(sheet: SheetMaterial, parts: list[Part], ws: Workshop) -> Mate
     max_cut = round(ws.equipment.saw.max_cut_length)
     size = _material_axes(sheet)
     field = (size[0] - 2 * trim, size[1] - 2 * trim)
-    textured = bool(sheet.texture) or any(p.texture for p in parts)
+    textured = bool(sheet.texture)
     by_id = {p.id: p for p in parts}
     for p in parts:
-        fits = p.length <= field[0] and p.width <= field[1]
-        if not fits and not textured:
-            fits = p.width <= field[0] and p.length <= field[1]
-        if not fits:
-            raise OrderError(
-                f"Деталь {p.id} {p.length}×{p.width} мм не помещается в рабочее поле листа "
-                f"{field[0]}×{field[1]} мм ({sheet.id}: лист {size[0]}×{size[1]} минус обрезка {trim} мм)."
-            )
+        findings = part_fit_findings(p, sheet, ws)
+        if findings:
+            raise OrderError(findings[0].message)
+    if max(size) > max_cut:
+        raise OrderError(
+            f"Материал {sheet.id}: подрезка листа {max(size)} мм по периметру длиннее максимума "
+            f"станка {max_cut} мм (equipment.yaml, пила)."
+        )
     best = min(
         _layouts(by_id, field, kerf, rotation=not textured),
-        key=lambda item: _score(item[1], field, by_id, kerf),
+        key=lambda item: _score(item[1], by_id),
         default=None,
     )
     if best is None:
