@@ -37,8 +37,10 @@ __all__ = [
     "build_module",
     "built_niche",
     "compute_parts",
+    "facade_color",
     "module_dims",
     "niche_item",
+    "resolve_materials",
 ]
 
 EDGE_SIDES = ("L1", "L2", "W1", "W2")
@@ -974,6 +976,36 @@ class PartsComputation:
 NO_COLOR = "без цвета"
 
 
+def _lower_facades(module: ModuleSpec, row: Row) -> bool:
+    """Фасады модуля нижние: нижний ряд или шаблон, входящий в оба ряда (пенал)."""
+    template = TEMPLATES.get(module.template)
+    return row.kind == "lower" or (template is not None and template.both_rows)
+
+
+def resolve_materials(module: ModuleSpec, row: Row, materials: ProjectMaterials) -> ProjectMaterials:
+    """Материалы модуля: проект, поверх него переопределения ряда, затем модуля. Фасады и цвет
+    фасада относятся к верхним или нижним фасадам по ряду (пенал — нижние). Одно место для
+    расчёта деталей, площади по цветам и закупки."""
+    values = materials.model_dump()
+    lower = _lower_facades(module, row)
+    keys = {
+        "facades": "facades_lower" if lower else "facades_upper",
+        "facade_color": "facades_lower_color" if lower else "facades_upper_color",
+    }
+    for override in (row.materials, module.materials):
+        if override is not None:
+            for key, value in override.model_dump(exclude_none=True).items():
+                values[keys.get(key, key)] = value
+    return ProjectMaterials.model_validate(values)
+
+
+def facade_color(module: ModuleSpec, row: Row, materials: ProjectMaterials) -> str:
+    """Цвет фасадов модуля с учётом переопределений; без цвета — «без цвета»."""
+    resolved = resolve_materials(module, row, materials)
+    lower = _lower_facades(module, row)
+    return (resolved.facades_lower_color if lower else resolved.facades_upper_color) or NO_COLOR
+
+
 def _area_4(area: Decimal) -> float:
     return float(area.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
 
@@ -1002,10 +1034,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
                         )
                     seen[part.id] = module.label
                 modules.append(ModuleParts(module=module.label, template=module.template, parts=out.parts))
-                lower = row.kind == "lower" or TEMPLATES[module.template].row_kind == "tall"
-                color = (
-                    project.materials.facades_lower_color if lower else project.materials.facades_upper_color
-                ) or NO_COLOR
+                color = facade_color(module, row, project.materials)
                 for part in out.parts:
                     if part.area_m2 is not None:
                         colored[color] = colored.get(color, Decimal(0)) + Decimal(str(part.area_m2))
@@ -1132,20 +1161,6 @@ def build_module(
         raise OrderError(
             f"Модуль {module.label}: наполнение или параметры модуля ещё не поддерживаются расчётом."
         )
-    values = materials.model_dump()
-    for override in (row.materials, module.materials):
-        if override is not None:
-            for key, value in override.model_dump(exclude_none=True).items():
-                if key == "facades":
-                    values[
-                        "facades_lower"
-                        if row.kind == "lower" or module.template == "tall_oven"
-                        else "facades_upper"
-                    ] = value
-                elif key == "facade_color":
-                    raise OrderError(f"Модуль {module.label}: цвет фасада ещё не поддерживается расчётом.")
-                else:
-                    values[key] = value
+    resolved_materials = resolve_materials(module, row, materials)
     dims = module_dims(module, row.kind, ws)
-    resolved_materials = ProjectMaterials.model_validate(values)
     return template.build(module, dims, resolved_materials, ws, BuildContext(appliances, row))

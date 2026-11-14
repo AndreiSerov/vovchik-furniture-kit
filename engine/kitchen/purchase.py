@@ -11,7 +11,7 @@ from kitchen.common import CommonItem, CountertopCut
 from kitchen.cutting import MaterialCut
 from kitchen.errors import OrderError
 from kitchen.models import Workshop
-from kitchen.parts import NO_COLOR, TEMPLATES, EdgeTotals, ModuleParts
+from kitchen.parts import EdgeTotals, ModuleParts, facade_color
 from kitchen.project import Project
 
 
@@ -56,10 +56,7 @@ def _facades(project: Project, modules: list[ModuleParts]) -> dict[tuple[str, st
     for wall in project.walls:
         for row in wall.rows:
             for module in row.modules:
-                lower = row.kind == "lower" or TEMPLATES[module.template].row_kind == "tall"
-                colors[module.label] = (
-                    project.materials.facades_lower_color if lower else project.materials.facades_upper_color
-                ) or NO_COLOR
+                colors[module.label] = facade_color(module, row, project.materials)
     groups: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
     for module in modules:
         for part in module.parts:
