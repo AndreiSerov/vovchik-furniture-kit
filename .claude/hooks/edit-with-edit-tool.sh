@@ -48,7 +48,8 @@ for word in candidates:
 if hits:
     print(
         "Blocked: this Bash command writes tracked files (" + ", ".join(sorted(hits)) + "). "
-        "Change them with the Edit tool, one small edit per call, or Write for a whole new file.",
+        "Change them with the Edit tool, sending independent edits together in one response, "
+        "or rewrite the file with Write.",
         file=sys.stderr,
     )
     sys.exit(2)
