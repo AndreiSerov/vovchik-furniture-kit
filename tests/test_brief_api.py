@@ -201,7 +201,9 @@ def test_old_v1_database_is_upgraded_and_keeps_orders(home, tmp_path):
     conn.commit()
     conn.close()
     assert api.order_show("petrov").order.client == "Петров"
-    assert sqlite3.connect(db).execute("PRAGMA user_version").fetchone()[0] == 2
+    assert sqlite3.connect(db).execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
+    columns = [r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(project_versions)")]
+    assert "brief_id" in columns  # миграция 3: бриф, с которым проверена версия
     assert api.brief_save("2026-047-petrov", _brief(tmp_path)).created is False
     assert api.brief_show("petrov").check["summary"]["conflicts"] == 10
 

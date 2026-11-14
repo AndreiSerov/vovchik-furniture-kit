@@ -14,7 +14,15 @@ from kitchen.brief import BriefAppliance
 from kitchen.brief import appliances as brief_appliances
 from kitchen.errors import KitchenError, WorkshopError
 from kitchen.models import Workshop
-from kitchen.parts import BACK_PANEL, TEMPLATES, ModuleDims, TemplateOut, build_module, module_dims
+from kitchen.parts import (
+    BACK_PANEL,
+    TEMPLATES,
+    ModuleDims,
+    TemplateOut,
+    build_module,
+    built_niche,
+    module_dims,
+)
 from kitchen.project import ModuleSpec, Project
 
 __all__ = ["Finding", "check_project"]
@@ -105,51 +113,36 @@ def _drawer_depth(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -> Finding
     )
 
 
-def _appliance_niche(appliance, brief: BriefAppliance | None, ws: Workshop):
-    """Что требуется от ниши, по порядку источников: бриф, проект (его строят шаблоны), мок-каталог.
-    Позиция каталога — по типу и типоразмеру (ширине); такого типоразмера нет — подстановки нет:
-    известное проверяется, неизвестное называет предупреждение. Возвращает ширину, высоту, глубину,
-    «не хватает данных» и «что-то взято из каталога»."""
-    width = (brief.width if brief and brief.width else None) or appliance.width
-    item = next(
-        (i for i in ws.appliances.items if i.type == appliance.type and i.nominal_width == width), None
-    )
-    height = (brief.height if brief else None) or appliance.height
-    depth = (brief.depth if brief else None) or appliance.depth
-    if item is None:
-        return width, height, depth, height is None or depth is None, False
-    from_catalog = True  # ширина-типоразмер читается как ниша каталога
-    if height is None:
-        height = item.niche_height
-    if depth is None:
-        depth = item.niche_depth
-    return item.niche_width, height, depth, False, from_catalog
-
-
-def _inner_width(dims: ModuleDims, ws: Workshop) -> int:
-    """Внутренняя ширина корпуса — по формуле мастерской (`ящики.внутренняя_ширина`)."""
-    return int(
-        formulas.evaluate(ws.construction.drawers.inner_width, W=dims.width, T=ws.construction.case_thickness)
-    )
-
-
-def _name(appliance, brief: BriefAppliance | None) -> str:
-    return brief.label if brief else appliance.type
-
-
-def _pair(project: Project, brief: list[BriefAppliance], ws: Workshop, found: list[Finding]):
-    """Сверка состава: приборы проекта и брифа одного вида идут парами по порядку.
+def _pair(project: Project, brief: list[BriefAppliance], found: list[Finding]):
+    """Сверка состава. В каждом виде техники сначала сопоставление по модели, затем по порядку.
     Возвращает прибор проекта → прибор брифа (или `None`)."""
     paired: dict[int, BriefAppliance | None] = {}
-    by_type: dict[str, list[BriefAppliance]] = {}
-    for b in brief:
-        by_type.setdefault(b.type, []).append(b)
-    used: dict[str, int] = {}
+    leftover_brief: dict[str, list[BriefAppliance]] = {}
+    for type_ in dict.fromkeys([b.type for b in brief] + [a.type for a in project.appliances]):
+        items = [b for b in brief if b.type == type_]
+        mine = [a for a in project.appliances if a.type == type_]
+        rest = []
+        for a in mine:
+            hit = next((b for b in items if a.model and b.model and a.model.lower() == b.model.lower()), None)
+            if hit:
+                items.remove(hit)
+                paired[id(a)] = hit
+            else:
+                rest.append(a)
+        by_order = bool(rest and items)
+        for a in rest:
+            paired[id(a)] = items.pop(0) if items else None
+        if by_order and (len([b for b in brief if b.type == type_]) > 1 or len(mine) > 1):
+            found.append(
+                Finding(
+                    code="appliance_pairing",
+                    level="warning",
+                    subject=type_,
+                    message=f"Несколько «{type_}» без моделей, сопоставление по порядку.",
+                )
+            )
+        leftover_brief[type_] = items
     for a in project.appliances:
-        index = used.get(a.type, 0)
-        used[a.type] = index + 1
-        candidates = by_type.get(a.type, [])
-        paired[id(a)] = candidates[index] if index < len(candidates) else None
         if paired[id(a)] is None:
             found.append(
                 Finding(
@@ -159,9 +152,11 @@ def _pair(project: Project, brief: list[BriefAppliance], ws: Workshop, found: li
                     message=f"Техника «{a.type}» в модуле {a.module} есть в проекте, но не в брифе заказа.",
                 )
             )
-    for type_, items in by_type.items():
-        for b in items[used.get(type_, 0) :]:
-            if b.built_in and type_ in ws.construction.module_appliances:
+    for items in leftover_brief.values():
+        for b in items:
+            if not b.built_in:
+                continue
+            if any(b.type in t.appliances for t in TEMPLATES.values()):
                 found.append(
                     Finding(
                         code="appliance_unbound",
@@ -170,7 +165,46 @@ def _pair(project: Project, brief: list[BriefAppliance], ws: Workshop, found: li
                         message=f"Встраиваемая техника из брифа «{b.label}» не привязана ни к одному модулю проекта.",
                     )
                 )
+            else:
+                found.append(
+                    Finding(
+                        code="appliance_no_template",
+                        level="warning",
+                        subject=b.label,
+                        message=f"Для встраиваемой техники «{b.label}» шаблона под «{b.type}» нет: модуль придётся описать вручную.",
+                    )
+                )
     return paired
+
+
+def _template_item(module: ModuleSpec, appliance, ws: Workshop):
+    """Позиция каталога, по которой шаблон модуля строит нишу под прибор (пенал, вытяжка), иначе `None`."""
+    rules = ws.construction
+    wanted = {
+        ("tall_oven", "oven"): rules.tall_rules.oven,
+        ("tall_oven", "microwave"): rules.tall_rules.microwave,
+        ("wall_hood", "hood"): rules.upper_rules.hood,
+    }.get((module.template, appliance.type))
+    return next((i for i in ws.appliances.items if i.id == wanted), None) if wanted else None
+
+
+def _built_niche(appliance, module: ModuleSpec, d: ModuleDims, item, ws: Workshop):
+    """Ниша, которую модуль реально строит: той же функцией, что шаблон (проект, иначе каталог);
+    у остальных — пространство модуля (ширина и глубина корпуса; у ПММ — модуль целиком)."""
+    if item is not None:
+        return built_niche(appliance, item)
+    if not TEMPLATES[module.template].carcass:
+        return d.width, d.height + ws.construction.legs.height, d.depth
+    # прибор «в столешницу» шире корпуса модуля может быть: его ширина не про нишу корпуса
+    on_top = appliance.type in ws.construction.countertop_appliances
+    return (None if on_top else _inner_width(d, ws)), None, d.depth
+
+
+def _inner_width(dims: ModuleDims, ws: Workshop) -> int:
+    """Внутренняя ширина корпуса — по формуле мастерской (`ящики.внутренняя_ширина`)."""
+    return int(
+        formulas.evaluate(ws.construction.drawers.inner_width, W=dims.width, T=ws.construction.case_thickness)
+    )
 
 
 def _niches(
@@ -179,8 +213,8 @@ def _niches(
     dims: dict[str, tuple[ModuleSpec, ModuleDims]],
     brief: list[BriefAppliance] | None,
 ) -> list[Finding]:
-    """Ниша модуля ≥ требований ниши техники. Ниша модуля — внутренняя ширина и глубина корпуса;
-    у модуля без корпуса (ПММ) — ширина модуля, а высота — высота ряда плюс ножки."""
+    """Требования из брифа (размеры встраивания, иначе типовая ниша каталога) против ниши,
+    которую строит модуль. Размеры корпуса прибора с нишей не сравниваются."""
     found: list[Finding] = []
     if brief is None:
         found.append(
@@ -188,18 +222,15 @@ def _niches(
                 code="brief_missing",
                 level="warning",
                 subject=project.order,
-                message="У заказа нет брифа: брифа нет, техника не сверена с клиентом (размеры — из проекта и мок-каталога).",
+                message="Брифа нет, техника не сверена с клиентом: ниши проверены по типовым значениям мок-каталога.",
             )
         )
         paired: dict[int, BriefAppliance | None] = {id(a): None for a in project.appliances}
     else:
-        paired = _pair(project, brief, ws, found)
+        paired = _pair(project, brief, found)
         found += [
             Finding(
-                code="brief_dimensions",
-                level="warning",
-                subject=b.label,
-                message=f"Бриф, «{b.label}»: {w}.",
+                code="brief_dimensions", level="warning", subject=b.label, message=f"Бриф, «{b.label}»: {w}."
             )
             for b in brief
             for w in b.warnings
@@ -216,9 +247,33 @@ def _niches(
             )
             continue
         module, d = dims[a.module]
+        if a.type not in TEMPLATES[module.template].appliances:
+            found.append(
+                Finding(
+                    code="appliance_wrong_module",
+                    level="error",
+                    subject=a.module,
+                    message=f"Модуль {a.module}: шаблон {module.template} не принимает технику «{a.type}».",
+                )
+            )
+            continue
         b = paired[id(a)]
-        width, height, depth, incomplete, from_catalog = _appliance_niche(a, b, ws)
-        if incomplete:
+        item = _template_item(module, a, ws)
+        try:
+            built = _built_niche(a, module, d, item, ws)
+        except KitchenError:  # дробные или неверные размеры уже названы ошибкой расчёта модуля
+            continue
+        # требование: размеры встраивания из брифа, недостающие — типовая ниша каталога
+        width = (b.width if b and b.width else None) or a.width
+        cat = item or next(
+            (i for i in ws.appliances.items if i.type == a.type and i.nominal_width == width), None
+        )
+        asked = (b.niche_width, b.niche_height, b.niche_depth) if b else (None, None, None)
+        typical = (cat.niche_width, cat.niche_height, cat.niche_depth) if cat else (None, None, None)
+        required = tuple(
+            mine if mine is not None else other for mine, other in zip(asked, typical, strict=True)
+        )
+        if cat is None and None in required:
             found.append(
                 Finding(
                     code="appliance_no_data",
@@ -226,49 +281,37 @@ def _niches(
                     subject=a.module,
                     message=(
                         f"Техника «{a.type}» шириной {_num(a.width)} мм в модуле {a.module}: такого типоразмера нет "
-                        "в appliances.yaml, а высота или глубина не указаны, поэтому нишу можно проверить только "
-                        "по известным габаритам."
+                        "в appliances.yaml и в брифе нет размеров встраивания, нишу можно проверить только "
+                        "по известным размерам."
                     ),
                 )
             )
-        if b and from_catalog:
+        if b and any(x is None and y is not None for x, y in zip(asked, typical, strict=True)):
             found.append(
                 Finding(
                     code="appliance_catalog_dims",
                     level="warning",
                     subject=a.module,
-                    message=f"Размеры «{b.label}» из мок-каталога — уточните модель у клиента.",
+                    message=(
+                        f"Размеры встраивания «{b.label}» не заданы в брифе, взята типовая ниша из мок-каталога — "
+                        "уточните размеры встраивания по инструкции модели."
+                    ),
                 )
             )
-        if b:
-            differ = [
-                f"{name} в проекте {_num(mine)} мм, в брифе {_num(theirs)} мм"
-                for name, mine, theirs in (
-                    ("ширина", a.width, b.width),
-                    ("высота", a.height, b.height),
-                    ("глубина", a.depth, b.depth),
+        if b and any(asked) and (a.height is None or a.depth is None):
+            found.append(
+                Finding(
+                    code="niche_not_in_project",
+                    level="warning",
+                    subject=a.module,
+                    message=(
+                        f"Модуль {a.module}, «{b.label}»: размеры встраивания есть в брифе, а в проекте нет — "
+                        "перенесите размеры встраивания из брифа в проект."
+                    ),
                 )
-                if mine is not None and theirs is not None and mine != theirs
-            ]
-            if differ:
-                found.append(
-                    Finding(
-                        code="appliance_dims_differ",
-                        level="warning",
-                        subject=a.module,
-                        message=f"Модуль {a.module}, «{b.label}»: размеры проекта расходятся с брифом ({'; '.join(differ)}).",
-                    )
-                )
-        bare = not TEMPLATES[module.template].carcass
-        # прибор «в столешницу» шире корпуса модуля может быть: его ширина не про нишу корпуса
-        on_top = a.type in ws.construction.countertop_appliances
-        limits = (
-            ("ширина", width, None if on_top else d.width if bare else _inner_width(d, ws)),
-            ("высота", height, d.height + ws.construction.legs.height if bare else None),
-            ("глубина", depth, d.depth),
-        )
-        for name, value, limit in limits:
-            if value is None or limit is None or value <= limit:
+            )
+        for name, need, have in zip(("ширина", "высота", "глубина"), required, built, strict=True):
+            if need is None or have is None or need <= have:
                 continue
             found.append(
                 Finding(
@@ -276,11 +319,11 @@ def _niches(
                     level="error",
                     subject=a.module,
                     message=(
-                        f"Модуль {a.module}: {name} ниши под «{_name(a, b)}» {_num(value)} мм не помещается "
-                        f"в модуль ({_num(limit)} мм)."
+                        f"Модуль {a.module}: {name} ниши под «{b.label if b else a.type}» по брифу (или каталогу) "
+                        f"{_num(need)} мм, а модуль строит нишу {_num(have)} мм."
                     ),
-                    value=_num(value),
-                    limit=_num(limit),
+                    value=_num(need),
+                    limit=_num(have),
                 )
             )
     return found

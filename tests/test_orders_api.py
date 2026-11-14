@@ -6,7 +6,7 @@ import sys
 from datetime import UTC, timedelta, timezone
 
 import pytest
-from kitchen import api
+from kitchen import api, store
 from kitchen.errors import OrderError
 
 
@@ -87,7 +87,7 @@ def test_schema_version_stored_and_newer_db_rejected(home):
     api.order_new("2026-047-petrov")
     db = home / "orders" / "kitchen.db"
     conn = sqlite3.connect(db)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
     conn.execute("PRAGMA user_version = 99")
     conn.commit()
     conn.close()
@@ -312,7 +312,7 @@ def test_concurrent_first_use_of_fresh_db(home):
     results = [(p.wait(), p.stderr.read().decode()) for p in procs]
     assert all(rc == 0 for rc, _ in results), results
     conn = sqlite3.connect(home / "orders" / "kitchen.db")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
 
 
 def test_not_a_database_file(home):

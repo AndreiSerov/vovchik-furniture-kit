@@ -394,14 +394,14 @@ def import_project(
                 previous_version=prev,
                 content_hash=digest,
                 warnings=checked.warnings,
-                brief_id=checked.brief_id,
+                brief_id=current["brief_id"],  # бриф, записанный у версии, а не новый
                 **mock,
             )
         version = (prev or 0) + 1
         o.conn.execute(
-            "INSERT INTO project_versions (order_id, version, data, content_hash, created_at)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (o.pk, version, text, digest, store.now()),
+            "INSERT INTO project_versions (order_id, version, data, content_hash, created_at, brief_id)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (o.pk, version, text, digest, store.now(), checked.brief_id),
         )
         for warning in checked.warnings:
             _insert_log(o.conn, o.pk, "note", f"Предупреждение при импорте: {warning}", version)

@@ -12,7 +12,7 @@ from typing import Literal
 from kitchen.errors import OrderError
 from kitchen.workshop import resolve_home
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Миграции: номер схемы -> скрипт (операторы через «;», без «;» внутри комментариев).
 # Добавить v3: написать _SCHEMA_V3, внести в MIGRATIONS и поднять SCHEMA_VERSION.
@@ -66,7 +66,12 @@ _SCHEMA_V2 = """
 ALTER TABLE briefs ADD COLUMN check_result TEXT NOT NULL DEFAULT '{}'
 """
 
-MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2}
+# brief_id — бриф, с которым проверялась версия проекта (без внешнего ключа: ALTER в SQLite его не любит)
+_SCHEMA_V3 = """
+ALTER TABLE project_versions ADD COLUMN brief_id INTEGER
+"""
+
+MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2, 3: _SCHEMA_V3}
 
 
 def now() -> str:

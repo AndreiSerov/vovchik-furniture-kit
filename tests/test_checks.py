@@ -122,7 +122,7 @@ def test_drawer_depth_also_checks_tall_drawer(home):
     assert (f.value, f.limit) == (450, 500)
 
 
-# --- niche_too_small -----------------------------------------------------------
+# --- вспомогательное для тестов техники (сами тесты — в test_checks_brief.py) ---------------
 
 
 def with_appliances(path, *appliances):
@@ -130,71 +130,6 @@ def with_appliances(path, *appliances):
     project["appliances"] = list(appliances)
     path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     return path
-
-
-def dishwasher(**extra):
-    return {"type": "dishwasher", "width": 450, "module": "Н1", **extra}
-
-
-def test_niche_fires_for_project_dimension(home):
-    path = with_appliances(single(home, "dishwasher_panel", 450), dishwasher(width=460))
-    [f] = findings(path, home, "niche_too_small")
-    assert (f.level, f.subject, f.value, f.limit) == ("error", "Н1", 460, 450)
-
-
-def test_niche_checks_height_and_depth(home):
-    path = with_appliances(single(home, "dishwasher_panel", 450), dishwasher(height=830, depth=570))
-    found = sorted((f.value, f.limit) for f in findings(path, home, "niche_too_small"))
-    assert found == [(570, 560), (830, 820)]  # высота ниши — 720 + ножки 100
-
-
-def test_niche_passes_with_catalog_dimensions(home):
-    path = with_appliances(single(home, "dishwasher_panel", 450), dishwasher())
-    assert findings(path, home, "niche_too_small") == []  # ширина 450 — типоразмер, берётся ниша каталога
-    assert findings(path, home, "appliance_module") == []
-
-
-def test_countertop_appliance_width_is_not_compared_with_carcass(home):
-    # варочная 770 лежит на столешнице шире корпуса 800 (внутри 768): ширина — не про нишу корпуса
-    hob = {"type": "hob", "width": 770, "height": 50, "depth": 520, "module": "Н1"}
-    path = with_appliances(single(home, "base_door", 800), hob)
-    assert findings(path, home, "niche_too_small") == []
-    # а встраиваемая в корпус техника сравнивается
-    oven = {"type": "oven", "width": 770, "height": 590, "depth": 550, "module": "Н1"}
-    path = with_appliances(single(home, "base_door", 800), oven)
-    [f] = findings(path, home, "niche_too_small")
-    assert (f.value, f.limit) == (770, 768)
-
-
-def test_standard_hob_over_standard_module_is_not_an_error(home):
-    # варочная 60 (корпус 590, ниша в столешнице 560×490) над модулем 600 (внутри 568×560)
-    for template in ("base_door", "base_drawers"):
-        path = with_appliances(single(home, template), {"type": "hob", "width": 600, "module": "Н1"})
-        assert [f for f in api.check_project(path, home).findings if f.level == "error"] == []
-
-
-def test_niche_falls_back_to_appliances_yaml(home):
-    a = home / "workshop/appliances.yaml"
-    a.write_text(a.read_text().replace("ниша_высота: 820", "ниша_высота: 900"))
-    path = with_appliances(single(home, "dishwasher_panel", 450), dishwasher())
-    [f] = findings(path, home, "niche_too_small")
-    assert (f.value, f.limit) == (900, 820)
-
-
-def test_niche_of_carcass_module_is_inner_width_and_depth(home):
-    sink = {"type": "oven", "width": 570, "height": 590, "depth": 560, "module": "Н1"}
-    path = with_appliances(single(home, "base_door"), sink)
-    [f] = findings(path, home, "niche_too_small")
-    assert (f.value, f.limit) == (570, 568)  # 600 − две боковины по 16
-    path = with_appliances(single(home, "base_door"), {**sink, "width": 568, "depth": 561})
-    [f] = findings(path, home, "niche_too_small")
-    assert (f.value, f.limit) == (561, 560)
-
-
-def test_appliance_must_refer_to_existing_module(home):
-    path = with_appliances(single(home, "dishwasher_panel", 450), dishwasher(module="Н9"))
-    [f] = findings(path, home, "appliance_module")
-    assert (f.level, f.subject) == ("error", "Н9")
 
 
 # --- part_exceeds_sheet --------------------------------------------------------
@@ -291,7 +226,7 @@ def test_import_saves_warnings_to_log(home):
     assert "без задней стенки" in api.status("petrov").text
 
 
-# --- corner_wall / appliance_no_data ----------------------------------------------
+# --- corner_wall -----------------------------------------------------------------------
 
 
 def test_corner_wall_must_exist_and_differ(home):
@@ -309,23 +244,6 @@ def test_corner_offset_from_project_overrides_workshop(home):
     other = ("Б", 1800, [("lower", [module("Н2", "base_door", 600), module("Н3", "base_door", 550)])])
     path = make_project(home / "p.json", [("A", 1050, [("lower", [corner])]), other])
     assert findings(path, home, "row_sum") == []  # 1150 + 650
-
-
-def test_unknown_appliance_without_dimensions_is_a_warning(home):
-    fridge = {"type": "fridge", "width": 600, "module": "Н1"}
-    path = with_appliances(single(home, "base_door"), fridge)
-    [f] = findings(path, home, "appliance_no_data")
-    assert (f.level, f.subject) == ("warning", "Н1")
-    path = with_appliances(single(home, "base_door"), {**fridge, "height": 1800, "depth": 550})
-    assert findings(path, home, "appliance_no_data") == []
-
-
-def test_width_matching_no_catalog_size_is_not_silently_substituted(home):
-    oven = {"type": "oven", "width": 700, "module": "Н1"}
-    [f] = findings(with_appliances(single(home, "base_door"), oven), home, "appliance_no_data")
-    assert f.level == "warning" and "700" in f.message
-    full = {**oven, "height": 600, "depth": 550}
-    assert findings(with_appliances(single(home, "base_door"), full), home, "appliance_no_data") == []
 
 
 def test_import_rejects_when_workshop_did_not_load(home):

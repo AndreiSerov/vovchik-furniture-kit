@@ -231,6 +231,9 @@
             "width_mm": "integer",
             "height_mm": "integer",
             "depth_mm": "integer",
+            "niche_width_mm": "integer: размеры встраивания из инструкции модели (ниша), не корпус прибора",
+            "niche_height_mm": "integer: см. niche_width_mm",
+            "niche_depth_mm": "integer: см. niche_width_mm",
             "dimensions": "string: Ш×В×Г — только в старых брифах, новые пишут width_mm, height_mm, depth_mm",
             "location": "string: где стоит, словами клиента (напр. «у окна», «в высоком шкафу», «на острове»)",
             "who_buys": "enum: client, salon",
@@ -263,7 +266,10 @@
             "model": "string",
             "width_mm": "integer",
             "height_mm": "integer",
-            "depth_mm": "integer"
+            "depth_mm": "integer",
+            "niche_width_mm": "integer: размеры встраивания из инструкции модели (ниша), не корпус прибора",
+            "niche_height_mm": "integer: см. niche_width_mm",
+            "niche_depth_mm": "integer: см. niche_width_mm"
           },
           "required": true,
           "ask": "now"

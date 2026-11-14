@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from kitchen import formulas
 from kitchen.errors import OrderError, WorkshopError
 from kitchen.formulas import FormulaError, InexactDivisionError
-from kitchen.models import EdgeRule, Num, Workshop
+from kitchen.models import ApplianceItem, EdgeRule, Num, Workshop
 from kitchen.project import Appliance, ModuleSpec, Project, ProjectMaterials, Row
 
 __all__ = [
@@ -33,6 +33,7 @@ __all__ = [
     "Span",
     "Template",
     "build_module",
+    "built_niche",
     "compute_parts",
     "module_dims",
 ]
@@ -211,6 +212,20 @@ def module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
             _whole(module.depth, f"Глубина модуля {module.label}") if module.depth is not None else base.depth
         ),
     )
+
+
+def built_niche(appliance: Appliance | None, item: ApplianceItem) -> tuple[int, int, int]:
+    """Ниша (ширина, высота, глубина), которую шаблон строит под прибор: размеры из проекта,
+    недостающие — ниша из `appliances.yaml`; ширина, равная типоразмеру, даёт нишу каталога.
+    Одна функция для шаблонов пенала и вытяжки и для проверок."""
+    if appliance is None:
+        return item.niche_width, item.niche_height, item.niche_depth
+    width = _whole(appliance.width, "Ширина техники")
+    if width == item.nominal_width:
+        width = item.niche_width
+    height = _whole(appliance.height, "Высота техники") if appliance.height is not None else item.niche_height
+    depth = _whole(appliance.depth, "Глубина техники") if appliance.depth is not None else item.niche_depth
+    return width, height, depth
 
 
 def _material(items: list, material_id: str, what: str, kind: str):
@@ -469,6 +484,7 @@ class Template:
     row_kind: str  # lower | upper | tall
     carcass: bool = True  # False: только фасад между соседними модулями (ПММ)
     drawers: bool = False  # ящики на направляющих: проверяется внутренняя глубина
+    appliances: tuple[str, ...] = ()  # виды техники, которые шаблон принимает (привязка из проекта)
 
 
 def build_base_sink(
@@ -713,18 +729,7 @@ def build_wall_hood(
     if hood is None or hood.type != "hood":
         raise WorkshopError(f"appliances.yaml: вытяжка «{c.upper_rules.hood}» не найдена.")
     t = c.case_thickness
-    project_width = _whole(appliance.width, "Ширина вытяжки") if appliance else hood.nominal_width
-    opening_width = hood.niche_width if project_width == hood.nominal_width else project_width
-    opening_depth = (
-        _whole(appliance.depth, "Глубина вытяжки")
-        if appliance and appliance.depth is not None
-        else hood.niche_depth
-    )
-    opening_height = (
-        _whole(appliance.height, "Высота вытяжки")
-        if appliance and appliance.height is not None
-        else hood.niche_height
-    )
+    opening_width, opening_height, opening_depth = built_niche(appliance, hood)
     if min(opening_width, opening_depth, opening_height) <= 0:
         raise OrderError(f"Модуль {module.label}: размеры вытяжки должны быть положительными.")
     free_width = dims.width - 2 * t - opening_width
@@ -857,18 +862,18 @@ def build_tall_oven(
 
 
 TEMPLATES = {
-    "tall_oven": Template(build_tall_oven, "tall", drawers=True),
-    "base_door": Template(build_base_door, "lower"),
+    "tall_oven": Template(build_tall_oven, "tall", drawers=True, appliances=("oven", "microwave")),
+    "base_door": Template(build_base_door, "lower", appliances=("hob",)),
     "base_corner": Template(build_base_corner, "lower"),
     "wall_corner": Template(build_wall_corner, "upper"),
     "wall_door": Template(build_wall_door, "upper"),
     "wall_lift": Template(build_wall_lift, "upper"),
-    "wall_hood": Template(build_wall_hood, "upper"),
+    "wall_hood": Template(build_wall_hood, "upper", appliances=("hood",)),
     "wall_dryer": Template(build_wall_dryer, "upper"),
-    "base_sink": Template(build_base_sink, "lower"),
+    "base_sink": Template(build_base_sink, "lower", appliances=("sink",)),
     "base_bottle": Template(build_base_bottle, "lower"),
-    "base_drawers": Template(build_base_drawers, "lower", drawers=True),
-    "dishwasher_panel": Template(build_dishwasher_panel, "lower", carcass=False),
+    "base_drawers": Template(build_base_drawers, "lower", drawers=True, appliances=("hob",)),
+    "dishwasher_panel": Template(build_dishwasher_panel, "lower", carcass=False, appliances=("dishwasher",)),
 }
 
 _ROW_RU = {"lower": "нижнем ряду", "upper": "верхнем ряду", "tall": "пенале"}

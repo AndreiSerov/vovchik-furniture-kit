@@ -44,14 +44,20 @@
           "built_in": true,
           "width_mm": 600,
           "location": "в высоком шкафу",
-          "who_buys": "client"
+          "who_buys": "client",
+          "niche_width_mm": 560,
+          "niche_height_mm": 590,
+          "niche_depth_mm": 550
         },
         {
           "type": "microwave",
           "built_in": true,
           "width_mm": 600,
           "location": "в высоком шкафу",
-          "who_buys": "client"
+          "who_buys": "client",
+          "niche_width_mm": 560,
+          "niche_height_mm": 380,
+          "niche_depth_mm": 350
         },
         {
           "type": "hob",
@@ -64,7 +70,10 @@
           "type": "dishwasher",
           "built_in": true,
           "width_mm": 450,
-          "who_buys": "client"
+          "who_buys": "client",
+          "niche_width_mm": 450,
+          "niche_height_mm": 820,
+          "niche_depth_mm": 560
         },
         {
           "type": "sink",
@@ -78,7 +87,10 @@
     "hood": {
       "value": {
         "kind": "built_in",
-        "width_mm": 600
+        "width_mm": 600,
+        "niche_width_mm": 560,
+        "niche_height_mm": 180,
+        "niche_depth_mm": 280
       },
       "source": "client"
     }

@@ -71,14 +71,18 @@ def parse_dimensions(text: Any) -> tuple[int, int, int] | None:
 
 @dataclass
 class BriefAppliance:
-    """Прибор из брифа: что клиент сказал о технике и её размерах."""
+    """Прибор из брифа. Размеры корпуса — справочные; ниша — размеры встраивания из инструкции."""
 
     type: str
     label: str  # для сообщений: «посудомойка 45 см Bosch SMV»
     built_in: bool
+    model: str | None = None
     width: int | None = None
     height: int | None = None
     depth: int | None = None
+    niche_width: int | None = None
+    niche_height: int | None = None
+    niche_depth: int | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -100,7 +104,21 @@ def _appliance(item: dict[str, Any], type_: str, label: str, built_in: bool) -> 
             width, height, depth = (
                 given or new for given, new in zip((width, height, depth), parsed, strict=True)
             )
-    return BriefAppliance(type_, label, built_in, width, height, depth, warnings)
+    niche = (_mm(item.get(k)) for k in ("niche_width_mm", "niche_height_mm", "niche_depth_mm"))
+    model = item.get("model")
+    return BriefAppliance(
+        type_, label, built_in, str(model) if model else None, width, height, depth, *niche, warnings
+    )
+
+
+def appliance_types() -> set[str]:
+    """Виды техники, которые знает бриф: перечень из схемы и вытяжка из объекта `appliances.hood`."""
+    schema = json.loads(_checker().SCHEMA_PATH.read_text(encoding="utf-8"))
+    text = schema["sections"]["appliances"]["fields"]["items"]["item"]["type"]
+    kinds = {
+        m.group(1) for part in text.split("enum:", 1)[1].split(",") if (m := re.match(r"\s*([a-z_]+)", part))
+    }
+    return {k.strip() for k in kinds} | {"hood"}
 
 
 def appliances(brief: dict[str, Any]) -> list[BriefAppliance]:

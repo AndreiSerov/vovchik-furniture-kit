@@ -385,8 +385,7 @@ class Construction(Section):
     tall_rules: TallRules = _f("правила_пенала")
     upper_rules: UpperRules = _f("верхние_модули")
     corner_rules: CornerRules = _f("угловые_модули")
-    # ДОБАВЛЕНО (МОК): виды техники, которым нужен модуль, и тех, что лежат на столешнице
-    module_appliances: list[str] = _f("техника_в_модуле")
+    # ДОБАВЛЕНО (МОК): виды техники, которые лежат на столешнице (ширину корпуса с нишей не сравнивать)
     countertop_appliances: list[str] = _f("техника_в_столешницу")
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")

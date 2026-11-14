@@ -14,8 +14,8 @@ from kitchen.parts import (
     _edge_id,
     _material,
     _required_thickness,
-    _whole,
     build_base_door,
+    built_niche,
     make_part,
     steps_pick,
 )
@@ -43,14 +43,7 @@ def build_tall_oven(
         matches = [a for a in project_appliances if a.module == module.label and a.type == item.type]
         if len(matches) > 1:
             raise OrderError(f"Модуль {module.label}: указано несколько приборов {item.type}.")
-        if not matches:
-            return item.niche_width, item.niche_height, item.niche_depth
-        chosen = matches[0]
-        width = _whole(chosen.width, "Ширина техники")
-        if width == item.nominal_width:
-            width = item.niche_width
-        height = _whole(chosen.height, "Высота техники") if chosen.height is not None else item.niche_height
-        depth = _whole(chosen.depth, "Глубина техники") if chosen.depth is not None else item.niche_depth
+        width, height, depth = built_niche(matches[0] if matches else None, item)
         if min(width, height, depth) <= 0:
             raise OrderError(f"Модуль {module.label}: габариты техники должны быть положительными.")
         return width, height, depth

@@ -1,9 +1,11 @@
-"""Техника для проверок берётся из последнего брифа заказа (а моковый appliances.yaml — запасной источник)."""
+"""Техника в проверках: требования берёт бриф заказа, а нишу строит проект (шаблон), как в расчёте деталей."""
 
 import json
 
+import pytest
 from kitchen import api
 from kitchen import brief as brief_mod
+from kitchen.errors import OrderError
 
 from tests.test_check_brief import c, sergey
 from tests.test_checks import findings, single, with_appliances
@@ -23,8 +25,16 @@ def save_brief(home, items=(), hood=None, name="brief.json"):
     return api.brief_save(ORDER, path, home)
 
 
+def niche(w, h, d):
+    return {"niche_width_mm": w, "niche_height_mm": h, "niche_depth_mm": d}
+
+
 def dw(**extra):
     return {"type": "dishwasher", "built_in": True, "model": "Bosch SMV", **extra}
+
+
+def oven(**extra):
+    return {"type": "oven", "built_in": True, "model": "Bosch HBG", **extra}
 
 
 def project_dw(home, **extra):
@@ -32,19 +42,34 @@ def project_dw(home, **extra):
     return with_appliances(single(home, "dishwasher_panel", 450), appliance)
 
 
-# --- состав и привязка -----------------------------------------------------------
+def project_oven(home, **extra):
+    appliance = {"type": "oven", "width": 600, "module": "Н1", **extra}
+    return with_appliances(single(home, "tall_oven", 600), appliance)
+
+
+def project_hood(home, **extra):
+    appliance = {"type": "hood", "width": 600, "module": "В1", **extra}
+    return with_appliances(single(home, "wall_hood", 600, row="upper"), appliance)
+
+
+def errors(path, home):
+    return [f for f in api.check_project(path, home).findings if f.level == "error"]
+
+
+# --- какой бриф --------------------------------------------------------------------
 
 
 def test_no_brief_is_a_warning_and_does_not_block(home):
     api.order_new(ORDER, client="Петров П. П.")
     result = api.check_project(project_dw(home), home)
     [f] = [f for f in result.findings if f.code == "brief_missing"]
-    assert f.level == "warning" and "брифа нет, техника не сверена" in f.message
+    assert f.level == "warning" and "брифа нет, техника не сверена" in f.message.lower()
+    assert "нет брифа" not in f.message.lower()
     assert result.brief_id is None and result.errors == []
 
 
 def test_brief_present_means_no_missing_warning_and_result_names_the_brief(home):
-    save_brief(home, [dw(width_mm=450)])
+    save_brief(home, [dw()])
     result = api.check_project(project_dw(home), home)
     assert [f for f in result.findings if f.code == "brief_missing"] == []
     assert result.brief_id == 1 and result.brief_saved_at
@@ -52,12 +77,15 @@ def test_brief_present_means_no_missing_warning_and_result_names_the_brief(home)
 
 def test_latest_brief_is_used(home):
     save_brief(home, [])
-    save_brief(home, [dw(width_mm=450)], name="b2.json")
+    save_brief(home, [dw()], name="b2.json")
     assert api.check_project(project_dw(home), home).brief_id == 2
 
 
+# --- состав и привязка к шаблонам ------------------------------------------------------
+
+
 def test_built_in_appliance_without_module_is_an_error(home):
-    save_brief(home, [dw(width_mm=450)])
+    save_brief(home, [dw()])
     [f] = findings(single(home, "base_door"), home, "appliance_unbound")
     assert f.level == "error" and "Bosch SMV" in f.message and f.subject.startswith("посудомойка")
     assert findings(project_dw(home), home, "appliance_unbound") == []
@@ -68,10 +96,25 @@ def test_not_built_in_appliance_needs_no_module(home):
     assert findings(single(home, "base_door"), home, "appliance_unbound") == []
 
 
+def test_appliance_no_template_accepts_is_a_warning(home):
+    save_brief(home, [{"type": "coffee_machine", "built_in": True, "model": "Delonghi"}])
+    [f] = findings(single(home, "base_door"), home, "appliance_no_template")
+    assert f.level == "warning" and "шаблона под «" in f.message and "Delonghi" in f.message
+    assert findings(single(home, "base_door"), home, "appliance_unbound") == []
+
+
+def test_appliance_in_module_of_wrong_template_is_an_error(home):
+    save_brief(home, [oven()])
+    path = with_appliances(single(home, "base_door"), {"type": "oven", "width": 600, "module": "Н1"})
+    [f] = findings(path, home, "appliance_wrong_module")
+    assert (f.level, f.subject) == ("error", "Н1")
+    assert findings(project_oven(home), home, "appliance_wrong_module") == []
+
+
 def test_count_per_type_is_compared(home):
-    save_brief(home, [dw(), dw()])
-    [f] = findings(project_dw(home), home, "appliance_unbound")
-    assert f.level == "error"
+    save_brief(home, [dw(model="A"), dw(model="B")])
+    [f] = findings(project_dw(home, model="A"), home, "appliance_unbound")
+    assert f.level == "error" and "B" in f.message
 
 
 def test_project_appliance_missing_in_brief_is_a_warning(home):
@@ -90,26 +133,157 @@ def test_built_in_hood_from_brief_object_needs_a_module(home):
     assert findings(single(home, "base_door"), home, "appliance_unbound") == []
 
 
-# --- размеры ------------------------------------------------------------------------
+def test_pairing_goes_by_model_first(home):
+    save_brief(home, [dw(model="Big", **niche(600, 820, 560)), dw(model="Compact", **niche(450, 820, 560))])
+    path = project_dw(home, model="Compact")
+    [f] = findings(path, home, "appliance_unbound")
+    assert "Big" in f.message and "Compact" not in f.message
+    assert findings(path, home, "appliance_pairing") == []
+    # с Compact сверена ниша 450, а не 600 из первого по порядку Big
+    assert findings(path, home, "niche_too_small") == []
 
 
-def test_niche_uses_dimensions_from_brief(home):
-    save_brief(home, [dw(width_mm=450, height_mm=830, depth_mm=560)])
-    [f] = findings(project_dw(home), home, "niche_too_small")
-    assert (f.value, f.limit) == (830, 820)
-    save_brief(home, [dw(width_mm=450, height_mm=815, depth_mm=550)], name="b2.json")
+def test_pairing_without_models_goes_by_order_with_a_warning(home):
+    save_brief(home, [dw(model=None), dw(model=None)])
+    [f] = findings(project_dw(home), home, "appliance_pairing")
+    assert f.level == "warning" and "без моделей" in f.message and "по порядку" in f.message
+    save_brief(home, [dw(model=None)], name="b2.json")
+    assert findings(project_dw(home), home, "appliance_pairing") == []
+
+
+# --- ниша: требование из брифа против ниши, которую строит модуль ------------------------------
+
+
+def test_oven_body_bigger_than_niche_is_not_an_error(home):
+    # корпус 595×595×550 в пенале 600, а размеры встраивания — 560×590×550
+    save_brief(home, [oven(width_mm=595, height_mm=595, depth_mm=550, **niche(560, 590, 550))])
+    assert errors(project_oven(home), home) == []
+
+
+def test_hood_598_in_wall_hood_600_is_not_an_error(home):
+    save_brief(home, [], hood={"kind": "built_in", "width_mm": 598, **niche(560, 180, 280)})
+    assert errors(project_hood(home), home) == []
+
+
+def test_brief_niche_taller_than_tall_module_builds_is_an_error(home):
+    save_brief(home, [oven(**niche(560, 600, 550))])
+    [f] = findings(project_oven(home), home, "niche_too_small")
+    assert (f.level, f.value, f.limit) == ("error", 600, 590)  # в брифе 600, пенал строит 590
+    assert "600" in f.message and "590" in f.message
+
+
+def test_built_niche_comes_from_the_project(home):
+    save_brief(home, [oven(**niche(560, 600, 550))])
+    # в проекте ниша 610 высотой — именно её строит шаблон
+    assert findings(project_oven(home, height=610), home, "niche_too_small") == []
+    save_brief(home, [oven(**niche(560, 620, 550))], name="b2.json")
+    [f] = findings(project_oven(home, height=610), home, "niche_too_small")
+    assert (f.value, f.limit) == (620, 610)
+
+
+def test_niche_in_brief_but_not_in_project_is_a_warning(home):
+    save_brief(home, [oven(**niche(560, 590, 550))])
+    [f] = findings(project_oven(home), home, "niche_not_in_project")
+    assert f.level == "warning" and "перенесите размеры встраивания из брифа в проект" in f.message
+    full = project_oven(home, height=590, depth=550)
+    assert findings(full, home, "niche_not_in_project") == []
+
+
+def test_dishwasher_niche_against_module_space(home):
+    save_brief(home, [dw(**niche(450, 830, 570))])
+    found = sorted((f.value, f.limit) for f in findings(project_dw(home), home, "niche_too_small"))
+    assert found == [(570, 560), (830, 820)]  # высота модуля 720 + ножки 100
+    save_brief(home, [dw(**niche(450, 820, 560))], name="b2.json")
     assert findings(project_dw(home), home, "niche_too_small") == []
 
 
-def test_dimensions_string_of_old_brief_is_parsed(home):
-    save_brief(home, [dw(width_mm=450, dimensions="450×830×560")])
+def test_body_dimensions_are_not_compared_with_niche(home):
+    save_brief(home, [dw(width_mm=600, height_mm=900, depth_mm=700, **niche(450, 820, 560))])
+    assert findings(project_dw(home), home, "niche_too_small") == []
+
+
+def test_countertop_types_come_from_construction_yaml(home):
+    save_brief(home, [{"type": "hob", "built_in": True, "model": "Hob", **niche(770, 50, 520)}])
+    hob = {"type": "hob", "width": 600, "module": "Н1"}
+    path = with_appliances(single(home, "base_door", 800), hob)
+    assert findings(path, home, "niche_too_small") == []
+    cfg = home / "workshop/construction.yaml"
+    cfg.write_text(
+        cfg.read_text().replace("техника_в_столешницу: [hob, sink]", "техника_в_столешницу: [sink]")
+    )
+    [f] = findings(path, home, "niche_too_small")
+    assert (f.value, f.limit) == (770, 768)
+
+
+def test_standard_hob_over_standard_module_is_not_an_error(home):
+    save_brief(home, [{"type": "hob", "built_in": True, "model": "Hob"}])
+    for template in ("base_door", "base_drawers"):
+        hob = {"type": "hob", "width": 600, "module": "Н1"}
+        assert errors(with_appliances(single(home, template), hob), home) == []
+
+
+def test_appliance_must_refer_to_existing_module(home):
+    path = project_dw(home, module="Н9")
+    [f] = findings(path, home, "appliance_module")
+    assert (f.level, f.subject) == ("error", "Н9")
+    assert findings(project_dw(home), home, "appliance_module") == []
+
+
+# --- нет размеров встраивания: типовая ниша каталога -------------------------------------------
+
+
+def test_missing_niche_in_brief_takes_catalog_with_warning(home):
+    save_brief(home, [dw()])
+    [f] = findings(project_dw(home), home, "appliance_catalog_dims")
+    assert f.level == "warning" and "Bosch SMV" in f.message
+    assert "уточните размеры встраивания по инструкции модели" in f.message
+    assert findings(project_dw(home), home, "niche_too_small") == []
+
+
+def test_catalog_warning_only_when_catalog_is_really_used(home):
+    # ширина 450 равна типоразмеру, но бриф дал все размеры встраивания
+    save_brief(home, [dw(width_mm=450, **niche(450, 820, 560))])
+    assert findings(project_dw(home), home, "appliance_catalog_dims") == []
+
+
+def test_catalog_niche_is_the_requirement_when_brief_is_silent(home):
+    a = home / "workshop/appliances.yaml"
+    a.write_text(a.read_text().replace("ниша_высота: 820", "ниша_высота: 900"))
+    save_brief(home, [dw()])
     [f] = findings(project_dw(home), home, "niche_too_small")
-    assert (f.value, f.limit) == (830, 820)
+    assert (f.value, f.limit) == (900, 820)
+
+
+def test_no_brief_uses_catalog_requirement(home):
+    a = home / "workshop/appliances.yaml"
+    a.write_text(a.read_text().replace("ниша_высота: 820", "ниша_высота: 900"))
+    [f] = findings(project_dw(home), home, "niche_too_small")
+    assert (f.value, f.limit) == (900, 820)
+
+
+def test_unknown_appliance_size_without_niche_is_a_warning(home):
+    hob = {"type": "hob", "built_in": True, "model": "Wide"}
+    path = with_appliances(single(home, "base_door"), {"type": "hob", "width": 700, "module": "Н1"})
+    save_brief(home, [hob])
+    [f] = findings(path, home, "appliance_no_data")
+    assert (f.level, f.subject) == ("warning", "Н1")
+    # с размерами встраивания данных хватает
+    save_brief(home, [{**hob, **niche(690, 50, 500)}], name="b2.json")
+    assert findings(path, home, "appliance_no_data") == []
+
+
+# --- размеры в брифе -----------------------------------------------------------------------------
+
+
+def test_dimensions_string_of_old_brief_is_parsed(home):
+    save_brief(home, [dw(dimensions="450×830×560")])
+    brief = brief_mod.appliances(api.brief_show(ORDER, home).brief)[0]
+    assert (brief.width, brief.height, brief.depth) == (450, 830, 560)
     assert findings(project_dw(home), home, "brief_dimensions") == []
 
 
 def test_unrecognised_dimensions_string_is_a_warning(home):
-    save_brief(home, [dw(width_mm=450, dimensions="большая")])
+    save_brief(home, [dw(dimensions="большая")])
     [f] = findings(project_dw(home), home, "brief_dimensions")
     assert f.level == "warning" and "большая" in f.message
 
@@ -121,70 +295,61 @@ def test_dimensions_string_formats():
     assert parse("") is None and parse("450") is None
 
 
-def test_dimensions_missing_in_brief_come_from_mock_catalog_with_warning(home):
-    save_brief(home, [dw(width_mm=450)])
-    [f] = findings(project_dw(home), home, "appliance_catalog_dims")
-    assert f.level == "warning"
-    assert "из мок-каталога — уточните модель у клиента" in f.message and "Bosch SMV" in f.message
-    save_brief(home, [dw(width_mm=460, height_mm=815, depth_mm=550)], name="b2.json")
-    assert findings(project_dw(home), home, "appliance_catalog_dims") == []
+def test_brief_schema_has_body_and_niche_dimensions(repo):
+    schema = json.loads((repo / "skills/kitchen-brief/references/brief_schema.json").read_text())
+    fields = schema["sections"]["appliances"]["fields"]
+    for item in (fields["items"]["item"], fields["hood"]["item"]):
+        for key in ("height_mm", "depth_mm", "niche_width_mm", "niche_height_mm", "niche_depth_mm"):
+            assert key in item
 
 
-def test_project_dimensions_that_differ_from_brief_are_a_warning(home):
-    save_brief(home, [dw(width_mm=450, height_mm=815, depth_mm=550)])
-    [f] = findings(project_dw(home, height=800), home, "appliance_dims_differ")
-    assert f.level == "warning" and "800" in f.message and "815" in f.message
-    assert findings(project_dw(home, height=815), home, "appliance_dims_differ") == []
+# --- виды техники в мастерской -----------------------------------------------------------------
 
 
-# --- «в столешницу» из construction.yaml ------------------------------------------------
-
-
-def test_countertop_types_come_from_construction_yaml(home):
-    hob = {"type": "hob", "width": 770, "height": 50, "depth": 520, "module": "Н1"}
-    path = with_appliances(single(home, "base_door", 800), hob)
-    assert findings(path, home, "niche_too_small") == []
+def test_workshop_appliance_kinds_must_exist_in_brief_schema(home):
     cfg = home / "workshop/construction.yaml"
     cfg.write_text(
-        cfg.read_text().replace("техника_в_столешницу: [hob, sink]", "техника_в_столешницу: [sink]")
+        cfg.read_text().replace("техника_в_столешницу: [hob, sink]", "техника_в_столешницу: [hobb]")
     )
-    [f] = findings(path, home, "niche_too_small")
-    assert (f.value, f.limit) == (770, 768)
+    result = api.check_workshop(home)
+    assert not result.valid and any("hobb" in e for e in result.errors)
 
 
-# --- импорт --------------------------------------------------------------------------------
+# --- импорт и версия ------------------------------------------------------------------------------
 
 
-def test_import_reports_brief_used_and_logs_it(home):
+def test_import_records_brief_used_in_the_version_and_log(home):
     api.order_new(ORDER, client="Петров П. П.")
-    save_brief(home, [dw(width_mm=450, height_mm=815, depth_mm=550)])
+    save_brief(home, [dw(**niche(450, 820, 560))])
     result = api.import_project("petrov", project_dw(home))
     assert result.brief_id == 1
     assert "брифом №1" in api.status("petrov").text
 
 
-def test_import_with_unbound_built_in_appliance_is_rejected(home):
-    import pytest
-    from kitchen.errors import OrderError
+def test_reimport_unchanged_returns_brief_recorded_with_version(home):
+    api.order_new(ORDER, client="Петров П. П.")
+    save_brief(home, [dw(**niche(450, 820, 560))])
+    path = project_dw(home)
+    api.import_project("petrov", path)
+    save_brief(home, [dw(**niche(450, 820, 560))], name="b2.json")
+    again = api.import_project("petrov", path)
+    assert not again.changed and again.brief_id == 1
 
+
+def test_import_with_unbound_built_in_appliance_is_rejected(home):
     save_brief(home, [dw()])
     with pytest.raises(OrderError, match="Bosch SMV"):
         api.import_project("petrov", single(home, "base_door"))
 
 
-def test_brief_schema_has_structured_dimensions(repo):
-    schema = json.loads((repo / "skills/kitchen-brief/references/brief_schema.json").read_text())
-    item = schema["sections"]["appliances"]["fields"]["items"]["item"]
-    assert "height_mm" in item and "depth_mm" in item
+# --- бриф Петрова (понадобится в тикете 11) -------------------------------------------------------
 
 
-# --- бриф Петрова (понадобится в тикете 11) -------------------------------------------------
-
-
-def test_petrov_brief_fixture_has_all_appliances_from_the_spec(repo, home):
-    path = repo / "tests/fixtures/petrov_brief.json"
-    api.brief_save(ORDER, path, home)
-    shown = api.brief_show(ORDER, home)
-    types = sorted(a.type for a in brief_mod.appliances(shown.brief))
-    assert types == ["dishwasher", "hob", "hood", "microwave", "oven", "sink"]
-    assert all(a.built_in for a in brief_mod.appliances(shown.brief))
+def test_petrov_brief_fixture_has_all_appliances_with_niches(repo, home):
+    api.brief_save(ORDER, repo / "tests/fixtures/petrov_brief.json", home)
+    items = brief_mod.appliances(api.brief_show(ORDER, home).brief)
+    assert sorted(a.type for a in items) == ["dishwasher", "hob", "hood", "microwave", "oven", "sink"]
+    assert all(a.built_in for a in items)
+    for a in items:
+        if a.type in ("oven", "microwave", "dishwasher", "hood"):
+            assert None not in (a.niche_width, a.niche_height, a.niche_depth), a.type
