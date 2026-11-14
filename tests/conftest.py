@@ -6,6 +6,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 
+# Поля результата `parts`, которых нет в эталонах (golden сравнивает детали, фурнитуру, кромку, фасады).
+NEW_FIELDS = {"mock", "mock_files", "source", "findings", "common", "facade_area_by_color"}
+
 # Минимальный проект (тикет 05): один нижний модуль base_door W600.
 BASE_DOOR_PROJECT = {
     "order": "2026-047-petrov",

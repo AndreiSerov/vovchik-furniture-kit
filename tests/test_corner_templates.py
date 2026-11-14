@@ -4,6 +4,8 @@ import json
 
 from kitchen import api
 
+from tests.conftest import NEW_FIELDS
+
 
 def corner_project(path, template, width, kind):
     project = json.loads(path.read_text(encoding="utf-8"))
@@ -77,7 +79,7 @@ def test_corner_manual_golden(home, base_door_project):
         corner_project(base_door_project, template, width, kind)
         result = api.parts_from_project(base_door_project, home)
         expected = json.loads((Path(__file__).parent / f"golden/{template}_{width}.json").read_text())
-        assert result.model_dump(exclude={"mock", "mock_files"}, exclude_none=True) == expected
+        assert result.model_dump(exclude=NEW_FIELDS, exclude_none=True) == expected
 
 
 def test_corner_uses_specified_filler_material(home, base_door_project):

@@ -924,7 +924,15 @@ class PartsComputation:
     hardware: dict[str, int]
     edges: dict[str, EdgeTotals]
     facade_area: float
+    facade_by_color: dict[str, float]  # м² по цветам; без цвета в проекте — «без цвета»
     warnings: list[str]
+
+
+NO_COLOR = "без цвета"
+
+
+def _area_4(area: Decimal) -> float:
+    return float(area.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
 
 
 def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
@@ -933,6 +941,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     hw: Counter = Counter()
     seen: dict[str, str] = {}
     warnings: list[str] = []
+    colored: dict[str, Decimal] = {}
     for wall in project.walls:
         for row in wall.rows:
             for module in row.modules:
@@ -950,6 +959,13 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
                         )
                     seen[part.id] = module.label
                 modules.append(ModuleParts(module=module.label, template=module.template, parts=out.parts))
+                lower = row.kind == "lower" or TEMPLATES[module.template].row_kind == "tall"
+                color = (
+                    project.materials.facades_lower_color if lower else project.materials.facades_upper_color
+                ) or NO_COLOR
+                for part in out.parts:
+                    if part.area_m2 is not None:
+                        colored[color] = colored.get(color, Decimal(0)) + Decimal(str(part.area_m2))
                 hw.update(out.hardware)
                 warnings += [f"{module.label}: {w}" for w in out.warnings]
     known = {i.id for i in ws.hardware.items}
@@ -963,7 +979,8 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
         modules=modules,
         hardware=dict(sorted(hw.items())),
         edges=_edge_totals(all_parts, ws),
-        facade_area=float(facade_area.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)),
+        facade_area=_area_4(facade_area),
+        facade_by_color={c: _area_4(a) for c, a in sorted(colored.items())},
         warnings=warnings,
     )
 

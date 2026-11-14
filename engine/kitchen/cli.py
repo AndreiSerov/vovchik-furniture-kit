@@ -12,7 +12,7 @@ from typing import Annotated, NoReturn, TypeVar
 import typer
 
 from kitchen import api
-from kitchen.errors import KitchenError
+from kitchen.errors import InputError, KitchenError
 from kitchen.result import MOCK_BANNER, Result
 
 app = typer.Typer(help="Движок мастерской: проверка данных, заказы, раскрой, смета.", no_args_is_help=True)
@@ -200,8 +200,23 @@ def status(order: OrderArg, json: JsonOpt = False) -> None:
     emit(result, lambda r: f"{r.text}\nФайл: {r.path}", json)
 
 
+def _render_source(src: api.PartsSource) -> str:
+    if src.kind == "order":
+        head = f"Источник: заказ {src.order}, версия {src.version} проекта"
+    else:
+        version = f"версия {src.version}" if src.version else "версия в файле не записана"
+        head = f"Источник: файл {src.path} (проект {src.order}, {version})"
+    head += f", хеш {src.content_hash[:12]}"
+    if src.brief_id is None:
+        return head + "; брифа нет"
+    brief = f"бриф №{src.brief_id} от {src.brief_saved_at}"
+    if src.version_brief_id is not None and src.version_brief_id != src.brief_id:
+        brief += f" (у версии записан бриф №{src.version_brief_id})"
+    return f"{head}; {brief}"
+
+
 def _render_parts(r: api.PartsResult) -> str:
-    lines = [f"Детали проекта {r.order}:"]
+    lines = [f"Детали проекта {r.order}:", _render_source(r.source)]
     for m in r.modules:
         lines.append(f"  Модуль {m.module} ({m.template}) — {len(m.parts)} дет.")
         for p in m.parts:
@@ -216,6 +231,16 @@ def _render_parts(r: api.PartsResult) -> str:
             f"{e.with_allowance_m:.3f} м, к закупке {e.purchase_m:.1f} м"
         )
     lines.append(f"Фасады: {r.facade_area:.4f} м²")
+    for color, area in r.facade_area_by_color.items():
+        lines.append(f"  {color}: {area:.4f} м²")
+    lines.append("Общие позиции:")
+    for c in r.common:
+        note = " (уже в фурнитуре)" if c.in_hardware else ""
+        lines.append(f"  {c.item} — {c.name}: {c.quantity} {c.unit}{note}; {c.basis}")
+    if r.findings:
+        lines.append("Находки проверок:")
+        for f in r.findings:
+            lines.append(f"  [{'ОШИБКА' if f.level == 'error' else 'предупреждение'}] {f.message}")
     if r.warnings:
         lines.append("Предупреждения: " + "; ".join(r.warnings))
     return "\n".join(lines)
@@ -223,12 +248,20 @@ def _render_parts(r: api.PartsResult) -> str:
 
 @app.command("parts")
 def parts(
-    project: Annotated[Path, typer.Option("--project", help="Файл project.json (без БД).")],
+    order: Annotated[
+        str | None,
+        typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project."),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
     json: JsonOpt = False,
 ) -> None:
-    """Детали проекта: по модулям, фурнитура, кромка, площадь фасадов."""
+    """Детали проекта: по модулям, фурнитура, кромка, фасады, общие позиции, находки проверок."""
     try:
-        result = api.parts_from_project(project)
+        if (order is None) == (project is None):
+            raise InputError("Укажите либо заказ (kitchen parts petrov), либо файл: --project project.json.")
+        result = api.parts_from_order(order) if order is not None else api.parts_from_project(project)
     except KitchenError as e:
         fail(e)
     emit(result, _render_parts, json)

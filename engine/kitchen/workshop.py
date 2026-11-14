@@ -190,6 +190,15 @@ def _cross_refs(w: Workshop) -> list[str]:
             "вытяжках appliances.yaml",
         ),
         *(
+            (f"общие_позиции.{key}", ref, hw_ids, "позициях hardware.yaml")
+            for key, ref in (
+                ("цоколь.позиция", w.construction.common.plinth.item),
+                ("шина.позиция", w.construction.common.rail.item),
+                ("led.профиль", w.construction.common.led.profile),
+                ("led.блок_питания", w.construction.common.led.power_supply),
+            )
+        ),
+        *(
             (f"фурнитура.{key}", ref, hw_ids, "позициях hardware.yaml")
             for key, ref in (
                 ("петли", w.construction.furniture.hinges),

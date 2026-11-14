@@ -1,0 +1,69 @@
+{
+  "order": "2026-047-petrov",
+  "ceiling_height": 2700,
+  "walls": [
+    {
+      "label": "A",
+      "length": 2800,
+      "rows": [
+        {
+          "kind": "lower",
+          "modules": [
+            {"label": "П1", "template": "tall_oven", "width": 600},
+            {"label": "Н1", "template": "base_drawers", "width": 600},
+            {"label": "Н2", "template": "base_door", "width": 400, "shelves": 1},
+            {"label": "Н3", "template": "base_bottle", "width": 150},
+            {"label": "Н4", "template": "base_corner", "width": 1050, "corner": {"adjacent_wall": "Б"}}
+          ]
+        },
+        {
+          "kind": "upper",
+          "modules": [
+            {"label": "В1", "template": "wall_hood", "width": 600},
+            {"label": "В2", "template": "wall_door", "width": 600, "shelves": 1},
+            {"label": "В3", "template": "wall_door", "width": 400, "shelves": 1},
+            {"label": "В4", "template": "wall_corner", "width": 600, "corner": {"adjacent_wall": "Б"}}
+          ]
+        }
+      ]
+    },
+    {
+      "label": "Б",
+      "length": 1800,
+      "rows": [
+        {
+          "kind": "lower",
+          "modules": [
+            {"label": "Н5", "template": "base_sink", "width": 750},
+            {"label": "Н6", "template": "dishwasher_panel", "width": 450}
+          ]
+        },
+        {
+          "kind": "upper",
+          "modules": [
+            {"label": "В5", "template": "wall_dryer", "width": 750},
+            {"label": "В6", "template": "wall_door", "width": 450, "shelves": 1}
+          ]
+        }
+      ]
+    }
+  ],
+  "materials": {
+    "body": "ldsp_16_white",
+    "facades_lower": "mdf_enamel_matt",
+    "facades_upper": "mdf_enamel_matt",
+    "facades_lower_color": "RAL 7044",
+    "facades_upper_color": "RAL 9003",
+    "handles": "handle_profile",
+    "countertop": "top_38_marble"
+  },
+  "led": true,
+  "appliances": [
+    {"type": "oven", "width": 560, "height": 590, "depth": 550, "module": "П1"},
+    {"type": "microwave", "width": 560, "height": 380, "depth": 350, "module": "П1"},
+    {"type": "hob", "width": 600, "module": "Н1"},
+    {"type": "dishwasher", "width": 450, "module": "Н6"},
+    {"type": "sink", "width": 750, "module": "Н5"},
+    {"type": "hood", "width": 560, "height": 180, "depth": 280, "module": "В1"}
+  ]
+}

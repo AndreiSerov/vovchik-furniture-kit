@@ -379,6 +379,33 @@ class CornerRules(Section):
     filler_edges: StrictBool = _f("кромить_заглушку")
 
 
+class LinearItem(Section):
+    """Погонная позиция из `hardware.yaml`, которая продаётся штуками фиксированной длины."""
+
+    item: str = _f("позиция")
+    piece_length: Annotated[Int, Field(gt=0)] = _f("длина_штуки")
+
+
+class LedRules(Section):
+    profile: str = _f("профиль")
+    power_supply: str = _f("блок_питания")
+    meters_per_supply: Annotated[Num, Field(gt=0)] = _f("метров_на_блок")
+
+
+class CountertopRules(Section):
+    corner_joint: Literal["встык"] = _f("стык_в_углу")
+
+
+class CommonRules(Section):
+    """Общие позиции кухни: не принадлежат одному модулю, считаются по длинам рядов проекта."""
+
+    joint_reserve: Annotated[Num, Field(ge=0)] = _f("запас_на_стыки")
+    plinth: LinearItem = _f("цоколь")
+    rail: LinearItem = _f("шина")
+    led: LedRules = _f("led")
+    countertop: CountertopRules = _f("столешница")
+
+
 class Construction(Section):
     mock: StrictBool
     case_thickness: Int = _f("толщина_корпуса")
@@ -405,6 +432,7 @@ class Construction(Section):
     corner_rules: CornerRules = _f("угловые_модули")
     # ДОБАВЛЕНО (МОК): виды техники, которые лежат на столешнице (ширину корпуса с нишей не сравнивать)
     countertop_appliances: list[str] = _f("техника_в_столешницу")
+    common: CommonRules = _f("общие_позиции")  # ДОБАВЛЕНО (МОК): цоколь, шина, LED, столешница
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
 

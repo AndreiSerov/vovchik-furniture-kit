@@ -1,0 +1,186 @@
+"""Общие позиции кухни (1.7): цоколь, шина, навесы, LED с блоком питания, столешница.
+
+Правила и позиции — в `construction.yaml` (`общие_позиции`, МОК). Длины берутся из рядов проекта:
+цоколь — по фронту всех нижних модулей (пенал и ПММ тоже стоят на цоколе), шина и LED — по верхним
+рядам, столешница — по нижним модулям без пенала. Угловой модуль считается на своей стене:
+смещение на соседней стене его не удлиняет (стык в углу «встык»).
+"""
+
+from collections.abc import Iterable
+from decimal import ROUND_CEILING, Decimal
+from typing import Literal
+
+from pydantic import BaseModel
+
+from kitchen.errors import OrderError
+from kitchen.models import Workshop
+from kitchen.parts import TEMPLATES
+from kitchen.project import Project
+
+__all__ = ["CommonItem", "compute_common"]
+
+
+class CommonItem(BaseModel):
+    """Общая позиция: что купить и на каком основании. `item` — id из hardware.yaml или столешницы."""
+
+    kind: Literal["plinth", "rail", "hangers", "led", "led_power_supply", "countertop"]
+    item: str
+    name: str
+    quantity: int
+    unit: str  # шт, м, лист
+    length_mm: int | None = None  # длина, по которой посчитано (без запаса)
+    basis: str  # откуда число, по-русски
+    in_hardware: bool = False  # уже входит в итог фурнитуры (навесы считают шаблоны модулей)
+
+
+def _ceil(value: Decimal) -> int:
+    return int(value.to_integral_value(rounding=ROUND_CEILING))
+
+
+def _runs(project: Project, kinds: Iterable[str], with_tall: bool) -> list[tuple[str, list[int]]]:
+    """Непрерывные участки модулей нужного ряда по стенам: пенал либо входит в участок, либо разрывает его."""
+    runs: list[tuple[str, list[int]]] = []
+    for wall in project.walls:
+        for row in wall.rows:
+            if row.kind not in kinds:
+                continue
+            current: list[int] = []
+            for m in row.modules:
+                tall = TEMPLATES[m.template].row_kind == "tall" if m.template in TEMPLATES else False
+                if tall and not with_tall:
+                    if current:
+                        runs.append((wall.label, current))
+                    current = []
+                else:
+                    current.append(round(m.width))
+            if current:
+                runs.append((wall.label, current))
+    return runs
+
+
+def _total(runs: list[tuple[str, list[int]]]) -> int:
+    return sum(sum(widths) for _, widths in runs)
+
+
+def _named(items: list, item_id: str) -> str:
+    return next((i.name for i in items if i.id == item_id), item_id)
+
+
+def _pieces(total_mm: int, rule_piece_mm: int, reserve: Decimal) -> int:
+    return _ceil(Decimal(total_mm) * (1 + reserve) / rule_piece_mm)
+
+
+def _countertop_sheets(runs: list[tuple[str, list[int]]], sheet_mm: int, kerf: int) -> tuple[int, list[int]]:
+    """Куски столешницы (участок = кусок, длиннее листа режется по длине листа) по листам: первый подходящий,
+    куски по убыванию; между кусками одного листа пропил."""
+    pieces: list[int] = []
+    for _, widths in runs:
+        length = sum(widths)
+        while length > sheet_mm:
+            pieces.append(sheet_mm)
+            length -= sheet_mm
+        if length:
+            pieces.append(length)
+    sheets: list[int] = []  # занято на каждом листе
+    for piece in sorted(pieces, reverse=True):
+        for i, used in enumerate(sheets):
+            if used + kerf + piece <= sheet_mm:
+                sheets[i] = used + kerf + piece
+                break
+        else:
+            sheets.append(piece)
+    return len(sheets), pieces
+
+
+def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> list[CommonItem]:
+    """Общие позиции кухни по правилам `общие_позиции`; LED — если в проекте `led`, столешница — если задана."""
+    rules = ws.construction.common
+    reserve = Decimal(str(rules.joint_reserve))
+    percent = f"{rules.joint_reserve:.0%}"
+    hw = ws.hardware.items
+    items: list[CommonItem] = []
+
+    lower = _total(_runs(project, ("lower",), with_tall=True))
+    n = _pieces(lower, rules.plinth.piece_length, reserve)
+    items.append(
+        CommonItem(
+            kind="plinth",
+            item=rules.plinth.item,
+            name=_named(hw, rules.plinth.item),
+            quantity=n,
+            unit="шт",
+            length_mm=lower,
+            basis=f"фронт нижних рядов {lower} мм + запас {percent}, штуки по {rules.plinth.piece_length} мм",
+        )
+    )
+    upper_runs = _runs(project, ("upper",), with_tall=False)
+    upper = _total(upper_runs)
+    n = _pieces(upper, rules.rail.piece_length, reserve)
+    items.append(
+        CommonItem(
+            kind="rail",
+            item=rules.rail.item,
+            name=_named(hw, rules.rail.item),
+            quantity=n,
+            unit="шт",
+            length_mm=upper,
+            basis=f"верхние ряды {upper} мм + запас {percent}, штуки по {rules.rail.piece_length} мм",
+        )
+    )
+    hanger = ws.construction.upper_rules.hanger
+    items.append(
+        CommonItem(
+            kind="hangers",
+            item=hanger,
+            name=_named(hw, hanger),
+            quantity=hardware.get(hanger, 0),
+            unit="шт",
+            basis="считают шаблоны верхних модулей; в итоге фурнитуры уже учтены",
+            in_hardware=True,
+        )
+    )
+    if project.led:
+        led = rules.led
+        meters = Decimal(upper) * (1 + reserve) / 1000
+        items.append(
+            CommonItem(
+                kind="led",
+                item=led.profile,
+                name=_named(hw, led.profile),
+                quantity=_ceil(meters),
+                unit="м",
+                length_mm=upper,
+                basis=f"верхние ряды {upper} мм + запас {percent}, вверх до целого метра",
+            )
+        )
+        items.append(
+            CommonItem(
+                kind="led_power_supply",
+                item=led.power_supply,
+                name=_named(hw, led.power_supply),
+                quantity=_ceil(meters / Decimal(str(led.meters_per_supply))),
+                unit="шт",
+                basis=f"{led.meters_per_supply:g} м ленты на блок",
+            )
+        )
+    if project.materials.countertop:
+        top_id = project.materials.countertop
+        top = next((t for t in ws.materials.countertops if t.id == top_id), None)
+        if top is None:
+            known = ", ".join(sorted(t.id for t in ws.materials.countertops))
+            raise OrderError(f"Столешница «{top_id}» не найдена в materials.yaml (столешницы: {known}).")
+        runs = _runs(project, ("lower",), with_tall=False)
+        sheets, pieces = _countertop_sheets(runs, round(top.sheet[0]), round(ws.equipment.saw.kerf))
+        listed = " + ".join(str(p) for p in sorted(pieces, reverse=True))
+        items.append(
+            CommonItem(
+                kind="countertop",
+                item=top_id,
+                name=top.name,
+                quantity=sheets,
+                unit="лист",
+                length_mm=_total(runs),
+                basis=f"куски {listed} мм из листов по {round(top.sheet[0])} мм, стык в углу встык",
+            )
+        )
+    return items

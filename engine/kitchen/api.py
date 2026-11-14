@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import tzinfo
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -17,10 +17,11 @@ from kitchen import brief as brief_check
 from kitchen import store
 from kitchen.checks import Finding
 from kitchen.checks import check_project as run_checks
+from kitchen.common import CommonItem, compute_common
 from kitchen.errors import InputError, OrderError
 from kitchen.models import Workshop
 from kitchen.parts import EdgeTotals, ModuleParts, compute_parts
-from kitchen.project import parse_project
+from kitchen.project import Project, parse_project
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
@@ -28,6 +29,7 @@ __all__ = [
     "BriefSaveResult",
     "BriefShowResult",
     "CheckResult",
+    "CommonItem",
     "DiffResult",
     "EdgeTotals",
     "ExportResult",
@@ -40,6 +42,7 @@ __all__ = [
     "OrderInfo",
     "OrderResult",
     "PartsResult",
+    "PartsSource",
     "QuickEstimate",
     "StatusResult",
     "ValidationContext",
@@ -56,6 +59,7 @@ __all__ = [
     "log_add",
     "order_new",
     "order_show",
+    "parts_from_order",
     "parts_from_project",
     "quick_estimate",
     "resolve_home",
@@ -760,34 +764,116 @@ def brief_show(order: str, home: Path | None = None) -> BriefShowResult:
 # --- детали проекта -----------------------------------------------------------
 
 
+class PartsSource(BaseModel):
+    """Откуда посчитан вывод: версия проекта заказа или файл; бриф, с которым прошли проверки."""
+
+    kind: Literal["order", "file"]
+    order: str  # номер-фамилия (из БД) или поле order файла
+    version: int | None  # версия проекта; у файла — только если она записана в самом файле
+    content_hash: str  # sha256 канонического JSON без поля version (как у версии в БД)
+    path: str | None = None  # путь файла проекта
+    brief_id: int | None = None  # последний бриф заказа: с ним посчитаны проверки
+    brief_saved_at: str | None = None
+    version_brief_id: int | None = None  # бриф, записанный у версии при импорте
+
+
 class PartsResult(Result):
-    """Детали по модулям, фурнитура, кромка, площадь фасадов, предупреждения."""
+    """Детали по модулям, фурнитура, кромка, площадь фасадов, находки проверок, версия-источник."""
 
     order: str  # поле order проекта
+    source: PartsSource
     modules: list[ModuleParts]
     hardware: dict[str, int]
     edges: dict[str, EdgeTotals]
     facade_area: float  # м², округлено до 4 знаков
+    facade_area_by_color: dict[str, float]  # м² по цветам фасадов проекта
+    common: list[CommonItem]  # общие позиции кухни: цоколь, шина, навесы, LED, столешница
+    findings: list[Finding]
     warnings: list[str]
 
 
-def parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
-    """`kitchen parts --project <файл>`: детали проекта без БД (черновик до импорта)."""
-    home = home or resolve_home()
-    data = _read_json(Path(path), "Файл проекта")
-    project = parse_project(data)
+def _project_hash(data: dict) -> str:
+    return hashlib.sha256(_canonical({k: v for k, v in data.items() if k != "version"}).encode()).hexdigest()
+
+
+def _build_parts(
+    project: Project, home: Path, source: PartsSource, brief: sqlite3.Row | None, extra_warnings: list[str]
+) -> PartsResult:
     workshop = load_workshop(home)
     computed = compute_parts(project, workshop)
+    source = source.model_copy(
+        update={
+            "brief_id": brief["id"] if brief else None,
+            "brief_saved_at": brief["created_at"] if brief else None,
+        }
+    )
     return PartsResult(
         order=project.order,
+        source=source,
         modules=computed.modules,
         hardware=computed.hardware,
         edges=computed.edges,
         facade_area=computed.facade_area,
-        warnings=computed.warnings,
+        facade_area_by_color=computed.facade_by_color,
+        common=compute_common(project, workshop, computed.hardware),
+        findings=run_checks(project, workshop, json.loads(brief["data"]) if brief else None),
+        warnings=[*computed.warnings, *extra_warnings],
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,
     )
+
+
+def _brief_of_project(home: Path, order: str) -> sqlite3.Row | None:
+    """Последний бриф заказа из БД; заказа или БД ещё нет — `None` (проект проверяют как черновик)."""
+    if not store.db_path(home).exists():
+        return None
+    with store.connect(home) as conn:
+        try:
+            return _latest_brief(conn, store.find_order(conn, order)["id"])
+        except OrderError:
+            return None
+
+
+def parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
+    """`kitchen parts --project <файл>`: детали проекта из файла (черновик до импорта)."""
+    home = home or resolve_home()
+    data = _read_json(Path(path), "Файл проекта")
+    project = parse_project(data)
+    source = PartsSource(
+        kind="file",
+        order=project.order,
+        version=project.version,
+        content_hash=_project_hash(data),
+        path=str(path),
+    )
+    return _build_parts(project, home, source, _brief_of_project(home, project.order), [])
+
+
+def parts_from_order(order: str, home: Path | None = None) -> PartsResult:
+    """`kitchen parts <заказ>`: детали текущей версии проекта, проверки с последним брифом заказа."""
+    home = home or resolve_home()
+    with _open_order(order, home) as o:
+        current = _current_version(o.conn, o.pk)
+        if not current:
+            raise OrderError(f"У заказа {o.ref} проекта ещё нет. Сначала kitchen import.")
+        project = parse_project({**json.loads(current["data"]), "version": current["version"]})
+        latest = _latest_brief(o.conn, o.pk)
+    warnings = []
+    if latest and latest["id"] != current["brief_id"]:
+        was = f"№{current['brief_id']}" if current["brief_id"] else "никакой"
+        warnings.append(
+            f"Бриф №{latest['id']} новее брифа, с которым проверена версия {current['version']} "
+            f"({was}): расчёт и проверки идут с последним брифом. "
+            "Импортируйте проект заново (kitchen import), чтобы записать его у версии."
+        )
+    source = PartsSource(
+        kind="order",
+        order=o.ref,
+        version=current["version"],
+        content_hash=current["content_hash"],
+        version_brief_id=current["brief_id"],
+    )
+    return _build_parts(project, home, source, latest, warnings)
 
 
 # --- проверки проекта ---------------------------------------------------------

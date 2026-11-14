@@ -4,6 +4,8 @@ import json
 
 from kitchen import api
 
+from tests.conftest import NEW_FIELDS
+
 
 def test_tall_oven_contains_two_niches_and_drawer(home, base_door_project):
     project = json.loads(base_door_project.read_text(encoding="utf-8"))
@@ -29,7 +31,7 @@ def test_tall_oven_manual_golden(home, base_door_project):
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     result = api.parts_from_project(base_door_project, home)
     expected = json.loads((Path(__file__).parent / "golden/tall_oven_600.json").read_text(encoding="utf-8"))
-    assert result.model_dump(exclude={"mock", "mock_files"}, exclude_none=True) == expected
+    assert result.model_dump(exclude=NEW_FIELDS, exclude_none=True) == expected
 
 
 def test_tall_oven_project_microwave_dimensions_change_niche(home, base_door_project):

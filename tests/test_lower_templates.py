@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 from kitchen import api
 
+from tests.conftest import NEW_FIELDS
+
 
 @pytest.fixture(autouse=True)
 def no_legacy_shelves(base_door_project):
@@ -23,7 +25,7 @@ def test_dishwasher_panel_600(home, base_door_project):
     expected = json.loads(
         (Path(__file__).parent / "golden/dishwasher_panel_600.json").read_text(encoding="utf-8")
     )
-    assert result.model_dump(exclude={"mock", "mock_files"}, exclude_none=True) == expected
+    assert result.model_dump(exclude=NEW_FIELDS, exclude_none=True) == expected
     (part,) = result.modules[0].parts
     assert (part.id, part.name, part.length, part.width) == ("Н1-фасад", "фасад", 716, 596)
     assert result.hardware == {}
@@ -40,7 +42,7 @@ def test_base_sink_750(home, base_door_project):
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     result = api.parts_from_project(base_door_project, home)
     expected = json.loads((Path(__file__).parent / "golden/base_sink_750.json").read_text(encoding="utf-8"))
-    assert result.model_dump(exclude={"mock", "mock_files"}, exclude_none=True) == expected
+    assert result.model_dump(exclude=NEW_FIELDS, exclude_none=True) == expected
     assert [p.name for p in result.modules[0].parts] == [
         "боковина",
         "боковина",
@@ -64,7 +66,7 @@ def test_base_bottle_150(home, base_door_project):
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     result = api.parts_from_project(base_door_project, home)
     expected = json.loads((Path(__file__).parent / "golden/base_bottle_150.json").read_text(encoding="utf-8"))
-    assert result.model_dump(exclude={"mock", "mock_files"}, exclude_none=True) == expected
+    assert result.model_dump(exclude=NEW_FIELDS, exclude_none=True) == expected
     assert len([p for p in result.modules[0].parts if p.name == "фасад"]) == 1
     assert not any(p.name == "полка" for p in result.modules[0].parts)
     assert result.hardware["bottle_150"] == 1
@@ -83,7 +85,7 @@ def test_base_drawers_600(home, base_door_project):
     expected = json.loads(
         (Path(__file__).parent / "golden/base_drawers_600.json").read_text(encoding="utf-8")
     )
-    assert result.model_dump(exclude={"mock", "mock_files"}, exclude_none=True) == expected
+    assert result.model_dump(exclude=NEW_FIELDS, exclude_none=True) == expected
     parts = result.modules[0].parts
     assert sorted(p.width for p in parts if p.name == "фасад") == [140, 286, 286]
     assert len([p for p in parts if p.name == "дно ящика"]) == 3
