@@ -63,12 +63,17 @@ class DuplicateKeyError(yaml.YAMLError):
 
 class _StrictLoader(yaml.SafeLoader):
     def construct_mapping(self, node, deep=False):
-        seen = set()
-        for key_node, _ in node.value:
-            key = self.construct_object(key_node, deep=True)
-            if isinstance(key, Hashable) and key in seen:
-                raise DuplicateKeyError(key, key_node.start_mark)
-            seen.add(key)
+        if isinstance(node, yaml.MappingNode):
+            seen = set()
+            for key_node, _ in node.value:
+                if key_node.tag == "tag:yaml.org,2002:merge":  # `<<:` подмешивает и может быть переопределён
+                    continue
+                key = self.construct_object(key_node, deep=True)
+                if not isinstance(key, Hashable):  # нехешируемый ключ отклонит базовый разбор
+                    continue
+                if key in seen:
+                    raise DuplicateKeyError(key, key_node.start_mark)
+                seen.add(key)
         return super().construct_mapping(node, deep)
 
 

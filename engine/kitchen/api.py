@@ -412,15 +412,17 @@ _WRITE_REASONS: dict[type[OSError], str] = {
 }
 
 
+def _write_reason(e: OSError) -> str:
+    return next((text for kind, text in _WRITE_REASONS.items() if isinstance(e, kind)), "ошибка записи")
+
+
 def _write_text(path: Path, text: str) -> None:
     """Запись файла заказа: папка вместо файла, нет доступа, нет места — русская ошибка, а не трейсбек."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     except OSError as e:
-        raise OrderError(
-            f"Не удалось записать файл {path}: {_WRITE_REASONS.get(type(e), 'ошибка записи')}."
-        ) from e
+        raise OrderError(f"Не удалось записать файл {path}: {_write_reason(e)}.") from e
 
 
 def _same_project(version: sqlite3.Row, digest: str) -> bool:
@@ -838,7 +840,7 @@ class PartsSource(BaseModel):
     kind: Literal["order", "file"]
     order: str  # номер-фамилия (из БД) или поле order файла
     version: int | None  # версия проекта; у файла — только если она записана в самом файле
-    content_hash: str  # sha256 канонического JSON без поля version (как у версии в БД)
+    content_hash: str  # sha256 нормализованного проекта (`_project_hash`): у файла и версии из БД одинаков
     path: str | None = None  # путь файла проекта
     brief_id: int | None = None  # последний бриф заказа: с ним посчитаны проверки
     brief_saved_at: str | None = None
@@ -863,6 +865,12 @@ class PartsResult(Result):
 def _project_hash(project: Project) -> str:
     """Хеш нормализованного проекта: написание `order`, `600` и `600.0`, порядок ключей хеш не меняют."""
     normalized = project.model_dump(mode="json", exclude={"order", "version"})
+    for wall in normalized["walls"]:
+        for row in wall["rows"]:
+            for module in row["modules"]:
+                # `contents: {}` и отсутствующий `contents` — один проект
+                if module["contents"] and not any(module["contents"].values()):
+                    module["contents"] = None
     return hashlib.sha256(_canonical(normalized).encode()).hexdigest()
 
 
@@ -1067,8 +1075,11 @@ def _save_outputs(
     if source.version is None:
         raise OrderError(f"У заказа {source.order} нет версии проекта.")
     directory = home / "orders" / source.order / "out"
-    directory.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=".output-", dir=directory))
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=".output-", dir=directory))
+    except OSError as e:
+        raise OrderError(f"Не удалось подготовить папку выводов {directory}: {_write_reason(e)}.") from e
     installed: list[tuple[Path, Path | None]] = []
     preserve_staging = False
     try:
@@ -1226,7 +1237,7 @@ def _purchase(project: Project, parts: PartsResult, cut: CutResult, workshop: Wo
         source=parts.source,
         shops=shops,
         total=total,
-        warnings=parts.warnings,
+        warnings=[*parts.warnings, *kerf_warnings(workshop.equipment.saw)],
         mock=parts.mock,
         mock_files=parts.mock_files,
         mock_notice=MOCK_BANNER if parts.mock else None,
@@ -1322,7 +1333,7 @@ def _estimate(project: Project, parts: PartsResult, cut: CutResult, workshop: Wo
         source=parts.source,
         materials_cost=purchase.total,
         labor=labor,
-        warnings=parts.warnings,
+        warnings=[*parts.warnings, *kerf_warnings(workshop.equipment.saw)],
         mock=parts.mock,
         mock_files=parts.mock_files,
         mock_notice=MOCK_BANNER if parts.mock else None,

@@ -251,7 +251,7 @@ def kerf_warnings(saw: Saw) -> list[str]:
     if saw.kerf == saw.kerf_mm:
         return []
     note = "equipment.yaml: дробный пропил округляется вверх до целого мм"
-    return [f"пропил {saw.kerf:g} мм учтён как {saw.kerf_mm} мм ({note})"]
+    return [f"пропил {saw.kerf} мм учтён как {saw.kerf_mm} мм ({note})"]
 
 
 def _material_axes(sheet: SheetMaterial) -> tuple[int, int]:

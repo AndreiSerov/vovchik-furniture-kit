@@ -34,6 +34,7 @@ Int = Annotated[int, BeforeValidator(_not_bool)]
 NonNegNum = Annotated[Num, Field(ge=0)]
 NonNegInt = Annotated[Int, Field(ge=0)]
 PosInt = Annotated[Int, Field(gt=0)]
+PosNum = Annotated[Num, Field(gt=0)]
 
 
 # Виды техники, которые знает движок: перечень брифа (тест сверяет с его схемой) и вытяжка из `appliances.hood`.
@@ -82,7 +83,7 @@ class SheetTrim(Section):
 
 class EdgingMachine(Section):
     machine: str = _f("станок")
-    allowance_per_side: Int = _f("припуск_на_сторону")
+    allowance_per_side: NonNegInt = _f("припуск_на_сторону")
 
 
 class Drilling(Section):
@@ -103,42 +104,42 @@ class Equipment(Section):
 
 
 class LowerModule(Section):
-    height: Int = _f("высота")
-    depth: Int = _f("глубина")
+    height: PosInt = _f("высота")
+    depth: PosInt = _f("глубина")
     scheme: str = _f("схема")
-    rail_width: Int = _f("царга_ширина")
+    rail_width: PosInt = _f("царга_ширина")
 
 
 class UpperModule(Section):
-    height: Int = _f("высота")
-    depth: Int = _f("глубина")
+    height: PosInt = _f("высота")
+    depth: PosInt = _f("глубина")
     scheme: str = _f("схема")
 
 
 class TallModule(Section):
-    height: Int = _f("высота")
-    depth: Int = _f("глубина")
+    height: PosInt = _f("высота")
+    depth: PosInt = _f("глубина")
 
 
 class BackPanel(Section):
     material: str = _f("материал")
-    contour_offset: Int = _f("отступ_по_контуру")
-    fastening_pitch: Int = _f("крепёж_шаг")
+    contour_offset: NonNegInt = _f("отступ_по_контуру")
+    fastening_pitch: PosInt = _f("крепёж_шаг")
 
 
 class Shelf(Section):
-    side_gap: Int = _f("отступ_от_боковин")
-    front_gap: Int = _f("отступ_спереди")
-    pins: Int = _f("полкодержателей")
-    height: Int = _f("высота")  # ДОБАВЛЕНО (МОК): положение полки от низа корпуса
+    side_gap: NonNegInt = _f("отступ_от_боковин")
+    front_gap: NonNegInt = _f("отступ_спереди")
+    pins: NonNegInt = _f("полкодержателей")
+    height: PosInt = _f("высота")  # ДОБАВЛЕНО (МОК): положение полки от низа корпуса
     step: PosInt = _f("шаг")  # ДОБАВЛЕНО (МОК): расстояние между полками по высоте
 
 
 class Legs(Section):
-    height: Int = _f("высота")
-    up_to_800: Int = _f("до_800")
-    over_800: Int = _f("свыше_800")
-    threshold: Num = _f("порог_ширины")  # ДОБАВЛЕНО (МОК): порог «до 800» — значением, а не именем ключа
+    height: PosInt = _f("высота")
+    up_to_800: NonNegInt = _f("до_800")
+    over_800: NonNegInt = _f("свыше_800")
+    threshold: PosNum = _f("порог_ширины")  # ДОБАВЛЕНО (МОК): порог «до 800» — значением, а не именем ключа
 
 
 class MeterRounding(BaseModel):
@@ -252,7 +253,7 @@ def parse_edge_rule(value: object) -> EdgeRule:
 
 
 class ThreeDrawers(Section):
-    top: Num = _f("верхний")
+    top: PosNum = _f("верхний")
     others: str = _f("остальные")
 
     @field_validator("others")
@@ -264,14 +265,14 @@ class ThreeDrawers(Section):
 
 
 class Facades(Section):
-    gap: Int = _f("зазор")
+    gap: NonNegInt = _f("зазор")
     height_lower: FormulaField = _f("высота_нижнего")
     height_upper: FormulaField = _f("высота_верхнего")
     single_door_width: FormulaField = _f("одна_дверь_ширина")
-    two_doors_if_wider_than: Num = _f("две_двери_если_ширина_больше")
+    two_doors_if_wider_than: PosNum = _f("две_двери_если_ширина_больше")
     two_doors_width: FormulaField = _f("две_двери_ширина")
-    single_door_max_module_width: Num = _f("одна_дверь_макс_ширина_модуля")  # ДОБАВЛЕНО (МОК)
-    two_doors_min_module_width: Num = _f("две_двери_мин_ширина_модуля")  # ДОБАВЛЕНО (МОК)
+    single_door_max_module_width: PosNum = _f("одна_дверь_макс_ширина_модуля")  # ДОБАВЛЕНО (МОК)
+    two_doors_min_module_width: PosNum = _f("две_двери_мин_ширина_модуля")  # ДОБАВЛЕНО (МОК)
     three_drawers: ThreeDrawers = _f("ящики_3_шт")
 
     @model_validator(mode="after")
@@ -307,7 +308,7 @@ class SinkRules(Section):
 
 class BottleRules(Section):
     insert: str = _f("вставка")
-    max_width: Int = _f("макс_ширина")
+    max_width: PosInt = _f("макс_ширина")
 
 
 class DrawerRules(Section):
@@ -326,8 +327,8 @@ class DrawerRules(Section):
 
 
 class Screws(Section):
-    per_hinge: Int = _f("на_петлю")
-    per_drawer: Int = _f("на_ящик")
+    per_hinge: NonNegInt = _f("на_петлю")
+    per_drawer: NonNegInt = _f("на_ящик")
 
 
 class ConstructionEdging(Section):
@@ -341,7 +342,7 @@ class ConstructionEdging(Section):
 
 
 class Tandembox(Section):
-    guide_length: Num = _f("длина_направляющей")
+    guide_length: PosNum = _f("длина_направляющей")
     bottom: FormulaField = _f("дно")
     back: FormulaField = _f("задняя_стенка")
     material: str = _f("материал")
@@ -353,7 +354,7 @@ class Tandembox(Section):
 
 
 # Таблица ступеней: [[порог, значение], ...]; берётся первая ступень, где значение <= порога.
-Steps = list[tuple[Num, Int]]
+Steps = list[tuple[NonNegNum, NonNegInt]]
 
 
 class TallRules(Section):
@@ -371,12 +372,12 @@ class TallRules(Section):
 
 class UpperRules(Section):
     hanger: str = _f("навес")
-    hangers: Int = _f("навесов")
+    hangers: NonNegInt = _f("навесов")
     lift: str = _f("подъёмник")
     dryer: str = _f("сушка")
-    dryer_width: Int = _f("ширина_сушки")
+    dryer_width: PosInt = _f("ширина_сушки")
     hood: str = _f("вытяжка")
-    hood_rail_min: Int = _f("мин_глубина_планки")
+    hood_rail_min: NonNegInt = _f("мин_глубина_планки")
     hood_bottom: Literal["передняя планка, открытый проём сзади"] = _f("дно_вытяжки")
 
 
@@ -423,7 +424,7 @@ class CommonRules(Section):
 
 class Construction(Section):
     mock: StrictBool
-    case_thickness: Int = _f("толщина_корпуса")
+    case_thickness: PosInt = _f("толщина_корпуса")
     lower: LowerModule = _f("нижний")
     upper: UpperModule = _f("верхний")
     tall: TallModule = _f("пенал")
@@ -472,7 +473,7 @@ class SheetMaterial(Section):
     name: str = _f("название")
     sheet: tuple[PosInt, PosInt] = _f("лист")
     texture: bool | str = _f("текстура")
-    thickness: Int | None = Field(
+    thickness: PosInt | None = Field(
         default=None, alias="толщина"
     )  # ДОБАВЛЕНО (МОК): у ХДФ — 3 (у ЛДСП корпуса толщина из construction.yaml)
     price: NonNegNum = _f("цена")
@@ -505,20 +506,20 @@ class Countertop(Section):
 class FacadeMaterial(Section):
     id: str
     name: str = _f("название")
-    thickness: Int | None = Field(default=None, alias="толщина")  # ДОБАВЛЕНО (МОК): 19 у МДФ
+    thickness: PosInt | None = Field(default=None, alias="толщина")  # ДОБАВЛЕНО (МОК): 19 у МДФ
     price_per_m2: NonNegNum = _f("цена_за_м2")
     outsourced: bool = _f("заказ_на_стороне")
     lead_days: NonNegInt = _f("срок_раб_дней")
     shop: str = _f("магазин")
 
 
-def _unique_ids(items: list, what: str) -> None:
+def _unique_ids(items: list, what: str, key: str) -> None:
     """Повторный `id` в одном списке — ошибка загрузки: какая цена верна, решал бы порядок поиска."""
     seen: set[str] = set()
     repeated = sorted({i.id for i in items if i.id in seen or seen.add(i.id)})
     if repeated:
         listed = ", ".join(f"«{i}»" for i in repeated)
-        raise ValueError(f"повторяется id {what}: {listed}")
+        raise ValueError(f"ключ «{key}»: повторяется id {what}: {listed}")
 
 
 class Materials(Section):
@@ -530,13 +531,13 @@ class Materials(Section):
 
     @model_validator(mode="after")
     def _ids_unique(self) -> "Materials":
-        for items, what in (
-            (self.sheets, "листового материала"),
-            (self.edges, "кромки"),
-            (self.countertops, "столешницы"),
-            (self.facades, "фасада"),
+        for items, what, key in (
+            (self.sheets, "листового материала", "листовые"),
+            (self.edges, "кромки", "кромка"),
+            (self.countertops, "столешницы", "столешницы"),
+            (self.facades, "фасада", "фасады"),
         ):
-            _unique_ids(items, what)
+            _unique_ids(items, what, key)
         return self
 
     # ДОБАВЛЕНО (МОК): какая кромка клеится на какой материал корпуса
@@ -560,7 +561,7 @@ class Hardware(Section):
 
     @model_validator(mode="after")
     def _ids_unique(self) -> "Hardware":
-        _unique_ids(self.items, "позиции фурнитуры")
+        _unique_ids(self.items, "позиции фурнитуры", "позиции")
         return self
 
 
@@ -659,7 +660,7 @@ class Appliances(Section):
 
     @model_validator(mode="after")
     def unique_ids(self):
-        _unique_ids(self.items, "прибора")
+        _unique_ids(self.items, "прибора", "позиции")
         return self
 
 

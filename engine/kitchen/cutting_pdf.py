@@ -456,9 +456,7 @@ def _sheet_pages(
     lines += [("Резы по порядку", True)] + [(_cut_line(c), False) for c in s.cuts]
     holder: dict[str, list[list[Placed]]] = {}
     kerf_text = (
-        f"{kerf} мм"
-        if kerf_declared in (None, kerf)
-        else f"{kerf} мм (в equipment.yaml {kerf_declared:g} мм)"
+        f"{kerf} мм" if kerf_declared in (None, kerf) else f"{kerf} мм (в equipment.yaml {kerf_declared} мм)"
     )
 
     def first(canvas: Canvas, area: Area) -> None:
