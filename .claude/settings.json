@@ -32,7 +32,7 @@
           },
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/edit-with-edit-tool.sh",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/no-in-place-edit.sh",
             "args": [],
             "timeout": 30
           }

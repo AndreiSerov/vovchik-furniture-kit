@@ -13,7 +13,7 @@ Start with `scripts/claim <ticket> --by implementer`. If the ticket is already c
 
 When the ticket leaves a decision open, follow the project's rule for ambiguity in `AGENTS.md`; without one, stop and report. Also stop when the same failure survives three fix attempts, and report what you tried, because the ticket or the environment may be wrong.
 
-Change tracked files with Edit and create files with Write. Plan the edits of a step first, then send the independent ones together in one response, up to about ten; rewrite a file with Write when most of it changes. While you work, run only the tests you touched, with `-x`. Commit when they are green: the commit hook runs `scripts/check` and shows you any failure.
+Use Edit for a targeted change, Write for a new file or one that changes almost entirely, and a script that reads and writes files for a bulk change of the same pattern in many places. Send independent tool calls together in one response. While you work, run only the tests you touched, with `-x`. Commit when they are green: the commit hook runs `scripts/check` and shows you any failure.
 
 Before handing back, go through `docs/agents/self-check.md` if the project has one, and list in your report which checks you ran. Finish with the commit hash, the result of `scripts/check`, and anything marked `manual` that you could not run.
 
