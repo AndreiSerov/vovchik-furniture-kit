@@ -11,7 +11,8 @@ TESTS = ROOT / "tests"
 ENGINE = ROOT / "engine" / "kitchen"
 
 # ADR 0002: тесты логики идут через kitchen.api, CLI — контрактными тестами.
-PUBLIC = {"kitchen.api", "kitchen.cli", "kitchen.errors", "kitchen.result"}
+# `kitchen.skill_lint` — отдельный инструмент проверки скиллов (`python -m`), не логика заказов.
+PUBLIC = {"kitchen.api", "kitchen.cli", "kitchen.errors", "kitchen.result", "kitchen.skill_lint"}
 
 # Храповик: тесты, которые уже ходят во внутренние модули. Список только сокращается.
 # Новый тест берёт данные через kitchen.api; если без внутреннего модуля никак — запиши

@@ -1,129 +1,117 @@
 """Тикет 26: статические проверки скиллов (спека 6.6, ADR 0003).
 
-Правила — в `skill_lint.py`. Здесь они работают на настоящих скиллах `skills/kitchen-*`
-и на скиллах-нарушителях из `fixtures/skills_bad/`.
+Правила живут в `kitchen.skill_lint`; `scripts/check` запускает их на настоящих скиллах.
+Здесь те же правила работают на скиллах-нарушителях из `fixtures/skills_bad/`.
 """
 
-import pytest
+import subprocess
+import sys
 
-from tests.skill_lint import (
-    REPO,
-    check_commands,
-    check_frontmatter,
-    check_no_formulas,
-    check_triggers,
-    load_triggers,
-    skill_dirs,
-)
+import pytest
+import typer
+from kitchen import skill_lint
+from kitchen.cli import app
+
+from tests.conftest import REPO
 
 BAD = REPO / "tests" / "fixtures" / "skills_bad"
-REAL = skill_dirs()
+
+VIOLATIONS = {
+    "extra_frontmatter": [
+        "kitchen-bad: строка 4: лишнее поле frontmatter «allowed-tools» (ADR 0003: только name и description)"
+    ],
+    "no_frontmatter": ["kitchen-bad: строка 1: нет frontmatter (блока `---` с name и description)"],
+    "no_name": ["kitchen-bad: строка 1: нет поля name во frontmatter или оно пустое"],
+    "no_description": ["kitchen-bad: строка 1: нет поля description во frontmatter или оно пустое"],
+    "wrong_name": ["kitchen-bad: строка 2: name «другое» не совпадает с папкой"],
+    "unknown_command": ["kitchen-bad: строка 8: нет команды `kitchen foo` в CLI"],
+    "unknown_subcommand": ["kitchen-bad: строка 8: нет подкоманды `kitchen brief foo` в CLI"],
+    "command_in_block": ["kitchen-bad: строка 10: нет команды `kitchen frobnicate` в CLI"],
+    "group_without_subcommand": ["kitchen-bad: строка 8: `kitchen brief` — группа, нужна подкоманда"],
+    "formula": ["kitchen-bad: строка 8: арифметика с переменной «W - 4» (формулы — только в движке)"],
+    "formula_mm": [
+        "kitchen-bad: строка 8: размер в мм «720 мм» (формулы — только в движке)",
+        "kitchen-bad: строка 8: размер «ширина×высота» «596x716» (формулы — только в движке)",
+    ],
+    "trigger_duplicate": ["triggers.json: фраза 2: дубль фразы 1 «  составь  БРИФ» (скилл kitchen-bad)"],
+    "trigger_unknown_skill": ["triggers.json: фраза 2: неизвестный скилл «kitchen-nope»"],
+    "skill_without_phrase": ["kitchen-bad: нет ни одной фразы в triggers.json"],
+    "triggers_bad_structure": ['triggers.json: строка 1: нужен объект {"phrases": [...]}'],
+    "triggers_not_json": [
+        "triggers.json: строка 1: не JSON: Expecting property name enclosed in double quotes"
+    ],
+    "triggers_bad_phrase": [
+        "triggers.json: фраза 1: нужны непустой text и skill, и больше ничего",
+        "kitchen-bad: нет ни одной фразы в triggers.json",
+    ],
+}
 
 
-def test_there_are_real_skills_to_check():
-    assert [p.name for p in REAL] == ["kitchen-brief"]
+@pytest.mark.parametrize("case", sorted(VIOLATIONS))
+def test_violator_is_caught_with_its_own_message(case):
+    assert skill_lint.lint(BAD / case) == VIOLATIONS[case]
 
 
-@pytest.mark.parametrize("skill", REAL, ids=lambda p: p.name)
-def test_real_skill_frontmatter(skill):
-    assert check_frontmatter(skill) == []
+def test_every_violator_fixture_has_an_expected_message():
+    cases = {p.name for p in BAD.iterdir() if not p.name.startswith("ok_")}
+    assert cases == set(VIOLATIONS)
 
 
-@pytest.mark.parametrize("skill", REAL, ids=lambda p: p.name)
-def test_real_skill_commands_exist(skill):
-    assert check_commands(skill) == []
+@pytest.mark.parametrize("case", ["ok_empty_triggers", "ok_no_triggers_file"])
+def test_empty_trigger_set_passes(case):
+    assert skill_lint.lint(BAD / case) == []
 
 
-@pytest.mark.parametrize("skill", REAL, ids=lambda p: p.name)
-def test_real_skill_has_no_formulas(skill):
-    assert check_no_formulas(skill) == []
+def test_real_skills_pass_without_exceptions():
+    assert skill_lint.lint() == []
+    assert [p.name for p in skill_lint.skill_dirs(skill_lint.DEFAULT_ROOT)] == ["kitchen-brief"]
 
 
-def test_extra_frontmatter_field_is_caught():
-    problems = check_frontmatter(BAD / "extra_frontmatter")
-    assert problems == ["лишние поля frontmatter: ['allowed-tools']"]
+def test_command_added_to_the_cli_counts_as_existing(tmp_path):
+    skill = tmp_path / "kitchen-x"
+    skill.mkdir()
+    (skill / "SKILL.md").write_text(
+        "---\nname: kitchen-x\ndescription: d\n---\n\nЗапусти `kitchen newcmd` и `kitchen grp sub 5`.\n",
+        encoding="utf-8",
+    )
+    assert len(skill_lint.lint(tmp_path)) == 2  # в настоящем CLI таких команд нет
+
+    extended = typer.Typer()
+    grp = typer.Typer()
+    extended.add_typer(grp, name="grp")
+    extended.command("newcmd")(lambda: None)
+    grp.command("sub")(lambda: None)
+    assert skill_lint.lint(tmp_path, extended) == []
 
 
-def test_missing_frontmatter_is_caught():
-    assert check_frontmatter(BAD / "missing_frontmatter") == ["нет frontmatter"]
+def test_every_real_cli_command_is_known_to_the_checker():
+    tree = skill_lint.command_tree(app)
+    assert {"quick-estimate", "purchase", "production"} <= set(tree)
+    assert {"save", "show"} == set(tree["brief"])
 
 
-def test_name_must_match_folder():
-    (problem,) = check_frontmatter(BAD / "wrong_name")
-    assert "не совпадает с папкой" in problem
-
-
-def test_unknown_commands_are_caught_in_spans_and_blocks():
-    problems = check_commands(BAD / "unknown_command")
-    assert problems == [
-        "нет команды `kitchen purchse`",
-        "нет команды `kitchen brief nosuch`",
-        "нет команды `kitchen frobnicate`",
-    ]
-
-
-def test_arithmetic_in_body_is_caught():
-    problems = check_no_formulas(BAD / "formula_arithmetic")
-    assert len(problems) == 3
-    assert all("арифметика" in p for p in problems)
-
-
-def test_millimetres_and_sizes_in_body_are_caught():
-    problems = check_no_formulas(BAD / "formula_mm")
-    assert any("размер в мм" in p for p in problems)
-    assert any("596x716" in p for p in problems)
-
-
-def test_real_trigger_set_is_valid():
-    skills = {p.name for p in REAL}
-    assert check_triggers(load_triggers(), skills) == []
-
-
-SKILLS = {"kitchen-brief", "kitchen-project"}
-
-
-def phrases(*pairs):
-    return {"phrases": [{"text": t, "skill": s} for t, s in pairs]}
-
-
-def test_empty_trigger_set_is_an_error():
-    assert check_triggers({"phrases": []}, SKILLS) == ["набор фраз пуст"]
-
-
-@pytest.mark.parametrize("data", [[], {}, {"phrases": "x"}, None])
-def test_trigger_set_needs_the_schema(data):
-    assert check_triggers(data, SKILLS) == ['нужен объект {"phrases": [...]}']
-
-
-@pytest.mark.parametrize(
-    "item",
-    [{"text": "a"}, {"text": "", "skill": "kitchen-brief"}, {"text": "a", "skill": "x", "z": 1}, "a"],
-)
-def test_malformed_phrase_is_an_error(item):
-    problems = check_triggers({"phrases": [item]}, SKILLS)
-    assert any("нужны непустой text и skill" in p for p in problems)
-
-
-def test_duplicate_phrase_is_an_error_ignoring_case_and_spaces():
-    data = phrases(("Составь бриф", "kitchen-brief"), ("  составь  БРИФ", "kitchen-project"))
-    assert any("повторяет фразу 0" in p for p in check_triggers(data, SKILLS))
-
-
-def test_unknown_expected_skill_is_an_error():
-    data = phrases(("a", "kitchen-brief"), ("b", "kitchen-project"), ("c", "kitchen-nope"))
-    assert check_triggers(data, SKILLS) == ["фраза 2: нет скилла «kitchen-nope»"]
-
-
-def test_skill_without_a_phrase_is_an_error():
-    data = phrases(("a", "kitchen-brief"))
-    assert check_triggers(data, SKILLS) == ["у скилла «kitchen-project» нет фразы"]
-
-
-def test_wall_labels_are_not_arithmetic(tmp_path):
+def test_wall_labels_dates_and_order_numbers_are_not_arithmetic(tmp_path):
     skill = tmp_path / "kitchen-x"
     skill.mkdir()
     (skill / "SKILL.md").write_text(
         "---\nname: kitchen-x\ndescription: d\n---\n\nУгол между стенами A/B, срок ГГГГ-ММ-ДД, заказ 2026-047.\n",
         encoding="utf-8",
     )
-    assert check_no_formulas(skill) == []
+    assert skill_lint.lint(tmp_path) == []
+
+
+def run_lint(*args):
+    return subprocess.run(
+        [sys.executable, "-m", "kitchen.skill_lint", *args], check=False, capture_output=True, text=True
+    )
+
+
+def test_command_line_fails_on_a_violator_and_passes_on_real_skills():
+    bad = run_lint(str(BAD / "formula"))
+    assert bad.returncode == 1
+    assert VIOLATIONS["formula"][0] in bad.stderr
+    assert run_lint().returncode == 0
+
+
+def test_scripts_check_runs_the_skill_lint():
+    assert "kitchen.skill_lint" in (REPO / "scripts" / "check").read_text(encoding="utf-8")
