@@ -21,7 +21,7 @@
 
 ## Этап 2. Раскрой, кромка, закупка
 
-- [ ] 12 — Раскрой (2.1) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
+- [x] 12 — Раскрой (2.1) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
 - [ ] 13 — Слой PDF, карта раскроя, учёт выводов (2.2) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
 - [ ] 14 — Карта кромления (2.3) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
 - [ ] 15 — Закупка и `kitchen production` (2.4) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))

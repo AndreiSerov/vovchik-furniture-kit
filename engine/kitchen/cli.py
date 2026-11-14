@@ -279,6 +279,61 @@ def parts(
     emit(result, _render_parts, json)
 
 
+def _render_cut(r: api.CutResult) -> str:
+    lines = [
+        f"Раскрой проекта {r.order}:",
+        _render_source(r.source),
+        f"Пила: пропил {r.kerf} мм, обрезка по периметру {r.trim} мм, макс. рез {r.max_cut_length} мм",
+    ]
+    for m in r.materials:
+        grain = ", текстура вдоль первой стороны" if m.texture else ""
+        lines.append(
+            f"Материал {m.material} — {m.name}: листов {m.sheet_count} ({m.sheet_size[0]}×{m.sheet_size[1]} мм"
+            f"{grain}), деталей {m.parts_count}, использование {m.utilization:.1%}, отход {m.waste_m2:.3f} м²"
+        )
+        for s in m.sheets:
+            lines.append(f"  Лист {s.number}: {len(s.placements)} дет., использование {s.utilization:.1%}")
+            for pl in s.placements:
+                turn = ", повёрнута" if pl.rotated else ""
+                lines.append(f"    {pl.part} {pl.w}×{pl.h} мм, x={pl.x} y={pl.y}{turn}")
+            for c in s.cuts:
+                axis = "вертикальный, x" if c.direction == "vertical" else "горизонтальный, y"
+                what = "обрезка отхода" if c.kind == "trim" else "разделяет детали"
+                lines.append(
+                    f"    Рез {c.number}: {axis}={c.position}, от {c.start} до {c.end} (длина {c.length} мм), {what}"
+                )
+    if r.countertop:
+        t = r.countertop
+        sheets = "; ".join(" + ".join(str(p) for p in sheet) for sheet in t.sheets)
+        lines.append(
+            f"Столешница {t.item} — {t.name}: листов {t.sheet_count} ({t.sheet_length} мм), куски, мм: {sheets}"
+        )
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("cut")
+def cut(
+    order: Annotated[
+        str | None,
+        typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project."),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Раскрой: гильотинная укладка деталей по листам с порядком резов, столешница линейно."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError("Укажите либо заказ (kitchen cut petrov), либо файл: --project project.json.")
+        result = api.cut_from_order(order) if order is not None else api.cut_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_cut, json)
+
+
 # --- бриф и быстрая вилка ----------------------------------------------------
 
 brief_app = typer.Typer(help="Бриф заказа: сохранить, показать.", no_args_is_help=True)

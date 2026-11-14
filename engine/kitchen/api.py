@@ -17,7 +17,8 @@ from kitchen import brief as brief_check
 from kitchen import store
 from kitchen.checks import Finding
 from kitchen.checks import check_project as run_checks
-from kitchen.common import CommonItem, compute_common
+from kitchen.common import CommonItem, CountertopCut, compute_common, plan_countertop
+from kitchen.cutting import MaterialCut, cut_parts
 from kitchen.errors import InputError, OrderError
 from kitchen.models import Workshop
 from kitchen.parts import EdgeTotals, ModuleParts, compute_parts
@@ -849,9 +850,8 @@ def parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
     return _build_parts(project, home, source, _brief_of_project(home, project.order), [])
 
 
-def parts_from_order(order: str, home: Path | None = None) -> PartsResult:
-    """`kitchen parts <заказ>`: детали текущей версии проекта, проверки с последним брифом заказа."""
-    home = home or resolve_home()
+def _order_project(order: str, home: Path) -> tuple[Project, PartsSource, sqlite3.Row | None, list[str]]:
+    """Текущая версия проекта заказа: проект, источник, последний бриф, предупреждения об устаревшем брифе."""
     with _open_order(order, home) as o:
         current = _current_version(o.conn, o.pk)
         if not current:
@@ -873,7 +873,77 @@ def parts_from_order(order: str, home: Path | None = None) -> PartsResult:
         content_hash=current["content_hash"],
         version_brief_id=current["brief_id"],
     )
+    return project, source, latest, warnings
+
+
+def parts_from_order(order: str, home: Path | None = None) -> PartsResult:
+    """`kitchen parts <заказ>`: детали текущей версии проекта, проверки с последним брифом заказа."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
     return _build_parts(project, home, source, latest, warnings)
+
+
+# --- раскрой ------------------------------------------------------------------
+
+
+class CutResult(Result):
+    """Раскрой листовых деталей по материалам, с порядком резов; версия-источник."""
+
+    order: str
+    source: PartsSource
+    kerf: int  # пропил, мм (equipment.yaml)
+    trim: int  # обрезка по периметру, мм
+    max_cut_length: int  # макс. длина реза станка, мм
+    materials: list[MaterialCut]
+    countertop: CountertopCut | None  # линейный раскрой столешницы; нет столешницы в проекте — `None`
+    warnings: list[str]
+
+
+def _build_cut(
+    project: Project, home: Path, source: PartsSource, brief: sqlite3.Row | None, extra: list[str]
+) -> CutResult:
+    workshop = load_workshop(home)
+    computed = compute_parts(project, workshop)
+    saw = workshop.equipment.saw
+    return CutResult(
+        order=project.order,
+        source=source.model_copy(
+            update={
+                "brief_id": brief["id"] if brief else None,
+                "brief_saved_at": brief["created_at"] if brief else None,
+            }
+        ),
+        kerf=round(saw.kerf),
+        trim=round(workshop.equipment.sheet.perimeter_trim),
+        max_cut_length=round(saw.max_cut_length),
+        materials=cut_parts(computed.modules, workshop),
+        countertop=plan_countertop(project, workshop),
+        warnings=[*computed.warnings, *extra],
+        mock=workshop.is_mock,
+        mock_files=workshop.mock_files,
+    )
+
+
+def cut_from_project(path: Path, home: Path | None = None) -> CutResult:
+    """`kitchen cut --project <файл>`: раскрой деталей проекта из файла (черновик до импорта)."""
+    home = home or resolve_home()
+    data = _read_json(Path(path), "Файл проекта")
+    project = parse_project(data)
+    source = PartsSource(
+        kind="file",
+        order=project.order,
+        version=project.version,
+        content_hash=_project_hash(data),
+        path=str(path),
+    )
+    return _build_cut(project, home, source, _brief_of_project(home, project.order), [])
+
+
+def cut_from_order(order: str, home: Path | None = None) -> CutResult:
+    """`kitchen cut <заказ>`: раскрой деталей текущей версии проекта."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
+    return _build_cut(project, home, source, latest, warnings)
 
 
 # --- проверки проекта ---------------------------------------------------------
