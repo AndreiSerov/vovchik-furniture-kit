@@ -4,7 +4,7 @@ import json
 
 from kitchen import api
 
-from tests.conftest import FIELDS_NOT_IN_GOLDEN
+from tests.conftest import FIELDS_NOT_IN_GOLDEN, load_golden
 
 
 def corner_project(path, template, width, kind):
@@ -69,8 +69,6 @@ def test_corner_rejects_impossible_geometry(home, base_door_project):
 
 
 def test_corner_manual_golden(home, base_door_project):
-    from pathlib import Path
-
     # ПРОВЕРИТЬ МАСТЕРУ. Низ: дно/царги 1018, заглушка 594, фасад 450;
     # кромка 7114 + 9×30 = 7384 мм, закупка 8,2 м. Карусель одна.
     # Верх: дно/крыша 568×600, полка 566×580, заглушка 150, фасад 444;
@@ -78,7 +76,7 @@ def test_corner_manual_golden(home, base_door_project):
     for template, width, kind in (("base_corner", 1050, "lower"), ("wall_corner", 600, "upper")):
         corner_project(base_door_project, template, width, kind)
         result = api.parts_from_project(base_door_project, home)
-        expected = json.loads((Path(__file__).parent / f"golden/{template}_{width}.json").read_text())
+        expected = load_golden(f"{template}_{width}")
         assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
 
 

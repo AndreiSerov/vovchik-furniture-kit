@@ -5,6 +5,14 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
+GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
+
+
+def load_golden(name: str) -> dict:
+    """Эталон `tests/golden/<name>.json` без служебных ключей (`_проверить_мастеру`, `_выкладка`)."""
+    raw = json.loads((GOLDEN_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    return {k: v for k, v in raw.items() if not k.startswith("_")}
+
 
 # Поля результата `parts`, которых нет в эталонах (golden сравнивает детали, фурнитуру, кромку, фасады).
 FIELDS_NOT_IN_GOLDEN = {"mock", "mock_files", "source", "findings", "common", "facade_area_by_color"}

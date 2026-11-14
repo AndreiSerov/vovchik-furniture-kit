@@ -1,12 +1,11 @@
 """Эталоны верхних шаблонов. ПРОВЕРИТЬ МАСТЕРУ."""
 
 import json
-from pathlib import Path
 
 import pytest
 from kitchen import api
 
-from tests.conftest import FIELDS_NOT_IN_GOLDEN
+from tests.conftest import FIELDS_NOT_IN_GOLDEN, load_golden
 
 
 def upper_project(path, template, width=600, contents=None):
@@ -90,9 +89,7 @@ def test_upper_manual_golden(home, base_door_project, template, width, contents)
     # Крепёж вытяжки: крыша 4, передняя планка 2 конфирмата.
     upper_project(base_door_project, template, width, contents)
     result = api.parts_from_project(base_door_project, home)
-    expected = json.loads(
-        (Path(__file__).parent / f"golden/{template}_{width}.json").read_text(encoding="utf-8")
-    )
+    expected = load_golden(f"{template}_{width}")
     assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
 
 

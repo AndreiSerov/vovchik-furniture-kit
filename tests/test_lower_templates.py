@@ -1,12 +1,11 @@
 """Эталоны нижних шаблонов. ПРОВЕРИТЬ МАСТЕРУ."""
 
 import json
-from pathlib import Path
 
 import pytest
 from kitchen import api
 
-from tests.conftest import FIELDS_NOT_IN_GOLDEN
+from tests.conftest import FIELDS_NOT_IN_GOLDEN, load_golden
 
 
 @pytest.fixture(autouse=True)
@@ -22,9 +21,7 @@ def test_dishwasher_panel_600(home, base_door_project):
     project["walls"][0]["rows"][0]["modules"][0]["template"] = "dishwasher_panel"
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     result = api.parts_from_project(base_door_project, home)
-    expected = json.loads(
-        (Path(__file__).parent / "golden/dishwasher_panel_600.json").read_text(encoding="utf-8")
-    )
+    expected = load_golden("dishwasher_panel_600")
     assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
     (part,) = result.modules[0].parts
     assert (part.id, part.name, part.length, part.width) == ("Н1-фасад", "фасад", 716, 596)
@@ -41,7 +38,7 @@ def test_base_sink_750(home, base_door_project):
     module.update(template="base_sink", width=750, without_back=True, contents={"inserts": ["bin_2sec"]})
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     result = api.parts_from_project(base_door_project, home)
-    expected = json.loads((Path(__file__).parent / "golden/base_sink_750.json").read_text(encoding="utf-8"))
+    expected = load_golden("base_sink_750")
     assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
     assert [p.name for p in result.modules[0].parts] == [
         "боковина",
@@ -65,7 +62,7 @@ def test_base_bottle_150(home, base_door_project):
     module.update(template="base_bottle", width=150, contents={"inserts": ["bottle_150"]})
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     result = api.parts_from_project(base_door_project, home)
-    expected = json.loads((Path(__file__).parent / "golden/base_bottle_150.json").read_text(encoding="utf-8"))
+    expected = load_golden("base_bottle_150")
     assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
     assert len([p for p in result.modules[0].parts if p.name == "фасад"]) == 1
     assert not any(p.name == "полка" for p in result.modules[0].parts)
@@ -82,9 +79,7 @@ def test_base_drawers_600(home, base_door_project):
     module.update(template="base_drawers", width=600, contents={"drawers": 3})
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     result = api.parts_from_project(base_door_project, home)
-    expected = json.loads(
-        (Path(__file__).parent / "golden/base_drawers_600.json").read_text(encoding="utf-8")
-    )
+    expected = load_golden("base_drawers_600")
     assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
     parts = result.modules[0].parts
     assert sorted(p.width for p in parts if p.name == "фасад") == [140, 286, 286]

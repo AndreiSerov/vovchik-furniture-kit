@@ -1,19 +1,16 @@
 import json
-from pathlib import Path
 
 import pytest
 from kitchen import api
 from kitchen.errors import KitchenError, OrderError, WorkshopError
 
-from tests.conftest import FIELDS_NOT_IN_GOLDEN
-
-GOLDEN = Path(__file__).resolve().parent / "golden" / "base_door_600.json"
+from tests.conftest import FIELDS_NOT_IN_GOLDEN, load_golden
 
 
 def test_golden_base_door_600(home, base_door_project):
     """Эталон из ТЗ: размеры, количества, кромка 3.710/3.890/4.3 м, фасады 0.4253 м² — до миллиметра."""
     result = api.parts_from_project(base_door_project, home)
-    expected = json.loads(GOLDEN.read_text(encoding="utf-8"))
+    expected = load_golden("base_door_600")
     # площадь есть только у фасадов: у остальных деталей area_m2 пуст и в эталон не входит
     assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
 

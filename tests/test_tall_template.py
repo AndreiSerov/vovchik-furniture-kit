@@ -4,7 +4,7 @@ import json
 
 from kitchen import api
 
-from tests.conftest import FIELDS_NOT_IN_GOLDEN
+from tests.conftest import FIELDS_NOT_IN_GOLDEN, load_golden
 
 
 def test_tall_oven_contains_two_niches_and_drawer(home, base_door_project):
@@ -24,13 +24,11 @@ def test_tall_oven_manual_golden(home, base_door_project):
     # Верхняя дверь 798×596; дно ящика 493×490; задняя стенка 481×68.
     # Кромка 2×2100 + 5×568 + 566 = 7606 мм; 8 сторон + 240 мм = 7846.
     # Конфирматы 8+12, петли 2, саморезы 36+8+8, опоры 4, ручки 2.
-    from pathlib import Path
-
     project = json.loads(base_door_project.read_text(encoding="utf-8"))
     project["walls"][0]["rows"][0]["modules"] = [{"label": "П1", "template": "tall_oven", "width": 600}]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     result = api.parts_from_project(base_door_project, home)
-    expected = json.loads((Path(__file__).parent / "golden/tall_oven_600.json").read_text(encoding="utf-8"))
+    expected = load_golden("tall_oven_600")
     assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
 
 
