@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 
 from kitchen import api
+from kitchen.cutting import Cut, MaterialCut, Placement, SheetCut
+from kitchen.cutting_pdf import cut_label_boxes, place_lines, write_cutting_map
+from kitchen.pdf import FONT, FONT_BOLD, Area, register_fonts
 from pypdf import PdfReader
+from reportlab.pdfbase.pdfmetrics import stringWidth
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ORDER = "2026-047-petrov"
@@ -39,6 +43,7 @@ def test_pdf_has_page_per_sheet_with_markings_cuts_and_utilization(home):
         for c in s.cuts:
             assert f"Рез {c.number}" in text
         assert MOCK in text and "версия проекта 1" in text and ORDER in text
+        assert text.count(MOCK) == 2  # водяной знак и колонтитул
 
 
 def test_pdf_without_mock_has_no_watermark(home):
@@ -74,3 +79,92 @@ def test_cut_from_order_writes_nothing(home):
     petrov(home)
     r = api.cut_from_order("petrov", home)
     assert r.output is None and not (home / "orders" / ORDER / "out").exists()
+
+
+def test_every_part_has_a_numbered_line_in_the_list(home):
+    petrov(home)
+    r = api.cut_and_save("petrov", home)
+    for text, (m, s) in zip(pages_of(r), sheets_of(r), strict=True):
+        for i, pl in enumerate(s.placements, 1):
+            assert f"{i}. {pl.part} {pl.w}×{pl.h}" in text
+
+
+def test_cut_number_labels_do_not_overlap(home):
+    petrov(home)
+    r = api.cut_and_save("petrov", home)
+    for m, s in sheets_of(r):
+        boxes = cut_label_boxes(m.sheet_size, s.cuts, r.kerf, 0.06)
+        assert {b[0] for b in boxes} == {c.number for c in s.cuts}
+        for i, a in enumerate(boxes):
+            for b in boxes[i + 1 :]:
+                assert a[3] <= b[1] or b[3] <= a[1] or a[4] <= b[2] or b[4] <= a[2], (s.number, a, b)
+
+
+def big_sheet(n=130):
+    """Синтетический лист: сетка из n деталей и по резу на деталь."""
+    placements = [
+        Placement(part=f"Д{i:03}-длинная-маркировка", x=10 + i, y=10, w=20, h=20, rotated=i % 2 == 0)
+        for i in range(n)
+    ]
+    cuts = [
+        Cut(
+            number=i + 1,
+            direction="vertical",
+            position=30 + i,
+            start=10,
+            end=2060,
+            length=2050,
+            kind="separate",
+        )
+        for i in range(n)
+    ]
+    sheet = SheetCut(number=1, placements=placements, cuts=cuts, parts_area_m2=0.1, utilization=0.5)
+    return MaterialCut(
+        material="ldsp_16_white", name="ЛДСП", sheet_size=(2800, 2070), texture=False, sheet_count=1,
+        parts_count=n, parts_area_m2=0.1, sheet_area_m2=5.8, utilization=0.5, waste_m2=1.0, algorithm="x",
+        sheets=[sheet],
+    )  # fmt: skip
+
+
+def test_text_lists_stay_in_their_columns_and_in_the_page():
+    register_fonts()
+    area = Area(28, 50, 540, 760)
+    lines = [(f"{i}. Д{i:03}-длинная-маркировка 20×20 мм, x={i} y=10, повёрнута", False) for i in range(250)]
+    pages = place_lines(lines, area, first_top=300)
+    assert len(pages) >= 2
+    boxes = []
+    for page in pages:
+        placed = [
+            (p.x, p.y, p.x + stringWidth(p.text, FONT_BOLD if p.bold else FONT, p.size), p.y + p.size)
+            for p in page
+        ]
+        assert all(b[0] >= area.x and b[2] <= area.x + area.w and b[1] >= area.y for b in placed)
+        for i, a in enumerate(placed):
+            for b in placed[i + 1 :]:
+                assert a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1], (a, b)
+        boxes += page
+    assert [p.text for p in boxes] == [t for t, _ in lines]  # ничего не потеряно, порядок сохранён
+    assert min(p.size for p in boxes) >= 5.5  # шрифт не мельчает ниже читаемого
+
+
+def test_huge_sheet_continues_on_extra_pages_with_all_text(tmp_path):
+    m = big_sheet()
+    path = tmp_path / "c.pdf"
+    write_cutting_map(
+        path,
+        [m],
+        kerf=4,
+        trim=10,
+        order=ORDER,
+        version=1,
+        mock=False,
+        on=__import__("datetime").date(2026, 11, 14),
+    )
+    pages = [p.extract_text() for p in PdfReader(path).pages]
+    assert len(pages) >= 2
+    assert "лист 1, продолжение" not in pages[0] and all("лист 1, продолжение" in t for t in pages[1:])
+    joined = "\n".join(pages)
+    for pl in m.sheets[0].placements:
+        assert pl.part in joined
+    for c in m.sheets[0].cuts:
+        assert f"Рез {c.number}:" in joined

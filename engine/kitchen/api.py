@@ -892,10 +892,13 @@ def parts_from_order(order: str, home: Path | None = None) -> PartsResult:
 # --- раскрой ------------------------------------------------------------------
 
 
+OutputKind = Literal["cutting"]  # виды выводов; этапы 2-4 добавляют свои
+
+
 class OutputInfo(BaseModel):
     """Вывод заказа: файл в `orders/<заказ>/out/` и версия проекта, из которой он посчитан."""
 
-    kind: str  # cutting
+    kind: OutputKind
     path: str  # относительно KITCHEN_HOME, как в БД
     file: str  # полный путь
     source_version: int

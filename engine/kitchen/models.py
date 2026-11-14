@@ -63,6 +63,7 @@ class Saw(Section):
     type: str = _f("тип")
     max_cut_length: Num = _f("макс_длина_реза")
     kerf: Num = _f("пропил")
+    min_waste_strip: Num = _f("мин_полоса_отхода")
 
 
 class SheetTrim(Section):

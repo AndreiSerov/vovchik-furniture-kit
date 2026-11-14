@@ -2,6 +2,7 @@
 
 from datetime import date
 
+import pytest
 from kitchen.pdf import FONT, PdfDocument
 from kitchen.result import MOCK_BANNER
 from pypdf import PdfReader
@@ -30,7 +31,8 @@ def test_every_page_has_watermark_and_footer_when_mock(tmp_path):
     pages = texts(tmp_path / "a.pdf")
     assert len(pages) == 2
     for i, text in enumerate(pages, 1):
-        assert MOCK_BANNER in text
+        # два вхождения: сам водяной знак и строка колонтитула; без знака осталось бы одно
+        assert text.count(MOCK_BANNER) == 2
         assert f"Страница-{i} Ёж" in text
         assert "2026-047-petrov" in text and "версия проекта 3" in text and "14.11.2026" in text
         assert f"стр. {i} из 2" in text
@@ -45,3 +47,30 @@ def test_no_watermark_without_mock(tmp_path):
 def test_unknown_version_is_named(tmp_path):
     make(tmp_path / "a.pdf", mock=False, version=None)
     assert "версия проекта не записана" in texts(tmp_path / "a.pdf")[0]
+
+
+def test_failing_page_leaves_no_files_and_keeps_previous_pdf(tmp_path):
+    path = tmp_path / "a.pdf"
+    make(path, mock=False)
+    before = path.read_bytes()
+    doc = PdfDocument(path, order="2026-047-petrov", version=3, mock=False, on=date(2026, 11, 14))
+
+    def boom(c, area):
+        raise RuntimeError("draw failed")
+
+    doc.add_page(boom)
+    with pytest.raises(RuntimeError):
+        doc.save()
+    assert path.read_bytes() == before
+    assert [p.name for p in tmp_path.iterdir()] == ["a.pdf"]
+
+
+def test_continuation_note_in_footer(tmp_path):
+    doc = PdfDocument(
+        tmp_path / "a.pdf", order="2026-047-petrov", version=1, mock=False, on=date(2026, 11, 14)
+    )
+    doc.add_page(lambda c, a: None)
+    doc.add_page(lambda c, a: None, note="лист 2, продолжение")
+    doc.save()
+    first, second = texts(tmp_path / "a.pdf")
+    assert "продолжение" not in first and "лист 2, продолжение" in second
