@@ -197,13 +197,15 @@ def _whole(value: Num, what: str) -> int:
 
 
 def module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
+    template = TEMPLATES.get(module.template)
     base = (
         ws.construction.tall
-        if module.template == "tall_oven"
+        if template and template.row_kind == "tall"
         else ws.construction.lower
         if row_kind == "lower"
         else ws.construction.upper
     )
+    default_depth = template.default_depth(ws) if template and template.default_depth else base.depth
     return ModuleDims(
         width=_whole(module.width, f"Ширина модуля {module.label}"),
         height=(
@@ -212,7 +214,9 @@ def module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
             else base.height
         ),
         depth=(
-            _whole(module.depth, f"Глубина модуля {module.label}") if module.depth is not None else base.depth
+            _whole(module.depth, f"Глубина модуля {module.label}")
+            if module.depth is not None
+            else default_depth
         ),
     )
 
@@ -480,14 +484,29 @@ def _edge_totals(parts: list[Part], ws: Workshop) -> dict[str, EdgeTotals]:
 
 
 @dataclass(frozen=True)
-class Template:
-    """Шаблон модуля: построитель деталей и ряд, в котором он применяется."""
+class BuildContext:
+    """Что шаблон знает о проекте кроме самого модуля: техника проекта и ряд, в котором модуль стоит."""
 
-    build: Callable[[ModuleSpec, ModuleDims, ProjectMaterials, Workshop], TemplateOut]
+    appliances: list[Appliance]
+    row: Row
+
+
+@dataclass(frozen=True)
+class Template:
+    """Шаблон модуля: построитель деталей, ряд и свойства, по которым его выбирают проверки и расчёты."""
+
+    build: Callable[[ModuleSpec, ModuleDims, ProjectMaterials, Workshop, BuildContext], TemplateOut]
     row_kind: str  # lower | upper | tall
     carcass: bool = True  # False: только фасад между соседними модулями (ПММ)
     drawers: bool = False  # ящики на направляющих: проверяется внутренняя глубина
     appliances: tuple[str, ...] = ()  # виды техники, под которые шаблон строит нишу
+    both_rows: bool = False  # модуль записан в одном ряду стены и занимает оба (пенал)
+    default_depth: Callable[[Workshop], int] | None = None  # глубина по умолчанию вместо глубины ряда
+
+
+def _plain(build: Callable[[ModuleSpec, ModuleDims, ProjectMaterials, Workshop], TemplateOut]):
+    """Шаблон без привязки к проекту: контекст ему не нужен."""
+    return lambda module, dims, materials, ws, ctx: build(module, dims, materials, ws)
 
 
 def build_base_sink(
@@ -776,14 +795,20 @@ def build_wall_hood(
 
 
 def _build_corner(
-    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop, *, upper: bool
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop, row: Row, *, upper: bool
 ) -> TemplateOut:
-    """Прямой угловой корпус с одной дверью и неподвижной заглушкой."""
+    """Прямой угловой корпус с одной дверью и неподвижной заглушкой.
+
+    Глухая часть — со стороны угла: у последнего модуля ряда (стена идёт слева направо, соседняя стена
+    начинается от угла) справа, у первого при других модулях в ряду слева; дверь — со стороны прохода."""
     c = ws.construction
     rules = c.corner_rules
     gap = c.facades.gap
     facade_width = dims.width - 3 * gap - rules.upper_filler_width if upper else rules.base_facade_width
     filler_width = dims.width - 3 * gap - facade_width
+    blind_left = len(row.modules) > 1 and row.modules[0] is module
+    filler_x = gap if blind_left else 2 * gap + facade_width
+    facade_x = 2 * gap + filler_width if blind_left else gap
     if (
         min(facade_width, filler_width, dims.height - 2 * gap) <= 0
         or dims.width <= 2 * c.case_thickness
@@ -818,7 +843,7 @@ def _build_corner(
             thickness=_required_thickness(body, "заглушки"),
             material_id=body.id,
             textured=bool(body.texture),
-            at=Position(x=gap, y=dims.depth, z=gap),
+            at=Position(x=filler_x, y=dims.depth, z=gap),
             edges=dict.fromkeys(EDGE_SIDES, _edge_id(ws, body.id)) if rules.filler_edges else None,
         )
     )
@@ -832,7 +857,7 @@ def _build_corner(
             thickness=_required_thickness(facade, "фасадов"),
             material_id=facade.id,
             textured=False,
-            at=Position(x=2 * gap + filler_width, y=dims.depth, z=gap),
+            at=Position(x=facade_x, y=dims.depth, z=gap),
             area=True,
         )
     )
@@ -845,38 +870,53 @@ def _build_corner(
 
 
 def build_base_corner(
-    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop, ctx: BuildContext
 ) -> TemplateOut:
-    return _build_corner(module, dims, materials, ws, upper=False)
+    return _build_corner(module, dims, materials, ws, ctx.row, upper=False)
 
 
 def build_wall_corner(
-    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop, ctx: BuildContext
 ) -> TemplateOut:
-    return _build_corner(module, dims, materials, ws, upper=True)
+    return _build_corner(module, dims, materials, ws, ctx.row, upper=True)
 
 
 def build_tall_oven(
-    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop, ctx: BuildContext
 ) -> TemplateOut:
     from kitchen.tall import build_tall_oven as build
 
-    return build(module, dims, materials, ws, [])
+    return build(module, dims, materials, ws, ctx.appliances)
+
+
+def build_hood_of_project(
+    module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop, ctx: BuildContext
+) -> TemplateOut:
+    matching = [item for item in ctx.appliances if item.module == module.label and item.type == "hood"]
+    if len(matching) > 1:
+        raise OrderError(f"Модуль {module.label}: указано несколько вытяжек.")
+    return build_wall_hood(module, dims, materials, ws, matching[0] if matching else None)
 
 
 TEMPLATES = {
-    "tall_oven": Template(build_tall_oven, "tall", drawers=True, appliances=("oven", "microwave")),
-    "base_door": Template(build_base_door, "lower"),
+    "tall_oven": Template(
+        build_tall_oven, "tall", drawers=True, appliances=("oven", "microwave"), both_rows=True
+    ),
+    "base_door": Template(_plain(build_base_door), "lower"),
     "base_corner": Template(build_base_corner, "lower"),
-    "wall_corner": Template(build_wall_corner, "upper"),
-    "wall_door": Template(build_wall_door, "upper"),
-    "wall_lift": Template(build_wall_lift, "upper"),
-    "wall_hood": Template(build_wall_hood, "upper", appliances=("hood",)),
-    "wall_dryer": Template(build_wall_dryer, "upper"),
-    "base_sink": Template(build_base_sink, "lower", appliances=("sink",)),
-    "base_bottle": Template(build_base_bottle, "lower"),
-    "base_drawers": Template(build_base_drawers, "lower", drawers=True),
-    "dishwasher_panel": Template(build_dishwasher_panel, "lower", carcass=False, appliances=("dishwasher",)),
+    "wall_corner": Template(
+        build_wall_corner, "upper", default_depth=lambda ws: ws.construction.corner_rules.upper_depth
+    ),
+    "wall_door": Template(_plain(build_wall_door), "upper"),
+    "wall_lift": Template(_plain(build_wall_lift), "upper"),
+    "wall_hood": Template(build_hood_of_project, "upper", appliances=("hood",)),
+    "wall_dryer": Template(_plain(build_wall_dryer), "upper"),
+    "base_sink": Template(_plain(build_base_sink), "lower", appliances=("sink",)),
+    "base_bottle": Template(_plain(build_base_bottle), "lower"),
+    "base_drawers": Template(_plain(build_base_drawers), "lower", drawers=True),
+    "dishwasher_panel": Template(
+        _plain(build_dishwasher_panel), "lower", carcass=False, appliances=("dishwasher",)
+    ),
 }
 
 # Явная несовместимость вида техники с рядом модуля: вытяжка только вверху, остальное только внизу
@@ -1104,16 +1144,5 @@ def build_module(
                 else:
                     values[key] = value
     dims = module_dims(module, row.kind, ws)
-    if module.template == "wall_corner" and module.depth is None:
-        dims.depth = ws.construction.corner_rules.upper_depth
     resolved_materials = ProjectMaterials.model_validate(values)
-    if module.template == "tall_oven":
-        from kitchen.tall import build_tall_oven as build
-
-        return build(module, dims, resolved_materials, ws, appliances)
-    if module.template == "wall_hood":
-        matching = [item for item in appliances if item.module == module.label and item.type == "hood"]
-        if len(matching) > 1:
-            raise OrderError(f"Модуль {module.label}: указано несколько вытяжек.")
-        return build_wall_hood(module, dims, resolved_materials, ws, matching[0] if matching else None)
-    return template.build(module, dims, resolved_materials, ws)
+    return template.build(module, dims, resolved_materials, ws, BuildContext(appliances, row))
