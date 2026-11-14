@@ -385,9 +385,10 @@ def along_texture(sheet, ws_sheet: tuple[float, float]) -> tuple[float, float]:
 
 
 def part_fit_findings(part: Part, sheet: SheetMaterial, ws: Workshop) -> list[Finding]:
-    """Деталь в рабочем поле листа (лист минус обрезка с двух сторон). Текстурная — без поворота."""
+    """Деталь в рабочем поле листа (лист минус обрезка с двух сторон). Текстура материала запрещает поворот
+    всех его деталей."""
     trim = 2 * ws.equipment.sheet.perimeter_trim
-    if part.texture:
+    if sheet.texture:
         along, across = (v - trim for v in along_texture(sheet, sheet.sheet))
         limits = (("длина (вдоль текстуры)", part.length, along), ("ширина", part.width, across))
     else:

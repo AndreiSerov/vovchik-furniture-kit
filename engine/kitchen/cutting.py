@@ -124,9 +124,6 @@ _SORTS = [
     ("lside", SORT_LSIDE),
     ("ratio", SORT_RATIO),
 ]
-_SORT_NAMES = {
-    id(s): n for s, n in zip(_SORTS, ["area", "peri", "diff", "ssize", "lside", "ratio"], strict=True)
-}
 _MODES = ["BNF", "BFF", "BBF"]
 
 

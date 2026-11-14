@@ -320,3 +320,17 @@ def test_output_is_identical_across_hash_seeds(home):
         )
         outs.append(r.stdout)
     assert outs[0] == outs[1] and '"materials"' in outs[0]
+
+
+def test_material_texture_forbids_rotation_of_all_its_parts(home):
+    """Текстурный ХДФ «вдоль 2070»: задняя стенка пенала 2096 мм не влезает вдоль 2070 — и проверка проекта,
+    и раскрой называют деталь по маркировке (раньше раскрой падал без маркировки)."""
+    path = home / "workshop/materials.yaml"
+    path.write_text(
+        path.read_text().replace("текстура: false, толщина: 3", "текстура: вдоль 2070, толщина: 3")
+    )
+    project = write_project(home, lambda p: None)
+    with pytest.raises(OrderError, match="П1-зад"):
+        api.cut_from_project(project, home)
+    found = api.check_project(project, home).errors
+    assert [f.subject for f in found if f.code == "part_exceeds_sheet"] == ["П1-зад"]
