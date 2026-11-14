@@ -51,18 +51,19 @@ def main() -> int:
         claim.unlink(missing_ok=True)
         print(f"released {args.ticket}")
         return 0
-    if claim.exists() and not args.force:
-        print(f"ticket {args.ticket} is already claimed: {claim.read_text(encoding='utf-8').strip()}")
-        print("Stop and report this; --force takes over only a claim you know is stale.")
-        return 1
     folder.mkdir(parents=True, exist_ok=True)
     branch = subprocess.run(
         ["git", "branch", "--show-current"], capture_output=True, text=True, check=False
     ).stdout.strip()
-    claim.write_text(
-        f"{args.by}, branch {branch or '(detached)'}, {Path.cwd()}, {time.strftime('%Y-%m-%d %H:%M')}\n",
-        encoding="utf-8",
-    )
+    line = f"{args.by}, branch {branch or '(detached)'}, {Path.cwd()}, {time.strftime('%Y-%m-%d %H:%M')}\n"
+    try:
+        # "x" creates the file or fails, in one step, so two agents can't both take the ticket.
+        with claim.open("w" if args.force else "x", encoding="utf-8") as fh:
+            fh.write(line)
+    except FileExistsError:
+        print(f"ticket {args.ticket} is already claimed: {claim.read_text(encoding='utf-8').strip()}")
+        print("Stop and report this; --force takes over only a claim you know is stale.")
+        return 1
     print(f"claimed {args.ticket}")
     return 0
 
