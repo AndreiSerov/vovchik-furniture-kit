@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Заказ Петрова целиком во временной мастерской: бриф, проект, production, PNG каждой страницы PDF.
+# Проверка «на реальной фикстуре» до сдачи тикета: смотри PNG глазами (Read) и сверяй цифры.
+# Использование: scripts/petrov-sandbox [папка]   (по умолчанию — новая папка в $TMPDIR)
+set -euo pipefail
+repo="$(cd "$(dirname "$0")/.." && pwd)"
+out="${1:-$(mktemp -d "${TMPDIR:-/tmp}/petrov.XXXXXX")}"
+mkdir -p "$out"
+rm -rf "$out/workshop" "$out/orders"
+cp -R "$repo/workshop" "$out/workshop"
+export KITCHEN_HOME="$out"
+unset KITCHEN_DB
+
+kitchen() { uv run --project "$repo" kitchen "$@"; }
+order=2026-047-petrov
+kitchen order new "$order" --client "Петров П. П." >/dev/null
+kitchen brief save "$order" "$repo/tests/fixtures/petrov_brief.json" >/dev/null
+kitchen import "$order" "$repo/tests/fixtures/petrov_project.json" >/dev/null
+kitchen production "$order" >"$out/production.txt"
+kitchen parts "$order" >"$out/parts.txt"
+
+# Каждая страница PDF отдельным PNG: qlmanage (macOS) рисует только первую страницу файла.
+uv run --project "$repo" python -I - "$out" <<'PY'
+import pathlib, shutil, subprocess, sys
+from pypdf import PdfReader, PdfWriter
+
+out = pathlib.Path(sys.argv[1])
+png = out / "png"
+png.mkdir(exist_ok=True)
+render = shutil.which("qlmanage")
+for pdf in sorted(out.joinpath("orders").rglob("*.pdf")):
+    for i, page in enumerate(PdfReader(pdf).pages, 1):
+        single = png / f"{pdf.stem}-p{i}.pdf"
+        writer = PdfWriter()
+        writer.add_page(page)
+        with single.open("wb") as fh:
+            writer.write(fh)
+        if render:
+            subprocess.run([render, "-t", "-s", "1800", "-o", str(png), str(single)], capture_output=True)
+            single.unlink()
+print(f"PDF: {len(list(out.joinpath('orders').rglob('*.pdf')))}, страницы: {png}")
+if not render:
+    print("qlmanage нет: страницы сохранены как отдельные PDF, PNG не нарисованы")
+PY
+echo "Текст: $out/production.txt, $out/parts.txt"
