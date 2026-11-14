@@ -1,0 +1,110 @@
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+
+from kitchen import api
+from kitchen.errors import KitchenError
+
+REPO = Path("/Users/andreiserov/Developer/vovchik-furniture-kit")
+MATERIALS = {
+    "body": "ldsp_16_white",
+    "facades_lower": "mdf_enamel_matt",
+    "facades_upper": "mdf_enamel_matt",
+    "handles": "handle_profile",
+}
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    shutil.copytree(REPO / "workshop", tmp_path / "workshop")
+    monkeypatch.setenv("KITCHEN_HOME", str(tmp_path))
+    return tmp_path
+
+
+def write(home, rows, length, order="2026-047-petrov"):
+    data = {
+        "order": order,
+        "ceiling_height": 2700,
+        "walls": [{"label": "A", "length": length, "rows": rows}],
+        "materials": MATERIALS,
+    }
+    path = home / "project.json"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def lower(*modules):
+    return [{"kind": "lower", "modules": list(modules)}]
+
+
+# 1. Неизвестный шаблон роняет проверки (и импорт) KeyError вместо находки module_build.
+def test_unknown_template_is_a_finding_not_a_keyerror(home):
+    path = write(home, lower({"label": "Н1", "template": "foo", "width": 600}), 600)
+    result = api.check_project(path, home)  # сейчас: KeyError: 'foo' (checks.py:111)
+    assert [f.code for f in result.errors] == ["module_build"]
+
+
+def test_import_of_unknown_template_is_rejected_in_russian(home):
+    api.order_new("2026-047-petrov", "Петров", home=home)
+    path = write(home, lower({"label": "Н1", "template": "foo", "width": 600}), 600)
+    with pytest.raises(KitchenError, match="неизвестный шаблон"):  # сейчас: KeyError
+        api.import_project("petrov", path, home=home)
+
+
+# 2. Габариты, при которых детали получаются нулевыми или отрицательными, проходят молча.
+@pytest.mark.parametrize(
+    "module",
+    [
+        {"label": "Н1", "template": "base_door", "width": 30},  # дно 560×-2, полка 540×-4
+        {"label": "Н1", "template": "base_door", "width": 600, "depth": 10},  # полка 566×-10
+        {"label": "Н1", "template": "dishwasher_panel", "width": 2},  # фасад 716×-2
+        {"label": "Н1", "template": "base_drawers", "width": 600, "height": 150},  # фасады ящиков 596×1
+    ],
+)
+def test_nonpositive_part_sizes_are_an_error(home, module):
+    path = write(home, lower(module), module["width"])
+    result = api.check_project(path, home)
+    sizes = []
+    try:
+        parts = api.parts_from_project(path, home)
+        sizes = [(p.id, p.length, p.width) for m in parts.modules for p in m.parts if min(p.length, p.width) <= 1]
+    except KitchenError:
+        pass
+    assert result.errors or not sizes, sizes  # сейчас: 0 ошибок и детали с размером <= 1 мм
+
+
+# 3. Отрицательное число полок даёт отрицательную фурнитуру.
+def test_negative_legacy_shelves_rejected(home):
+    path = write(home, lower({"label": "Н1", "template": "base_door", "width": 600, "shelves": -1}), 600)
+    with pytest.raises(KitchenError):
+        result = api.parts_from_project(path, home)  # сейчас: shelf_pin_5 == -4
+        assert all(n >= 0 for n in result.hardware.values()), result.hardware
+        raise AssertionError("shelves: -1 принят")
+
+
+# 4. check_project не видит повтор меток и теряет находки первого из одноимённых модулей.
+def test_check_project_reports_duplicate_labels(home):
+    path = write(
+        home,
+        lower(
+            {"label": "Н1", "template": "base_door", "width": 600, "height": 3000},  # боковина 3000 > 2780
+            {"label": "Н1", "template": "base_door", "width": 400},
+        ),
+        1000,
+    )
+    result = api.check_project(path, home)
+    assert result.errors  # сейчас: []
+
+
+# 5. Два пенала одной стены, записанные в разных рядах: ложный row_sum и недосчитанный цоколь.
+def test_two_talls_in_different_rows_fill_both_rows(home):
+    rows = [
+        {"kind": "lower", "modules": [{"label": "П1", "template": "tall_oven", "width": 600}]},
+        {"kind": "upper", "modules": [{"label": "П2", "template": "tall_oven", "width": 600}]},
+    ]
+    path = write(home, rows, 1200)
+    result = api.parts_from_project(path, home)
+    assert [f for f in result.findings if f.code == "row_sum"] == []  # сейчас: 2 ошибки «600 против 1200»
+    assert next(c for c in result.common if c.kind == "plinth").length_mm == 1200  # сейчас: 600

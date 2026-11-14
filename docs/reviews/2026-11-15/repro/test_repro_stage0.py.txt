@@ -1,0 +1,136 @@
+import json
+
+import pytest
+from kitchen import api
+from kitchen.cli import app
+from kitchen.errors import KitchenError
+from typer.testing import CliRunner
+
+from tests.conftest import BASE_DOOR_PROJECT, home  # noqa: F401
+
+runner = CliRunner()
+
+
+def _project(tmp_path, name="p.json", **changes):
+    p = tmp_path / name
+    p.write_text(json.dumps({**BASE_DOOR_PROJECT, **changes}, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+def _fit_wall(project):
+    project = json.loads(json.dumps(project))
+    project["walls"][0]["length"] = 600
+    return project
+
+
+# 1
+def test_check_workshop_scalar_instead_of_list_is_russian_error(home):
+    (home / "workshop" / "hardware.yaml").write_text("mock: true\nпозиции: 5\n", encoding="utf-8")
+    r = api.check_workshop(home)  # сейчас: TypeError: object of type 'int' has no len()
+    assert not r.valid and any("hardware.yaml" in e and "позиции" in e for e in r.errors)
+
+
+# 2
+def test_check_workshop_non_utf8_file_is_russian_error(home):
+    p = home / "workshop" / "equipment.yaml"
+    p.write_bytes(p.read_text(encoding="utf-8").encode("cp1251"))
+    r = api.check_workshop(home)  # сейчас: UnicodeDecodeError
+    assert not r.valid and any("equipment.yaml" in e for e in r.errors)
+
+
+# 3
+def test_export_to_directory_is_russian_error(home, tmp_path):
+    api.order_new("2026-047-petrov")
+    wall = _fit_wall(BASE_DOOR_PROJECT)
+    api.import_project("petrov", _project(tmp_path, walls=wall["walls"]))
+    with pytest.raises(KitchenError):  # сейчас: IsADirectoryError
+        api.export_project("petrov", out=tmp_path)
+
+
+# 4
+@pytest.mark.parametrize("spelling", ["2026-047", "2026-047-ПЕТРОВ"])
+def test_order_field_spelling_does_not_make_a_version(home, tmp_path, spelling):
+    api.order_new("2026-047-petrov")
+    walls = _fit_wall(BASE_DOOR_PROJECT)["walls"]
+    assert api.import_project("petrov", _project(tmp_path, walls=walls)).version == 1
+    again = api.import_project("petrov", _project(tmp_path, "q.json", walls=walls, order=spelling))
+    assert again.changed is False and again.version == 1  # сейчас: changed=True, version=2
+
+
+# 5
+def test_integer_written_as_float_does_not_make_a_version(home, tmp_path):
+    api.order_new("2026-047-petrov")
+    walls = _fit_wall(BASE_DOOR_PROJECT)["walls"]
+    api.import_project("petrov", _project(tmp_path, walls=walls))
+    walls[0]["rows"][0]["modules"][0]["width"] = 600.0
+    again = api.import_project("petrov", _project(tmp_path, "q.json", walls=walls))
+    assert again.changed is False  # сейчас: версия 2, а diff v1 v2 пишет «Изменений модулей нет.»
+
+
+# 6
+def test_diff_does_not_say_no_changes_when_project_level_field_changed(home, tmp_path):
+    api.order_new("2026-047-petrov")
+    walls = _fit_wall(BASE_DOOR_PROJECT)["walls"]
+    api.import_project("petrov", _project(tmp_path, walls=walls))
+    api.import_project("petrov", _project(tmp_path, "q.json", walls=walls, ceiling_height=2500))
+    assert api.diff_project("petrov", 1, 2).changes  # сейчас: [] -> «Изменений модулей нет.»
+
+
+# 7
+def test_duplicate_yaml_key_is_load_error(home):
+    p = home / "workshop" / "labor.yaml"
+    p.write_text(p.read_text(encoding="utf-8") + "ставка_в_час: 5\n", encoding="utf-8")
+    assert not api.check_workshop(home).valid  # сейчас: valid, ставка молча стала 5
+
+
+# 8
+def test_duplicate_hardware_id_is_load_error(home):
+    p = home / "workshop" / "hardware.yaml"
+    lines = p.read_text(encoding="utf-8").splitlines()
+    p.write_text("\n".join([*lines, lines[2].replace("цена: 520", "цена: 1")]) + "\n", encoding="utf-8")
+    assert not api.check_workshop(home).valid  # сейчас: «данные верны»
+
+
+# 9
+def test_quick_estimate_range_must_be_positive_and_ordered(home):
+    p = home / "workshop" / "pricing.yaml"
+    p.write_text(p.read_text(encoding="utf-8").replace("[85000, 110000]", "[110000, -5]"), encoding="utf-8")
+    assert not api.check_workshop(home).valid  # сейчас: valid; quick-estimate печатает «330 000 – 0 ₽»
+
+
+# 10
+def test_order_number_takes_ascii_digits_only(home):
+    with pytest.raises(KitchenError):  # сейчас: заказ «٢٠٢٦-٠٤٩-ivanov» заведён
+        api.order_new("٢٠٢٦-٠٤٩-ivanov")
+
+
+# 11
+def test_log_text_cannot_inject_a_heading_into_status(home):
+    api.order_new("2026-047-petrov")
+    api.log_add("petrov", "decision", "строка1\n## Сделано\n- подделка")
+    assert api.status("petrov").text.count("## Сделано") == 1  # сейчас: 2
+
+
+# 12
+def test_rejected_import_output_carries_mock_banner(home, tmp_path):
+    runner.invoke(app, ["order", "new", "2026-047-petrov"])
+    r = runner.invoke(app, ["import", "petrov", str(_project(tmp_path))])  # стена 2800, модуль 600
+    assert r.exit_code == 1 and "допуск" in r.output
+    assert "МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА" in r.output  # сейчас: плашки нет
+
+
+# 13
+def test_status_file_itself_carries_mock_banner(home):
+    api.order_new("2026-047-petrov")
+    r = api.status("petrov")
+    lines = open(r.path, encoding="utf-8").read().strip().splitlines()
+    assert lines[0] == lines[-1] == "МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА"  # проходит: это недостающий тест
+
+
+# 14
+def test_project_json_with_bom_is_accepted(home, tmp_path):
+    api.order_new("2026-047-petrov")
+    p = tmp_path / "bom.json"
+    data = {**BASE_DOOR_PROJECT, "walls": _fit_wall(BASE_DOOR_PROJECT)["walls"]}
+    p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8-sig")
+    assert api.import_project("petrov", p).version == 1  # сейчас: «не JSON (строка 1, столбец 1)»

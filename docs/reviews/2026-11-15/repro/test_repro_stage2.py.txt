@@ -1,0 +1,54 @@
+import datetime
+import shutil
+from pathlib import Path
+
+import pytest
+from kitchen import api
+from kitchen.errors import KitchenError
+
+REPO = Path("/Users/andreiserov/Developer/vovchik-furniture-kit")
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    shutil.copytree(REPO / "workshop", tmp_path / "workshop")
+    monkeypatch.setenv("KITCHEN_HOME", str(tmp_path))
+    return tmp_path
+
+
+@pytest.mark.parametrize("kerf", ["4.5", "3.2"])
+def test_fractional_kerf_is_not_silently_rounded(home, kerf):
+    """Пропил 4.5 мм: движок молча кладёт детали с зазором 4 мм и пишет «пропил 4 мм»."""
+    path = home / "workshop/equipment.yaml"
+    path.write_text(path.read_text().replace("пропил: 4", f"пропил: {kerf}"))
+    project = REPO / "tests/fixtures/petrov_project.json"
+    try:
+        result = api.cut_from_project(project, home)
+    except KitchenError:
+        return  # русская ошибка «пропил должен быть целым» — допустимое исправление
+    assert result.kerf == float(kerf)
+    for m in result.materials:
+        for s in m.sheets:
+            for i, a in enumerate(s.placements):
+                for b in s.placements[i + 1 :]:
+                    gap = max(b.x - a.x - a.w, a.x - b.x - b.w, b.y - a.y - a.h, a.y - b.y - b.h)
+                    assert gap >= float(kerf), (a.part, b.part, gap)
+
+
+def test_footer_with_long_order_does_not_run_into_mock_banner(tmp_path):
+    """Заказ с длинной фамилией на странице-продолжении: левая строка колонтитула наезжает на красную плашку."""
+    from kitchen.pdf import FONT, FONT_BOLD, PdfDocument, page_area, register_fonts
+    from kitchen.result import MOCK_BANNER
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    register_fonts()
+    order = "2026-047-golenishchev-kutuzov-smolenskiy"
+    doc = PdfDocument(tmp_path / "x.pdf", order=order, version=12, mock=True, on=datetime.date(2026, 11, 15))
+    for _ in range(12):
+        doc.add_page(lambda c, a: None, "лист 2, продолжение")
+    doc.save()  # сейчас пишется без ошибки
+    left = stringWidth(
+        f"Заказ {order} · версия проекта 12 · 15.11.2026 · стр. 10 из 12 · лист 2, продолжение", FONT, 7
+    )
+    right = stringWidth(MOCK_BANNER, FONT_BOLD, 7)
+    assert left + right <= page_area().w
