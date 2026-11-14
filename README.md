@@ -109,6 +109,8 @@ scripts/check           # ruff + pytest
 
 `scripts/link-skills` ставит симлинки `skills/kitchen-*` в `.claude/skills/`, `.agents/skills/`, `.qwen/skills/` (его же вызывает `sync-skills`); для Hermes один раз вручную: `scripts/link-skills --hermes` (пишет в `~/.hermes/skills/`). Запускать из основной копии репозитория, не из worktree: после удаления worktree ссылки повиснут.
 
+`scripts/check` проверяет и скиллы `skills/kitchen-*` (`tests/test_skill_checks.py`): frontmatter только с `name` и `description`, команды `kitchen …` из кода в `SKILL.md` существуют в CLI, в теле нет формул и размеров, набор фраз-триггеров `tests/skill_triggers.json` корректен. Новый скилл добавляет в этот набор хотя бы одну фразу.
+
 Проверка брифа вручную:
 
 ```sh
