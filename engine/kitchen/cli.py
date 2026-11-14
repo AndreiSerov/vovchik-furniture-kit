@@ -232,9 +232,12 @@ def _render_parts(r: api.PartsResult) -> str:
     for m in r.modules:
         lines.append(f"  Модуль {m.module} ({m.template}) — {len(m.parts)} дет.")
         for p in m.parts:
-            edged = ", ".join(side for side, edge in p.edges.items() if edge)
+            edged = ", ".join(f"{side} {edge}" for side, edge in p.edges.items() if edge)
             tail = f", кромка: {edged}" if edged else ""
-            lines.append(f"    {p.id} — {p.name} {p.length}×{p.width} мм{tail}")
+            grain = "текстура вдоль длины" if p.texture else "без текстуры"
+            lines.append(
+                f"    {p.id} — {p.name} {p.length}×{p.width}×{p.thickness} мм, {p.material}, {grain}{tail}"
+            )
     hw = ", ".join(f"{pid} ×{n}" for pid, n in r.hardware.items())
     lines.append(f"Фурнитура: {hw}")
     for edge_id, e in r.edges.items():

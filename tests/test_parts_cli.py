@@ -21,6 +21,14 @@ def test_parts_json_equals_api_and_text_has_banner(home, base_door_project):
     assert lines[0] == MOCK_BANNER and lines[-1] == MOCK_BANNER
     assert "Н1-бок-Л" in t.output and "2026-047-petrov" in t.output
     assert "3.71" in t.output and "0.4253" in t.output
+    # истории 9-10: толщина, материал, текстура и id кромки по сторонам в строке детали
+    assert (
+        "    Н1-бок-Л — боковина 720×560×16 мм, ldsp_16_white, без текстуры, кромка: L1 edge_08_white"
+        in t.output
+    )
+    assert "    Н1-зад — задняя стенка 716×596×3 мм, hdf_3_white, без текстуры\n" in t.output
+    part = data["modules"][0]["parts"][0]
+    assert {"thickness", "material", "texture", "edges"} <= set(part)
 
 
 def test_parts_missing_file_exits_1(home):
@@ -72,3 +80,12 @@ def test_parts_needs_exactly_one_source(home, base_door_project):
     assert none.exit_code == 1 and "заказ" in none.output and "--project" in none.output
     both = runner.invoke(app, ["parts", "petrov", "--project", str(base_door_project)])
     assert both.exit_code == 1 and "либо" in both.output
+
+
+def test_parts_text_marks_textured_material(home, base_door_project):
+    project = json.loads(base_door_project.read_text(encoding="utf-8"))
+    project["materials"]["body"] = "ldsp_16_oak"
+    base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    t = runner.invoke(app, ["parts", "--project", str(base_door_project)])
+    assert t.exit_code == 0, t.output
+    assert "ldsp_16_oak, текстура вдоль длины, кромка: L1 edge_08_oak" in t.output
