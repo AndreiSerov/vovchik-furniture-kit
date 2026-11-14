@@ -9,6 +9,12 @@
 
 ## Установка
 
+Нужны `git`, `python3` 3.11+, `uv` и Claude Code; агенты также пользуются `rg`, `sd` и `ast-grep` (`scripts/doctor` скажет, чего нет):
+
+```sh
+brew install git uv ripgrep sd ast-grep gh
+```
+
 ```sh
 uv tool install -e .    # команда kitchen в системе
 export KITCHEN_HOME=/путь/к/папке/с/workshop   # не нужно внутри репозитория

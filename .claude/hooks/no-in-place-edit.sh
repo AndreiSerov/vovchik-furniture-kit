@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Blocks in-place stream edits (`sed -i`, `perl -i`) of tracked files.
 # They differ between GNU and BSD: on macOS `sed -i` with the wrong argument can empty a file
-# silently. Edit, Write, or a script that reads and writes the file do the same job safely.
+# silently. Edit, `sd` or `ast-grep` do the same job safely and the same on every system.
 # Scratch files outside git stay editable.
 set -u
 
@@ -41,7 +41,8 @@ for word in words:
 if hits:
     print(
         "Blocked: in-place sed/perl on tracked files (" + ", ".join(sorted(hits)) + "). "
-        "Use Edit for targeted changes, or a script that reads and writes the file for bulk ones.",
+        "Use Edit for a targeted change, `sd -p` then `sd` for a text pattern, "
+        "or `ast-grep` for a structural change of code.",
         file=sys.stderr,
     )
     sys.exit(2)

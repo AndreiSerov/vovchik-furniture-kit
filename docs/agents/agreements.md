@@ -9,6 +9,14 @@
 - Turn a rule into a check when you can: a failing `scripts/check` beats a sentence in this file.
 - A `# noqa` states its reason on the same or the previous line.
 
+## Editing files
+
+- A targeted change goes through the Edit tool, a new file through Write.
+- A text change of the same pattern across many files goes through `sd`: preview with `sd -p`, then run it without `-p`. `sd -F` matches the text literally.
+- A structural change of code (rename a call, reorder arguments, replace a pattern) goes through `ast-grep`: `ast-grep run -p '<pattern>' -r '<rewrite>' -l <lang>` shows the diff, `-U` writes it.
+- Search with `rg`. In-place `sed -i` and `perl -i` are blocked on tracked files: they differ between macOS and Linux and can empty a file.
+- `scripts/doctor` names any of these tools that is missing.
+
 ## Private data
 
 Secrets stay on this machine and out of git. The deny rules in `.claude/settings.json` guide agents but aren't a security boundary for shell commands, so don't work around them. Anything that sends this data to a hosted service must be selected explicitly.
