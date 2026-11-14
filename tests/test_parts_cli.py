@@ -13,7 +13,7 @@ def test_parts_json_equals_api_and_text_has_banner(home, base_door_project):
     assert r.exit_code == 0, r.output
     data = json.loads(r.output)
     assert data == json.loads(api.parts_from_project(base_door_project, home).model_dump_json())
-    assert data["mock"] is True and MOCK_BANNER not in r.output
+    assert data["mock"] is True and data["warning"] == MOCK_BANNER
 
     t = runner.invoke(app, ["parts", "--project", str(base_door_project)])
     assert t.exit_code == 0, t.output

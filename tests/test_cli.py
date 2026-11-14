@@ -22,7 +22,7 @@ def test_check_workshop_json_equals_api(home):
     assert json.loads(r.output) == json.loads(api.check_workshop(home).model_dump_json())
     assert json.loads(r.output)["mock"] is True
     assert len(json.loads(r.output)["mock_files"]) == 7
-    assert MOCK_BANNER not in r.output
+    assert json.loads(r.output)["warning"] == MOCK_BANNER
 
 
 def test_no_banner_when_nothing_is_mock(home):

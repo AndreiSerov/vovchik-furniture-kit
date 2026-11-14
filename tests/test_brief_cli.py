@@ -38,7 +38,7 @@ def test_brief_save_json_is_the_api_result(home, brief_file):
     assert r.exit_code == 0, r.output
     data = api.BriefSaveResult.model_validate_json(r.output)
     assert (data.order, data.created, data.conflicts, data.mock) == ("2026-047-sergeev", True, 10, True)
-    assert MOCK_BANNER not in r.output
+    assert data.warning == MOCK_BANNER and json.loads(r.output)["warning"] == MOCK_BANNER
 
 
 def test_brief_save_rejected_exits_1_in_russian(home, tmp_path):
@@ -80,7 +80,7 @@ def test_quick_estimate_json_equals_api(home):
     r = runner.invoke(app, ["quick-estimate", "--meters", "2.8", "--json"])
     assert r.exit_code == 0
     assert json.loads(r.output) == json.loads(api.quick_estimate(2.8, home).model_dump_json())
-    assert json.loads(r.output)["mock"] is True and MOCK_BANNER not in r.output
+    assert json.loads(r.output)["warning"] == MOCK_BANNER
 
 
 @pytest.mark.parametrize("meters", ["0", "-2"])
