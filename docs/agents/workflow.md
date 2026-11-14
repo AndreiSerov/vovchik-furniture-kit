@@ -20,7 +20,7 @@ Keep steps 1-3 in one unbroken context, so the spec and tickets build on the gri
 - The `implementer` subagent builds on Sonnet, and the `reviewer` subagent reviews each step independently.
 - Before review, check that the commit hash the implementer reports exists and that `scripts/check` passes on it. A hand-back without a commit goes straight back.
 - Work from any model passes the same `scripts/check` and review. A ticket that fails review goes back to its implementer, at most three times. After the third failed review, stop and report what keeps failing to the user, because the ticket or the environment may be wrong.
-- One ticket, one agent: the implementer takes it with `scripts/claim`, and the main session releases it with `scripts/claim <ticket> --release` once the ticket passes review.
+- One ticket, one agent: the implementer takes it with `scripts/claim`, and the main session releases it with `scripts/claim <ticket> --release` once the ticket passes review, or before it hands the ticket to a fresh implementer, who claims it again.
 
 ## Review rounds
 

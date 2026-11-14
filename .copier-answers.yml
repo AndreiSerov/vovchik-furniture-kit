@@ -1,5 +1,5 @@
 # Written by Copier. Run `copier update` instead of editing this file.
-_commit: v1.0.0-3-g32e7c0c
+_commit: v1.0.0-20-g1a850ca
 _src_path: /Users/andreiserov/Developer/harness-template
 ci: true
 ci_runner: ubuntu-latest
