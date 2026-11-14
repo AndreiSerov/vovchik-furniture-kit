@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from kitchen import formulas
 from kitchen.errors import KitchenError, WorkshopError
 from kitchen.models import Workshop
-from kitchen.parts import TEMPLATES, ModuleDims, TemplateOut, build_module, module_dims
+from kitchen.parts import BACK_PANEL, TEMPLATES, ModuleDims, TemplateOut, build_module, module_dims
 from kitchen.project import ModuleSpec, Project
 
 __all__ = ["Finding", "check_project"]
@@ -165,8 +165,10 @@ def _niches(project: Project, ws: Workshop, dims: dict[str, tuple[ModuleSpec, Mo
                 )
             )
         bare = not TEMPLATES[module.template].carcass
+        # прибор «в столешницу» шире корпуса модуля может быть: его ширина не про нишу корпуса
+        on_top = any(i.in_countertop for i in ws.appliances.items if i.type == a.type)
         limits = (
-            ("ширина", width, d.width if bare else _inner_width(d, ws)),
+            ("ширина", width, None if on_top else d.width if bare else _inner_width(d, ws)),
             ("высота", height, d.height + ws.construction.legs.height if bare else None),
             ("глубина", depth, d.depth),
         )
@@ -283,8 +285,7 @@ def _no_back(built: dict[str, TemplateOut], dims: dict[str, tuple[ModuleSpec, Mo
             message=f"Модуль {label}: без задней стенки — проверьте, что так и задумано.",
         )
         for label, out in built.items()
-        if any(p.name == "боковина" for p in out.parts)
-        and not any(p.name == "задняя стенка" for p in out.parts)
+        if TEMPLATES[dims[label][0].template].carcass and not any(p.name == BACK_PANEL for p in out.parts)
     ]
 
 

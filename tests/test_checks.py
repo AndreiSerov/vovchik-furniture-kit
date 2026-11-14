@@ -154,6 +154,18 @@ def test_niche_passes_with_catalog_dimensions(home):
     assert findings(path, home, "appliance_module") == []
 
 
+def test_countertop_appliance_width_is_not_compared_with_carcass(home):
+    # варочная 770 лежит на столешнице шире корпуса 800 (внутри 768): ширина — не про нишу корпуса
+    hob = {"type": "hob", "width": 770, "height": 50, "depth": 520, "module": "Н1"}
+    path = with_appliances(single(home, "base_door", 800), hob)
+    assert findings(path, home, "niche_too_small") == []
+    # а встраиваемая в корпус техника сравнивается
+    oven = {"type": "oven", "width": 770, "height": 590, "depth": 550, "module": "Н1"}
+    path = with_appliances(single(home, "base_door", 800), oven)
+    [f] = findings(path, home, "niche_too_small")
+    assert (f.value, f.limit) == (770, 768)
+
+
 def test_standard_hob_over_standard_module_is_not_an_error(home):
     # варочная 60 (корпус 590, ниша в столешнице 560×490) над модулем 600 (внутри 568×560)
     for template in ("base_door", "base_drawers"):
@@ -170,11 +182,11 @@ def test_niche_falls_back_to_appliances_yaml(home):
 
 
 def test_niche_of_carcass_module_is_inner_width_and_depth(home):
-    sink = {"type": "sink", "width": 570, "depth": 560, "module": "Н1"}
-    path = with_appliances(single(home, "base_sink"), sink)
+    sink = {"type": "oven", "width": 570, "height": 590, "depth": 560, "module": "Н1"}
+    path = with_appliances(single(home, "base_door"), sink)
     [f] = findings(path, home, "niche_too_small")
     assert (f.value, f.limit) == (570, 568)  # 600 − две боковины по 16
-    path = with_appliances(single(home, "base_sink"), {**sink, "width": 568, "depth": 561})
+    path = with_appliances(single(home, "base_door"), {**sink, "width": 568, "depth": 561})
     [f] = findings(path, home, "niche_too_small")
     assert (f.value, f.limit) == (561, 560)
 
