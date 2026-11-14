@@ -139,7 +139,7 @@ def _cross_refs(w: Workshop) -> list[str]:
     probs = []
     kinds = APPLIANCE_KINDS
     probs += [
-        f"construction.yaml: техника_в_столешницу: неизвестный вид «{kind}» (бриф знает: {', '.join(sorted(kinds))})."
+        f"construction.yaml: техника_в_столешницу: неизвестный вид «{kind}» (допустимы виды: {', '.join(sorted(kinds))})."
         for kind in w.construction.countertop_appliances
         if kind not in kinds
     ]

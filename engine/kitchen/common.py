@@ -100,7 +100,16 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
     hw = ws.hardware.items
     items: list[CommonItem] = []
 
-    lower = _total(_runs(project, ("lower",), with_tall=True))
+    corner = ws.construction.corner_rules.lower_offset
+    dead = sum(  # глухая часть угловых модулей нижних рядов цоколем не закрывается
+        round(m.corner.offset if m.corner.offset is not None else corner)
+        for wall in project.walls
+        for row in wall.rows
+        if row.kind == "lower"
+        for m in row.modules
+        if m.corner
+    )
+    lower = _total(_runs(project, ("lower",), with_tall=True)) - dead
     n = _pieces(lower, rules.plinth.piece_length, reserve)
     items.append(
         CommonItem(
@@ -110,7 +119,7 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
             quantity=n,
             unit="шт",
             length_mm=lower,
-            basis=f"фронт нижних рядов {lower} мм + запас {percent}, штуки по {rules.plinth.piece_length} мм",
+            basis=f"фронт нижних рядов {lower} мм (без глухой части углов {dead} мм) + запас {percent}, штуки по {rules.plinth.piece_length} мм",
         )
     )
     upper_runs = _runs(project, ("upper",), with_tall=False)
@@ -147,10 +156,10 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
                 kind="led",
                 item=led.profile,
                 name=_named(hw, led.profile),
-                quantity=_ceil(meters),
+                quantity=_ceil(meters / led.meter_rounding) * led.meter_rounding,
                 unit="м",
                 length_mm=upper,
-                basis=f"верхние ряды {upper} мм + запас {percent}, вверх до целого метра",
+                basis=f"верхние ряды {upper} мм + запас {percent}, вверх до кратного {led.meter_rounding} м",
             )
         )
         items.append(

@@ -215,8 +215,20 @@ def _render_source(src: api.PartsSource) -> str:
     return f"{head}; {brief}"
 
 
+def _plural(n: int, forms: tuple[str, str, str]) -> str:
+    """«1 ошибка», «2 ошибки», «5 ошибок»."""
+    if n % 100 in range(11, 15):
+        return f"{n} {forms[2]}"
+    return f"{n} {forms[0] if n % 10 == 1 else forms[1] if n % 10 in (2, 3, 4) else forms[2]}"
+
+
 def _render_parts(r: api.PartsResult) -> str:
-    lines = [f"Детали проекта {r.order}:", _render_source(r.source)]
+    errors = sum(f.level == "error" for f in r.findings)
+    summary = (
+        f"Проверки: {_plural(errors, ('ошибка', 'ошибки', 'ошибок'))}, "
+        f"{_plural(len(r.findings) - errors, ('предупреждение', 'предупреждения', 'предупреждений'))}"
+    )
+    lines = [f"Детали проекта {r.order}:", _render_source(r.source), summary]
     for m in r.modules:
         lines.append(f"  Модуль {m.module} ({m.template}) — {len(m.parts)} дет.")
         for p in m.parts:

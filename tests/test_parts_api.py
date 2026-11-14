@@ -5,7 +5,7 @@ import pytest
 from kitchen import api
 from kitchen.errors import KitchenError, OrderError, WorkshopError
 
-from tests.conftest import NEW_FIELDS
+from tests.conftest import FIELDS_NOT_IN_GOLDEN
 
 GOLDEN = Path(__file__).resolve().parent / "golden" / "base_door_600.json"
 
@@ -15,7 +15,7 @@ def test_golden_base_door_600(home, base_door_project):
     result = api.parts_from_project(base_door_project, home)
     expected = json.loads(GOLDEN.read_text(encoding="utf-8"))
     # площадь есть только у фасадов: у остальных деталей area_m2 пуст и в эталон не входит
-    assert result.model_dump(exclude=NEW_FIELDS, exclude_none=True) == expected
+    assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
 
 
 def test_mock_flag_on_result(home, base_door_project):

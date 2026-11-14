@@ -37,14 +37,17 @@ def test_petrov_parts_from_order(petrov):
         "П1", "Н1", "Н2", "Н3", "Н4", "В1", "В2", "В3", "В4", "Н5", "Н6", "В5", "В6",
     ]  # fmt: skip
     parts = all_parts(result)
-    assert len(parts) == 102
+    assert len(parts) == 100
     ids = [p.id for p in parts]
     assert len(ids) == len(set(ids))  # маркировки уникальны во всём заказе
     for p in parts:
         assert p.position is not None and p.orientation is not None, p.id
         assert {p.orientation.length, p.orientation.width, p.orientation.thickness} == {"x", "y", "z"}, p.id
     assert result.edges["edge_08_white"].purchase_m == 50.9
-    assert result.hardware["hanger_camar807"] == 12
+    hw = result.hardware
+    assert (hw["aventos_hks"], hw["bin_2sec"]) == (2, 1)  # подъёмники В1 и В5, ведро Н5 из ТЗ
+    assert (hw["hinge_71B3550"], hw["plate_173L6100"], hw["handle_profile"]) == (20, 20, 17)
+    assert (hw["hanger_camar807"], hw["screw_3_5x16"]) == (12, 330)
 
 
 def test_source_names_version_and_brief(petrov):
@@ -106,12 +109,12 @@ def common(result):
 
 
 def test_petrov_common_items(petrov):
-    """Руками по правилам МОК: нижний фронт 2800 + 1200 = 4000 мм, верхние ряды 2200 + 1200 = 3400 мм,
-    запас на стыки 5%: цоколь 4200 мм → 2 штуки по 4 м; шина 3570 мм → 2 по 2 м; LED 3.57 → 4 м,
+    """Руками по правилам МОК: нижний фронт 2800 + 1200 − угловое смещение 600 = 3400 мм, верхние ряды 2200 + 1200 = 3400 мм,
+    запас на стыки 5%: цоколь 3570 мм → 1 штука 4 м; шина 3570 мм → 2 по 2 м; LED 3.57 → 4 м,
     блок питания 1 (5 м на блок); столешница: куски 2200 и 1200 мм с пропилом 4 мм влезают в один лист 4100."""
     c = common(api.parts_from_order(ORDER, petrov))
     assert list(c) == ["plinth", "rail", "hangers", "led", "led_power_supply", "countertop"]
-    assert (c["plinth"].item, c["plinth"].quantity, c["plinth"].length_mm) == ("plinth_100", 2, 4000)
+    assert (c["plinth"].item, c["plinth"].quantity, c["plinth"].length_mm) == ("plinth_100", 1, 3400)
     assert (c["rail"].item, c["rail"].quantity, c["rail"].length_mm) == ("rail_2000", 2, 3400)
     assert (c["hangers"].item, c["hangers"].quantity, c["hangers"].in_hardware) == (
         "hanger_camar807",
@@ -157,10 +160,24 @@ def test_countertop_longer_than_sheet_is_split_and_packed(home):
 
 def test_common_rules_come_from_workshop(home):
     path = home / "workshop/construction.yaml"
-    path.write_text(path.read_text().replace("запас_на_стыки: 0.05", "запас_на_стыки: 0"))
+    text = path.read_text()
+    path.write_text(text.replace("запас_на_стыки: 0.05", "запас_на_стыки: 0.2"))
     c = common(api.parts_from_project(FIXTURES / "petrov_project.json", home))
-    assert c["plinth"].quantity == 1  # ровно 4000 мм = одна штука
-    assert c["led"].quantity == 4  # 3.4 м вверх до целого метра
+    assert c["plinth"].quantity == 2  # 3400 × 1.2 = 4080 мм > одной штуки
+    path.write_text(text.replace("смещение_нижнего: 600", "смещение_нижнего: 500"))
+    c = common(api.parts_from_project(FIXTURES / "petrov_project.json", home))
+    assert c["plinth"].length_mm == 3500  # угловое смещение — из мастерской, а не из кода
+    path.write_text(text.replace("округление_метров: 1", "округление_метров: 5"))
+    c = common(api.parts_from_project(FIXTURES / "petrov_project.json", home))
+    assert c["led"].quantity == 5  # 3.57 м вверх до кратного 5
+
+
+def test_corner_offset_of_module_overrides_workshop(home):
+    project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
+    project["walls"][0]["rows"][0]["modules"][4]["corner"]["offset"] = 450
+    path = home / "p.json"
+    path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    assert common(api.parts_from_project(path, home))["plinth"].length_mm == 3550
 
 
 def test_workshop_rejects_unknown_common_item_id(home):

@@ -55,7 +55,11 @@ def test_parts_order_contract(home):
     lines = t.output.strip().splitlines()
     assert lines[0] == MOCK_BANNER and lines[-1] == MOCK_BANNER
     assert "версия 1" in t.output and "бриф №1" in t.output
-    assert "Н5: без задней стенки" in t.output  # находка проверок
+    # находка проверок — строка списка, а не подстрока предупреждения шаблона («Н5: без задней стенки»)
+    assert any(line.startswith("  [предупреждение] Модуль Н5: без задней стенки") for line in lines)
+    summary = "Проверки: 0 ошибок, 3 предупреждения"
+    assert summary in lines
+    assert lines.index(summary) < next(i for i, line in enumerate(lines) if "Модуль П1" in line)
     assert "Общие позиции" in t.output and "plinth_100" in t.output and "RAL 7044" in t.output
 
     f = runner.invoke(app, ["parts", "--project", str(fixtures / "petrov_project.json")])

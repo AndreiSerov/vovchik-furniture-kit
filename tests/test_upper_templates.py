@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from kitchen import api
 
-from tests.conftest import NEW_FIELDS
+from tests.conftest import FIELDS_NOT_IN_GOLDEN
 
 
 def upper_project(path, template, width=600, contents=None):
@@ -93,7 +93,7 @@ def test_upper_manual_golden(home, base_door_project, template, width, contents)
     expected = json.loads(
         (Path(__file__).parent / f"golden/{template}_{width}.json").read_text(encoding="utf-8")
     )
-    assert result.model_dump(exclude=NEW_FIELDS, exclude_none=True) == expected
+    assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
 
 
 def test_hood_rejects_too_narrow_front_rail(home, base_door_project):

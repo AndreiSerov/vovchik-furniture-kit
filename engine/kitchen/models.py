@@ -390,6 +390,7 @@ class LedRules(Section):
     profile: str = _f("профиль")
     power_supply: str = _f("блок_питания")
     meters_per_supply: Annotated[Num, Field(gt=0)] = _f("метров_на_блок")
+    meter_rounding: Annotated[Int, Field(gt=0)] = _f("округление_метров")  # вверх до кратного N метров
 
 
 class CountertopRules(Section):
