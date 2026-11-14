@@ -269,7 +269,7 @@ def test_all_findings_come_at_once(home):
         )
     ]
     codes = {f.code for f in api.check_project(make_project(home / "p.json", walls), home).findings}
-    assert codes == {"row_sum", "module_build", "drawer_depth"}
+    assert codes == {"row_sum", "module_build", "drawer_depth", "brief_missing"}
 
 
 # --- импорт ------------------------------------------------------------------------

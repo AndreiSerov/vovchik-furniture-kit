@@ -1,0 +1,96 @@
+{
+  "client": {
+    "name": {
+      "value": "Петров",
+      "source": "client"
+    },
+    "phone": {
+      "value": "+7 900 000-00-00",
+      "source": "client"
+    },
+    "address": {
+      "value": "Москва",
+      "source": "client"
+    }
+  },
+  "room": {
+    "shape": {
+      "value": "corner",
+      "source": "client"
+    },
+    "walls": {
+      "value": [
+        {
+          "name": "A",
+          "length_mm": 2800
+        },
+        {
+          "name": "Б",
+          "length_mm": 1800
+        }
+      ],
+      "source": "client"
+    },
+    "ceiling_height_mm": {
+      "value": 2700,
+      "source": "client"
+    }
+  },
+  "appliances": {
+    "items": {
+      "value": [
+        {
+          "type": "oven",
+          "built_in": true,
+          "width_mm": 600,
+          "location": "в высоком шкафу",
+          "who_buys": "client"
+        },
+        {
+          "type": "microwave",
+          "built_in": true,
+          "width_mm": 600,
+          "location": "в высоком шкафу",
+          "who_buys": "client"
+        },
+        {
+          "type": "hob",
+          "built_in": true,
+          "fuel": "induction",
+          "width_mm": 600,
+          "who_buys": "client"
+        },
+        {
+          "type": "dishwasher",
+          "built_in": true,
+          "width_mm": 450,
+          "who_buys": "client"
+        },
+        {
+          "type": "sink",
+          "built_in": true,
+          "location": "на стене Б",
+          "who_buys": "client"
+        }
+      ],
+      "source": "client"
+    },
+    "hood": {
+      "value": {
+        "kind": "built_in",
+        "width_mm": 600
+      },
+      "source": "client"
+    }
+  },
+  "style": {
+    "colors": {
+      "value": "низ RAL 7044, верх RAL 9003",
+      "source": "client"
+    },
+    "fronts_finish": {
+      "value": "matte",
+      "source": "client"
+    }
+  }
+}

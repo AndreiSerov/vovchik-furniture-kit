@@ -385,6 +385,9 @@ class Construction(Section):
     tall_rules: TallRules = _f("правила_пенала")
     upper_rules: UpperRules = _f("верхние_модули")
     corner_rules: CornerRules = _f("угловые_модули")
+    # ДОБАВЛЕНО (МОК): виды техники, которым нужен модуль, и тех, что лежат на столешнице
+    module_appliances: list[str] = _f("техника_в_модуле")
+    countertop_appliances: list[str] = _f("техника_в_столешницу")
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
 
@@ -552,8 +555,6 @@ class ApplianceItem(Section):
     niche_width: Int = Field(alias="ниша_ширина", gt=0)
     niche_height: Int = Field(alias="ниша_высота", gt=0)
     niche_depth: Int = Field(alias="ниша_глубина", gt=0)
-    # ДОБАВЛЕНО (МОК): прибор лежит на столешнице (варочная, мойка), его корпус не стоит в нише модуля
-    in_countertop: bool = Field(default=False, alias="в_столешницу")
 
 
 class Appliances(Section):

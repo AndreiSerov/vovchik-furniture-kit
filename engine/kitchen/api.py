@@ -143,6 +143,7 @@ class ImportResult(Result):
     previous_version: int | None
     content_hash: str
     warnings: list[str] = Field(default_factory=list)
+    brief_id: int | None = None  # бриф, с которым сверена техника
 
 
 class ExportResult(Result):
@@ -261,15 +262,22 @@ class ValidationContext:
     order_number: str  # ГГГГ-NNN
     workshop: Workshop | None = None
     workshop_problems: list[str] = field(default_factory=list)  # почему мастерская не загрузилась
+    brief: dict | None = None  # последний бриф заказа (техника сверяется с ним)
+    brief_id: int | None = None
 
 
 @dataclass
 class ValidationResult:
     errors: list[str] = field(default_factory=list)  # отклоняют импорт
     warnings: list[str] = field(default_factory=list)  # пишутся в журнал как note
+    brief_id: int | None = None  # какой бриф использован при проверке
 
 
 Validator = Callable[[Any, ValidationContext], ValidationResult]
+
+
+def _latest_brief(conn: sqlite3.Connection, pk: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM briefs WHERE order_id = ? ORDER BY id DESC LIMIT 1", (pk,)).fetchone()
 
 
 def _same_order(value: Any, ctx: ValidationContext) -> bool:
@@ -314,10 +322,11 @@ def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
                 *ctx.workshop_problems,
             ]
         )
-    findings = run_checks(project, ctx.workshop)
+    findings = run_checks(project, ctx.workshop, ctx.brief)
     return ValidationResult(
         errors=[f.message for f in findings if f.level == "error"],
         warnings=[f.message for f in findings if f.level == "warning"],
+        brief_id=ctx.brief_id,
     )
 
 
@@ -358,7 +367,15 @@ def import_project(
         loaded = load(home)
         mock = _mock_of(loaded)
         current = _current_version(o.conn, o.pk)
-        ctx = ValidationContext(o.ref, o.row["number"], loaded.workshop, loaded.problems)
+        latest = _latest_brief(o.conn, o.pk)
+        ctx = ValidationContext(
+            o.ref,
+            o.row["number"],
+            loaded.workshop,
+            loaded.problems,
+            json.loads(latest["data"]) if latest else None,
+            latest["id"] if latest else None,
+        )
         checked = validate(data, ctx)
         if checked.errors:
             tail = "Проект отклонён, текущая версия не изменена." if current else "Проект отклонён."
@@ -377,6 +394,7 @@ def import_project(
                 previous_version=prev,
                 content_hash=digest,
                 warnings=checked.warnings,
+                brief_id=checked.brief_id,
                 **mock,
             )
         version = (prev or 0) + 1
@@ -387,6 +405,14 @@ def import_project(
         )
         for warning in checked.warnings:
             _insert_log(o.conn, o.pk, "note", f"Предупреждение при импорте: {warning}", version)
+        if checked.brief_id is not None:
+            _insert_log(
+                o.conn,
+                o.pk,
+                "note",
+                f"Проверки проекта: техника сверена с брифом №{checked.brief_id}",
+                version,
+            )
         o.changed = True
         return ImportResult(
             order=o.ref,
@@ -395,6 +421,7 @@ def import_project(
             previous_version=prev,
             content_hash=digest,
             warnings=checked.warnings,
+            brief_id=checked.brief_id,
             **mock,
         )
 
@@ -771,6 +798,8 @@ class CheckResult(Result):
 
     order: str
     findings: list[Finding]
+    brief_id: int | None = None  # какой бриф использован (последний сохранённый заказа)
+    brief_saved_at: str | None = None
 
     @property
     def errors(self) -> list[Finding]:
@@ -786,9 +815,18 @@ def check_project(path: Path, home: Path | None = None) -> CheckResult:
     home = home or resolve_home()
     project = parse_project(_read_json(Path(path), "Файл проекта"))
     workshop = load_workshop(home)
+    latest = None
+    if store.db_path(home).exists():
+        with store.connect(home) as conn:
+            try:
+                latest = _latest_brief(conn, store.find_order(conn, project.order)["id"])
+            except OrderError:  # заказа ещё нет: проект проверяют как черновик
+                latest = None
     return CheckResult(
         order=project.order,
-        findings=run_checks(project, workshop),
+        findings=run_checks(project, workshop, json.loads(latest["data"]) if latest else None),
+        brief_id=latest["id"] if latest else None,
+        brief_saved_at=latest["created_at"] if latest else None,
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,
     )

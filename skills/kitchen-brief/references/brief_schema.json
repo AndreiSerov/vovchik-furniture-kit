@@ -229,7 +229,9 @@
             "brand": "string: бренд, если назван без модели",
             "model": "string: модель (без неё встраиваемую технику нельзя пускать в производство)",
             "width_mm": "integer",
-            "dimensions": "string: Ш×В×Г, если известно",
+            "height_mm": "integer",
+            "depth_mm": "integer",
+            "dimensions": "string: Ш×В×Г — только в старых брифах, новые пишут width_mm, height_mm, depth_mm",
             "location": "string: где стоит, словами клиента (напр. «у окна», «в высоком шкафу», «на острове»)",
             "who_buys": "enum: client, salon",
             "keep_existing": "boolean: остаётся своя, уже стоит"
@@ -259,7 +261,9 @@
             "kind": "enum: built_in, telescopic, wall, island, worktop, none",
             "exhaust": "enum: duct (отвод в вентканал), recirculation",
             "model": "string",
-            "width_mm": "integer"
+            "width_mm": "integer",
+            "height_mm": "integer",
+            "depth_mm": "integer"
           },
           "required": true,
           "ask": "now"

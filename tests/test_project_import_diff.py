@@ -64,7 +64,7 @@ def project():
 def schema_import(order, path):
     """Импорт без проверок конструкции (1.6): фикстура ниже — про схему и diff, не про раскрой.
     Схема и прочие проверки обёртки работают как обычно; подменяются только проверки конструкции."""
-    with patch.object(api, "run_checks", lambda project, workshop: []):
+    with patch.object(api, "run_checks", lambda *args: []):
         return api.import_project(order, path)
 
 
