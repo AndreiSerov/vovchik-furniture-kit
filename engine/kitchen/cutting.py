@@ -193,13 +193,7 @@ def cut_order(placements: list[Placement], size: tuple[int, int], kerf: int, tri
         for e in sorted({edge(r) for r in items}):
             if e >= hi:
                 continue
-            if (
-                all(edge(r) <= e or begin(r) >= e + kerf for r in items)
-                and any(edge(r) <= e for r in items)
-                and any(
-                    begin(r) >= e + kerf for r in items
-                )  # справа от реза есть деталь (край куска мог не стянуться)
-            ):
+            if all(edge(r) <= e or begin(r) >= e + kerf for r in items) and any(edge(r) <= e for r in items):
                 return e
         return None
 

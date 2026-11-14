@@ -254,9 +254,12 @@ def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
 
 # --- выводы -----------------------------------------------------------------
 
+OutputKind = Literal["cutting"]  # виды выводов; этапы 2-4 добавляют свои
+CUTTING: OutputKind = "cutting"
+
 
 def register_output(
-    conn: sqlite3.Connection, order_pk: int, kind: str, path: str, source_version: int
+    conn: sqlite3.Connection, order_pk: int, kind: OutputKind, path: str, source_version: int
 ) -> None:
     """Записывает вывод с версией-источником. Тот же файл пересчитывают на месте: прежняя запись заменяется."""
     conn.execute("DELETE FROM outputs WHERE order_id = ? AND path = ?", (order_pk, path))

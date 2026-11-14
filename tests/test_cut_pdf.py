@@ -1,12 +1,13 @@
 """Карта раскроя PDF (2.2) и учёт выводов: через `kitchen.api`, PDF читаем обратно `pypdf`."""
 
 import json
+from datetime import date
 from pathlib import Path
 
 from kitchen import api
 from kitchen.cutting import Cut, MaterialCut, Placement, SheetCut
-from kitchen.cutting_pdf import cut_label_boxes, place_lines, write_cutting_map
-from kitchen.pdf import FONT, FONT_BOLD, Area, register_fonts
+from kitchen.cutting_pdf import place_lines, scheme_labels, scheme_scale, write_cutting_map
+from kitchen.pdf import FONT, FONT_BOLD, Area, page_area, register_fonts
 from pypdf import PdfReader
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
@@ -89,15 +90,43 @@ def test_every_part_has_a_numbered_line_in_the_list(home):
             assert f"{i}. {pl.part} {pl.w}×{pl.h}" in text
 
 
-def test_cut_number_labels_do_not_overlap(home):
+def test_cut_numbers_overlap_neither_each_other_nor_part_labels_at_real_scale(home):
     petrov(home)
     r = api.cut_and_save("petrov", home)
+    k = scheme_scale(page_area().w, (2800, 2070))
+    assert 0.18 < k < 0.2  # реальный масштаб страницы, а не придуманный
     for m, s in sheets_of(r):
-        boxes = cut_label_boxes(m.sheet_size, s.cuts, r.kerf, 0.06)
-        assert {b[0] for b in boxes} == {c.number for c in s.cuts}
-        for i, a in enumerate(boxes):
-            for b in boxes[i + 1 :]:
-                assert a[3] <= b[1] or b[3] <= a[1] or a[4] <= b[2] or b[4] <= a[2], (s.number, a, b)
+        assert scheme_scale(page_area().w, m.sheet_size) == k
+        parts, cuts = scheme_labels(m.sheet_size, s, r.kerf, k)
+        assert {n for n, _ in cuts} == {c.number for c in s.cuts}
+        assert [p.n for p in parts] == list(range(1, len(s.placements) + 1))
+
+        def clear(a, b):
+            return a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1]
+
+        for i, (_, a) in enumerate(cuts):
+            assert all(clear(a, b) for _, b in cuts[i + 1 :]), (s.number, a)
+            assert all(clear(a, p.box) for p in parts), (s.number, a)
+        for p, pl in zip(parts, s.placements, strict=True):
+            # подпись — одна из трёх допустимых целиком, а не обрезок
+            assert p.text in (f"{pl.part} {pl.w}×{pl.h}", pl.part, str(p.n)), p
+
+
+def test_label_is_shortened_when_cut_number_would_cover_it():
+    """Короткий рез у середины подписи: свободного места для номера нет, подпись детали укорачивается."""
+    sheet = SheetCut(
+        number=1,
+        placements=[Placement(part="Деталь-длинная", x=10, y=10, w=300, h=40, rotated=False)],
+        cuts=[Cut(number=7, direction="vertical", position=122, start=26, end=34, length=8, kind="separate")],
+        parts_area_m2=0.01,
+        utilization=0.1,
+    )
+    parts, cuts = scheme_labels((400, 100), sheet, 4, 1.0)
+    (label,), ((_, box),) = parts, cuts
+    assert label.text != "Деталь-длинная 300×40"  # полная подпись закрыта линией реза и номером
+    assert (
+        box[2] <= label.box[0] or label.box[2] <= box[0] or box[3] <= label.box[1] or label.box[3] <= box[1]
+    )
 
 
 def big_sheet(n=130):
@@ -158,7 +187,7 @@ def test_huge_sheet_continues_on_extra_pages_with_all_text(tmp_path):
         order=ORDER,
         version=1,
         mock=False,
-        on=__import__("datetime").date(2026, 11, 14),
+        on=date(2026, 11, 14),
     )
     pages = [p.extract_text() for p in PdfReader(path).pages]
     assert len(pages) >= 2

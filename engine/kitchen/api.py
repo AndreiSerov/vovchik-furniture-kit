@@ -892,7 +892,7 @@ def parts_from_order(order: str, home: Path | None = None) -> PartsResult:
 # --- раскрой ------------------------------------------------------------------
 
 
-OutputKind = Literal["cutting"]  # виды выводов; этапы 2-4 добавляют свои
+OutputKind = store.OutputKind
 
 
 class OutputInfo(BaseModel):
@@ -902,9 +902,8 @@ class OutputInfo(BaseModel):
     path: str  # относительно KITCHEN_HOME, как в БД
     file: str  # полный путь
     source_version: int
-    created_at: str | None = (
-        None  # время записи в БД; в результате команды не заполняется (вывод детерминирован)
-    )
+    # Время записи в БД. В результате команды не заполняется: вывод детерминирован.
+    created_at: str | None = None
 
 
 class CutResult(Result):
@@ -990,9 +989,9 @@ def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -
         on=on or store.today(),
     )
     with _open_order(order, home) as o:
-        store.register_output(o.conn, o.pk, "cutting", rel, version)
+        store.register_output(o.conn, o.pk, store.CUTTING, rel, version)
         o.changed = True
-    output = OutputInfo(kind="cutting", path=rel, file=str(home / rel), source_version=version)
+    output = OutputInfo(kind=store.CUTTING, path=rel, file=str(home / rel), source_version=version)
     return result.model_copy(update={"output": output})
 
 
