@@ -49,6 +49,12 @@ def _num(x: float) -> int | float:
     return int(x) if float(x).is_integer() else x
 
 
+def _both_rows(module: ModuleSpec) -> bool:
+    """Модуль записан в одном ряду стены и занимает оба — свойство шаблона в реестре."""
+    template = TEMPLATES.get(module.template)
+    return template is not None and template.both_rows
+
+
 def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
     """Ширины модулей ряда + угловые смещения с соседней стены (+ пенал из другого ряда) = длина стены."""
     rules = ws.construction.corner_rules
@@ -60,7 +66,7 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
     for wall in project.walls:
         for row in wall.rows:
             for m in row.modules:
-                if m.template == "tall_oven":
+                if _both_rows(m):
                     tall_widths[wall.label] = tall_widths.get(wall.label, 0) + m.width
                 if m.corner is None:
                     continue
@@ -80,7 +86,7 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
     for wall in project.walls:
         for row in wall.rows:
             total = sum(m.width for m in row.modules) + extra.get((wall.label, row.kind), 0)
-            if not any(m.template == "tall_oven" for m in row.modules):
+            if not any(_both_rows(m) for m in row.modules):
                 total += tall_widths.get(wall.label, 0)
             if abs(total - wall.length) > rules.wall_tolerance:
                 found.append(

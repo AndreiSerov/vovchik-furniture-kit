@@ -46,7 +46,7 @@ def _runs(project: Project, kinds: Iterable[str], with_tall: bool) -> list[tuple
                 continue
             current: list[int] = []
             for m in row.modules:
-                tall = TEMPLATES[m.template].row_kind == "tall" if m.template in TEMPLATES else False
+                tall = TEMPLATES[m.template].both_rows if m.template in TEMPLATES else False
                 if tall and not with_tall:
                     if current:
                         runs.append((wall.label, current))
