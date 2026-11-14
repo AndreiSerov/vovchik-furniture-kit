@@ -27,6 +27,7 @@ from kitchen.errors import InputError, OrderError
 from kitchen.models import Workshop
 from kitchen.parts import EdgeTotals, ModuleParts, Part, compute_parts
 from kitchen.project import Project, parse_project
+from kitchen.purchase import PurchaseShop, build_purchase
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
@@ -50,6 +51,8 @@ __all__ = [
     "OutputInfo",
     "PartsResult",
     "PartsSource",
+    "ProductionResult",
+    "PurchaseResult",
     "QuickEstimate",
     "StatusResult",
     "ValidationContext",
@@ -75,6 +78,9 @@ __all__ = [
     "order_show",
     "parts_from_order",
     "parts_from_project",
+    "production_and_save",
+    "purchase_and_save",
+    "purchase_from_order",
     "quick_estimate",
     "resolve_home",
     "status",
@@ -811,9 +817,14 @@ def _project_hash(data: dict) -> str:
 
 
 def _build_parts(
-    project: Project, home: Path, source: PartsSource, brief: sqlite3.Row | None, extra_warnings: list[str]
+    project: Project,
+    home: Path,
+    source: PartsSource,
+    brief: sqlite3.Row | None,
+    extra_warnings: list[str],
+    workshop: Workshop | None = None,
 ) -> PartsResult:
-    workshop = load_workshop(home)
+    workshop = workshop or load_workshop(home)
     computed = compute_parts(project, workshop)
     source = source.model_copy(
         update={
@@ -928,9 +939,14 @@ class CutResult(Result):
 
 
 def _build_cut(
-    project: Project, home: Path, source: PartsSource, brief: sqlite3.Row | None, extra: list[str]
+    project: Project,
+    home: Path,
+    source: PartsSource,
+    brief: sqlite3.Row | None,
+    extra: list[str],
+    workshop: Workshop | None = None,
 ) -> CutResult:
-    workshop = load_workshop(home)
+    workshop = workshop or load_workshop(home)
     computed = compute_parts(project, workshop)
     saw = workshop.equipment.saw
     return CutResult(
@@ -977,57 +993,76 @@ def cut_from_order(order: str, home: Path | None = None) -> CutResult:
 CUTTING_PDF = "cutting-map.pdf"
 
 
-def _save_output(
-    home: Path, source: PartsSource, kind: OutputKind, filename: str, write_pdf: Callable[[Path], None]
-) -> OutputInfo:
-    """Сохраняет файл и регистрирует его под блокировкой, восстанавливая прежний при сбое БД."""
-    version = source.version
-    if version is None:
+def _output_info(home: Path, source: PartsSource, kind: OutputKind, filename: str) -> OutputInfo:
+    if source.version is None:
         raise OrderError(f"У заказа {source.order} нет версии проекта.")
     rel = f"orders/{source.order}/out/{filename}"
-    path = home / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=".output-", dir=path.parent))
-    backup = staging / "previous.pdf"
-    installed = False
+    return OutputInfo(kind=kind, path=rel, file=str(home / rel), source_version=source.version)
+
+
+def _save_outputs(
+    home: Path, source: PartsSource, files: list[tuple[OutputInfo, Callable[[Path], None]]]
+) -> None:
+    """Регистрирует и устанавливает комплект файлов под одной блокировкой; сбой восстанавливает старый комплект."""
+    if source.version is None:
+        raise OrderError(f"У заказа {source.order} нет версии проекта.")
+    directory = home / "orders" / source.order / "out"
+    directory.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".output-", dir=directory))
+    installed: list[tuple[Path, Path | None]] = []
     preserve_staging = False
     try:
-        new_pdf = staging / filename
-        write_pdf(new_pdf)
+        for info, write in files:
+            write(staging / Path(info.file).name)
         with store.connect(home) as conn:
-            # Блокировка удерживается до завершения commit или восстановления прежнего PDF.
             conn.execute("BEGIN IMMEDIATE")
             try:
                 row = store.find_order(conn, source.order)
                 current = _current_version(conn, row["id"])
-                if current is None or current["version"] != version:
+                if current is None or current["version"] != source.version:
                     raise OrderError("Изменилась версия проекта во время расчёта. Повторите команду.")
-                had_previous = path.exists()
-                if had_previous:
-                    shutil.copy2(path, backup)
-                store.register_output(conn, row["id"], kind, rel, version)
-                new_pdf.replace(path)
-                installed = True
+                for index, (info, _) in enumerate(files):
+                    path = Path(info.file)
+                    backup_name = "previous.pdf" if index == 0 else f"backup-{index}"
+                    backup = staging / backup_name if path.exists() else None
+                    if backup is not None:
+                        shutil.copy2(path, backup)
+                    store.register_output(conn, row["id"], info.kind, info.path, source.version)
+                    (staging / path.name).replace(path)
+                    installed.append((path, backup))
                 conn.execute("UPDATE orders SET updated_at = ? WHERE id = ?", (store.now(), row["id"]))
                 conn.commit()
-            except BaseException:
+            except BaseException as error:
+                failures = []
                 try:
-                    if installed:
-                        if had_previous:
-                            backup.replace(path)
-                        else:
-                            path.unlink(missing_ok=True)
-                except BaseException:
-                    # Не удалять резервную копию, если восстановление тоже не удалось.
-                    preserve_staging = True
-                    raise
+                    for path, backup in reversed(installed):
+                        try:
+                            if backup is not None:
+                                backup.replace(path)
+                            else:
+                                path.unlink(missing_ok=True)
+                        except BaseException as restore_error:  # noqa: BLE001 — сохранить резерв и продолжить откат при прерывании
+                            failures.append(f"{path}: {restore_error}")
                 finally:
                     conn.rollback()
+                if failures:
+                    preserve_staging = True
+                    raise OrderError(
+                        f"Не удалось восстановить файлы после ошибки: {'; '.join(failures)}. "
+                        f"Резервные копии сохранены в {staging}. Первоначальная ошибка: {error}"
+                    ) from error
                 raise
     finally:
         if not preserve_staging:
             shutil.rmtree(staging, ignore_errors=True)
-    return OutputInfo(kind=kind, path=rel, file=str(path), source_version=version)
+
+
+def _save_output(
+    home: Path, source: PartsSource, kind: OutputKind, filename: str, write_pdf: Callable[[Path], None]
+) -> OutputInfo:
+    info = _output_info(home, source, kind, filename)
+    _save_outputs(home, source, [(info, write_pdf)])
+    return info
 
 
 def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -> CutResult:
@@ -1102,6 +1137,161 @@ def edges_and_save(order: str, home: Path | None = None, on: date | None = None)
         ),
     )
     return result.model_copy(update={"output": output})
+
+
+class PurchaseResult(Result):
+    """Позиции закупки с количеством, ценами и суммами по магазинам."""
+
+    source: PartsSource
+    shops: list[PurchaseShop]
+    total: float
+    warnings: list[str]
+    mock_notice: str | None = None
+    outputs: list[OutputInfo] = Field(default_factory=list)
+
+
+def _purchase(project: Project, parts: PartsResult, cut: CutResult, workshop: Workshop) -> PurchaseResult:
+    shops, total = build_purchase(
+        project,
+        workshop,
+        parts.modules,
+        parts.hardware,
+        parts.edges,
+        parts.common,
+        cut.materials,
+        cut.countertop,
+    )
+    return PurchaseResult(
+        source=parts.source,
+        shops=shops,
+        total=total,
+        warnings=parts.warnings,
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+        mock_notice=MOCK_BANNER if parts.mock else None,
+    )
+
+
+def purchase_from_order(order: str, home: Path | None = None) -> PurchaseResult:
+    home = home or resolve_home()
+    project, source, brief, warnings = _order_project(order, home)
+    workshop = load_workshop(home)
+    return _purchase(
+        project,
+        _build_parts(project, home, source, brief, warnings, workshop),
+        _build_cut(project, home, source, brief, warnings, workshop),
+        workshop,
+    )
+
+
+def _purchase_markdown(result: PurchaseResult) -> str:
+    """Телефонная версия закупки: все суммы и количества из единой модели."""
+    lines = []
+    if result.mock_notice:
+        lines += [f"**{result.mock_notice}**", ""]
+    lines += ["# Закупка", "", f"Заказ {result.source.order} · версия проекта {result.source.version}", ""]
+    if result.warnings:
+        lines += ["## Предупреждения", "", *(f"- {warning}" for warning in result.warnings), ""]
+    for shop in result.shops:
+        lines += [f"## {shop.name}", ""]
+        for item in shop.items:
+            details = []
+            if item.needed is not None:
+                details.append(f"нужно {item.needed} {item.needed_unit}")
+            if item.pack_size is not None:
+                details.append(f"в упаковке {item.pack_size} {item.needed_unit}")
+            if item.color:
+                details.append(f"цвет {item.color}")
+            if item.lead_days is not None:
+                details.append(f"срок {item.lead_days} раб. дней")
+            suffix = f" ({', '.join(details)})" if details else ""
+            lines.append(
+                f"- {item.name} [{item.id}]{suffix}: {item.quantity} {item.unit} × "
+                f"{item.unit_price} ₽ = {item.amount:.2f} ₽"
+            )
+        lines += ["", f"**Итого по магазину: {shop.total:.2f} ₽**", ""]
+    lines += [f"**Итого: {result.total:.2f} ₽**", ""]
+    return "\n".join(lines)
+
+
+def _purchase_files(
+    home: Path, result: PurchaseResult
+) -> tuple[PurchaseResult, list[tuple[OutputInfo, Callable]]]:
+    outputs = [
+        _output_info(home, result.source, store.PURCHASE_MD, "purchase.md"),
+        _output_info(home, result.source, store.PURCHASE_JSON, "purchase.json"),
+    ]
+    result = result.model_copy(update={"outputs": outputs})
+    return result, [
+        (outputs[0], lambda path: path.write_text(_purchase_markdown(result), encoding="utf-8")),
+        (outputs[1], lambda path: path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")),
+    ]
+
+
+def purchase_and_save(order: str, home: Path | None = None) -> PurchaseResult:
+    home = home or resolve_home()
+    result, files = _purchase_files(home, purchase_from_order(order, home))
+    _save_outputs(home, result.source, files)
+    return result
+
+
+class ProductionResult(Result):
+    """Все производственные выводы одной версии проекта."""
+
+    cutting: CutResult
+    edging: EdgingResult
+    purchase: PurchaseResult
+    mock_notice: str | None = None
+
+
+def production_and_save(order: str, home: Path | None = None, on: date | None = None) -> ProductionResult:
+    home = home or resolve_home()
+    project, source, brief, warnings = _order_project(order, home)
+    workshop = load_workshop(home)
+    parts = _build_parts(project, home, source, brief, warnings, workshop)
+    cut = _build_cut(project, home, source, brief, warnings, workshop)
+    edging = _edging(parts)
+    purchase, purchase_files = _purchase_files(home, _purchase(project, parts, cut, workshop))
+    cut_output = _output_info(home, source, store.CUTTING, CUTTING_PDF)
+    edging_output = _output_info(home, source, store.EDGING, "edging-map.pdf")
+    day = on or store.today()
+    files = [
+        (
+            cut_output,
+            lambda path: write_cutting_map(
+                path,
+                cut.materials,
+                kerf=cut.kerf,
+                trim=cut.trim,
+                order=source.order,
+                version=source.version,
+                mock=cut.mock,
+                on=day,
+            ),
+        ),
+        (
+            edging_output,
+            lambda path: write_edging_map(
+                path,
+                edging.parts,
+                edging.edges,
+                order=source.order,
+                version=source.version,
+                mock=edging.mock,
+                on=day,
+            ),
+        ),
+        *purchase_files,
+    ]
+    _save_outputs(home, source, files)
+    return ProductionResult(
+        cutting=cut.model_copy(update={"output": cut_output}),
+        edging=edging.model_copy(update={"output": edging_output}),
+        purchase=purchase,
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+        mock_notice=MOCK_BANNER if parts.mock else None,
+    )
 
 
 def list_outputs(order: str, home: Path | None = None) -> list[OutputInfo]:

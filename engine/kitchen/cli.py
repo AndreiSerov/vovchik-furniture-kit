@@ -373,6 +373,83 @@ def cut(
     emit(result, _render_cut, json)
 
 
+def _render_purchase(r: api.PurchaseResult) -> str:
+    lines = ["Закупка:", _render_source(r.source)]
+    for shop in r.shops:
+        lines.append(f"Магазин {shop.name}:")
+        for item in shop.items:
+            details = []
+            if item.needed is not None:
+                details.append(f"нужно {item.needed} {item.needed_unit}")
+            if item.pack_size is not None:
+                details.append(f"в упаковке {item.pack_size} {item.needed_unit}")
+            if item.color:
+                details.append(f"цвет {item.color}")
+            if item.lead_days is not None:
+                details.append(f"срок {item.lead_days} раб. дней")
+            note = f" ({', '.join(details)})" if details else ""
+            lines.append(
+                f"  {item.id} — {item.name}{note}: {item.quantity} {item.unit} × "
+                f"{item.unit_price} ₽ = {item.amount:.2f} ₽"
+            )
+        lines.append(f"  Итого по магазину: {shop.total:.2f} ₽")
+    lines.append(f"Итого: {r.total:.2f} ₽")
+    for output in r.outputs:
+        lines.append(f"Файл: {output.file} (версия проекта {output.source_version})")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("purchase")
+def purchase(order: OrderArg, json: JsonOpt = False) -> None:
+    """Список закупки по магазинам: Markdown и JSON для текущей версии заказа."""
+    try:
+        result = api.purchase_and_save(order)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_purchase, json)
+
+
+def _render_production(r: api.ProductionResult) -> str:
+    lines = ["Производство:", _render_source(r.purchase.source)]
+    for material in r.cutting.materials:
+        lines.append(
+            f"Материал {material.material} — {material.name}: листов {material.sheet_count}, "
+            f"использование {material.utilization:.1%}"
+        )
+    if r.cutting.countertop:
+        top = r.cutting.countertop
+        lines.append(f"Столешница {top.item}: листов {top.sheet_count}")
+    purchase_edges = {
+        item.id: item.quantity for shop in r.purchase.shops for item in shop.items if item.kind == "edge"
+    }
+    for edge_id, edge in r.edging.edges.items():
+        lines.append(
+            f"Кромка {edge_id}: чистая {edge.clean_m} м, с припуском "
+            f"{edge.with_allowance_m} м, к закупке {purchase_edges[edge_id]} м"
+        )
+    for shop in r.purchase.shops:
+        lines.append(f"Магазин {shop.name}: {shop.total:.2f} ₽")
+    lines.append(f"Итого закупка: {r.purchase.total:.2f} ₽")
+    for output in (r.cutting.output, r.edging.output, *r.purchase.outputs):
+        if output:
+            lines.append(f"Файл: {output.file} (версия проекта {output.source_version})")
+    if r.purchase.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.purchase.warnings))
+    return "\n".join(lines)
+
+
+@app.command("production")
+def production(order: OrderArg, json: JsonOpt = False) -> None:
+    """Пересчитать раскрой, кромление и закупку текущей версии заказа."""
+    try:
+        result = api.production_and_save(order)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_production, json)
+
+
 # --- бриф и быстрая вилка ----------------------------------------------------
 
 brief_app = typer.Typer(help="Бриф заказа: сохранить, показать.", no_args_is_help=True)
