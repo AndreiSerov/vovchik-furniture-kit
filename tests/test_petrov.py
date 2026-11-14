@@ -172,6 +172,68 @@ def test_common_rules_come_from_workshop(home):
     assert c["led"].quantity == 5  # 3.57 м вверх до кратного 5
 
 
+def test_tall_in_upper_row_gives_same_plinth_and_countertop_as_in_lower_row(home):
+    # Пенал описывается один раз и входит в оба ряда: цоколь 3400 мм (2800 + 1200 - 600 глухой части угла)
+    # и куски столешницы 2200 и 1200 мм не зависят от того, в каком ряду описан П1.
+    project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
+    rows = {row["kind"]: row for row in project["walls"][0]["rows"]}
+    assert rows["lower"]["modules"][0]["label"] == "П1"
+    rows["upper"]["modules"].insert(0, rows["lower"]["modules"].pop(0))
+    path = home / "p.json"
+    path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    result = api.parts_from_project(path, home)
+    c = common(result)
+    assert c["plinth"].length_mm == 3400
+    assert c["rail"].length_mm == 3400
+    assert c["countertop"].length_mm == 3400
+    assert "2200" in c["countertop"].basis and "1200" in c["countertop"].basis
+
+
+def test_tall_in_upper_row_breaks_countertop_at_its_place(home):
+    # Н1 600 | П1 600 | Н2 400 на стене 1600: столешница двумя кусками 600 и 400 мм, цоколь 1600 мм.
+    project = {
+        "order": ORDER,
+        "ceiling_height": 2700,
+        "walls": [
+            {
+                "label": "A",
+                "length": 1600,
+                "rows": [
+                    {
+                        "kind": "lower",
+                        "modules": [
+                            {"label": "Н1", "template": "base_door", "width": 600},
+                            {"label": "Н2", "template": "base_door", "width": 400},
+                        ],
+                    },
+                    {
+                        "kind": "upper",
+                        "modules": [
+                            {"label": "В1", "template": "wall_door", "width": 600},
+                            {"label": "П1", "template": "tall_oven", "width": 600},
+                            {"label": "В2", "template": "wall_door", "width": 400},
+                        ],
+                    },
+                ],
+            }
+        ],
+        "materials": {
+            "body": "ldsp_16_white",
+            "facades_lower": "mdf_enamel_matt",
+            "facades_upper": "mdf_enamel_matt",
+            "handles": "handle_profile",
+            "countertop": "top_38_marble",
+        },
+    }
+    path = home / "p.json"
+    path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    c = common(api.parts_from_project(path, home))
+    assert c["plinth"].length_mm == 1600
+    assert c["countertop"].length_mm == 1000
+    assert c["countertop"].quantity == 1
+    assert "600 + 400" in c["countertop"].basis
+
+
 def test_workshop_rejects_unknown_common_item_id(home):
     path = home / "workshop/construction.yaml"
     path.write_text(path.read_text().replace("позиция: plinth_100", "позиция: plinth_nope"))

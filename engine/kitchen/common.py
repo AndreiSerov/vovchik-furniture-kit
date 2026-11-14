@@ -37,6 +37,36 @@ def _ceil(value: Decimal) -> int:
     return int(value.to_integral_value(rounding=ROUND_CEILING))
 
 
+def _is_tall(m) -> bool:
+    return TEMPLATES[m.template].both_rows if m.template in TEMPLATES else False
+
+
+def _row_modules(wall, row) -> list:
+    """Модули ряда по порядку вдоль стены. В нижний ряд без своего пенала добавлены пеналы, описанные в других
+    рядах стены: пенал входит в оба ряда. Место пенала — по его отступу от начала стены в своём ряду."""
+    if row.kind != "lower" or any(_is_tall(m) for m in row.modules):
+        return list(row.modules)
+    talls: list[tuple[float, object]] = []
+    for other in wall.rows:
+        x = 0.0
+        for m in other.modules:
+            if _is_tall(m):
+                talls.append((x, m))
+            x += m.width
+    talls.sort(key=lambda t: t[0])
+    merged: list = []
+    x = 0.0
+    for m in row.modules:
+        while talls and talls[0][0] <= x:
+            tall = talls.pop(0)[1]
+            merged.append(tall)
+            x += tall.width
+        merged.append(m)
+        x += m.width
+    merged += [t for _, t in talls]
+    return merged
+
+
 def _runs(project: Project, kinds: Iterable[str], with_tall: bool) -> list[tuple[str, list[int]]]:
     """Непрерывные участки модулей нужного ряда по стенам: пенал либо входит в участок, либо разрывает его."""
     runs: list[tuple[str, list[int]]] = []
@@ -45,7 +75,7 @@ def _runs(project: Project, kinds: Iterable[str], with_tall: bool) -> list[tuple
             if row.kind not in kinds:
                 continue
             current: list[int] = []
-            for m in row.modules:
+            for m in _row_modules(wall, row):
                 tall = TEMPLATES[m.template].both_rows if m.template in TEMPLATES else False
                 if tall and not with_tall:
                     if current:
