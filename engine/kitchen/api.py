@@ -24,6 +24,7 @@ from kitchen.cutting import MaterialCut, cut_parts
 from kitchen.cutting_pdf import write_cutting_map
 from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, OrderError
+from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
 from kitchen.models import Workshop
 from kitchen.parts import EdgeTotals, ModuleParts, Part, compute_parts
 from kitchen.project import Project, parse_project
@@ -39,10 +40,13 @@ __all__ = [
     "DiffResult",
     "EdgeTotals",
     "EdgingResult",
+    "EstimateLabor",
+    "EstimateResult",
     "ExportResult",
     "FileSummary",
     "Finding",
     "ImportResult",
+    "LaborLine",
     "LogEntry",
     "LogResult",
     "ModuleParts",
@@ -69,6 +73,9 @@ __all__ = [
     "edges_and_save",
     "edges_from_order",
     "edges_from_project",
+    "estimate_and_save",
+    "estimate_from_order",
+    "estimate_from_project",
     "export_project",
     "import_project",
     "list_outputs",
@@ -1230,6 +1237,133 @@ def _purchase_files(
 def purchase_and_save(order: str, home: Path | None = None) -> PurchaseResult:
     home = home or resolve_home()
     result, files = _purchase_files(home, purchase_from_order(order, home))
+    _save_outputs(home, result.source, files)
+    return result
+
+
+class EstimateResult(Result):
+    """Смета: себестоимость материалов из закупки, труд по операциям, цена с округлением."""
+
+    source: PartsSource
+    materials_cost: float
+    markup: float
+    consumables: float
+    delivery: float
+    labor: EstimateLabor
+    price_before_rounding: float
+    price: int
+    margin: float
+    rounding: str
+    warnings: list[str]
+    mock_notice: str | None = None
+    outputs: list[OutputInfo] = Field(default_factory=list)
+
+
+def _estimate(project: Project, parts: PartsResult, cut: CutResult, workshop: Workshop) -> EstimateResult:
+    purchase = _purchase(project, parts, cut, workshop)
+    labor = build_labor(project, workshop, parts.modules, parts.hardware, parts.edges)
+    pricing = build_pricing(workshop, purchase.total, labor.total)
+    return EstimateResult(
+        source=parts.source,
+        materials_cost=purchase.total,
+        labor=labor,
+        warnings=parts.warnings,
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+        mock_notice=MOCK_BANNER if parts.mock else None,
+        **pricing.model_dump(),
+    )
+
+
+def estimate_from_order(order: str, home: Path | None = None) -> EstimateResult:
+    home = home or resolve_home()
+    project, source, brief, warnings = _order_project(order, home)
+    workshop = load_workshop(home)
+    return _estimate(
+        project,
+        _build_parts(project, home, source, brief, warnings, workshop),
+        _build_cut(project, home, source, brief, warnings, workshop),
+        workshop,
+    )
+
+
+def estimate_from_project(path: Path, home: Path | None = None) -> EstimateResult:
+    """`kitchen estimate --project <файл>`: смета проекта из файла, без файлов выводов и записи в БД."""
+    home = home or resolve_home()
+    data = _read_json(Path(path), "Файл проекта")
+    project = parse_project(data)
+    source = PartsSource(
+        kind="file",
+        order=project.order,
+        version=project.version,
+        content_hash=_project_hash(data),
+        path=str(path),
+    )
+    workshop = load_workshop(home)
+    brief = _brief_of_project(home, project.order)
+    return _estimate(
+        project,
+        _build_parts(project, home, source, brief, [], workshop),
+        _build_cut(project, home, source, brief, [], workshop),
+        workshop,
+    )
+
+
+def _estimate_markdown(result: EstimateResult) -> str:
+    """Телефонная версия сметы: все суммы и количества из единой модели."""
+    lines = []
+    if result.mock_notice:
+        lines += [f"**{result.mock_notice}**", ""]
+    lines += ["# Смета", "", f"Заказ {result.source.order} · версия проекта {result.source.version}", ""]
+    if result.warnings:
+        lines += ["## Предупреждения", "", *(f"- {warning}" for warning in result.warnings), ""]
+    labor = result.labor
+    lines += [
+        "## Труд",
+        "",
+        f"Ставка {labor.rate_per_hour:g} ₽/ч.",
+        "",
+        *(
+            f"- {line.name}: {line.quantity:g} {line.unit} ({line.basis}) × {line.norm_min:g} мин = "
+            f"{line.minutes:g} мин = {line.amount:.2f} ₽"
+            for line in labor.lines
+        ),
+        "",
+        f"**Итого труд: {labor.minutes:g} мин, {labor.total:.2f} ₽**",
+        "",
+        "## Цена",
+        "",
+        f"- Материалы (закупка): {result.materials_cost:.2f} ₽",
+        f"- Наценка на материалы: {result.markup:.2f} ₽",
+        f"- Расходники: {result.consumables:.2f} ₽",
+        f"- Доставка материалов: {result.delivery:.2f} ₽",
+        f"- Труд: {labor.total:.2f} ₽",
+        f"- Итого до округления: {result.price_before_rounding:.2f} ₽",
+        f"- Маржа с учётом округления: {result.margin:.2f} ₽",
+        "",
+        f"**Цена: {result.price} ₽** (округление: {result.rounding})",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _estimate_files(
+    home: Path, result: EstimateResult
+) -> tuple[EstimateResult, list[tuple[OutputInfo, Callable]]]:
+    outputs = [
+        _output_info(home, result.source, store.ESTIMATE_MD, "estimate.md"),
+        _output_info(home, result.source, store.ESTIMATE_JSON, "estimate.json"),
+    ]
+    result = result.model_copy(update={"outputs": outputs})
+    return result, [
+        (outputs[0], lambda path: path.write_text(_estimate_markdown(result), encoding="utf-8")),
+        (outputs[1], lambda path: path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")),
+    ]
+
+
+def estimate_and_save(order: str, home: Path | None = None) -> EstimateResult:
+    home = home or resolve_home()
+    result, files = _estimate_files(home, estimate_from_order(order, home))
     _save_outputs(home, result.source, files)
     return result
 

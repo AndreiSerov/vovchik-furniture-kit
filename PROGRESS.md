@@ -31,7 +31,7 @@
 
 ## Этап 3. Смета и КП
 
-- [ ] 16 — Смета (3.1, 3.2, 3.3) ([спека](docs/specs/stage-3-estimate.md))
+- [x] 16 — Смета (3.1, 3.2, 3.3) ([спека](docs/specs/stage-3-estimate.md))
 - [ ] 17 — Вариант «экономия» (3.3) ([спека](docs/specs/stage-3-estimate.md))
 - [ ] 18 — КП (3.4) ([спека](docs/specs/stage-3-estimate.md))
 
