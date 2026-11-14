@@ -49,6 +49,7 @@
 
 - [ ] 23 — Модули в комнате и 3D (5.1) ([спека](docs/specs/stage-5-project-3d.md))
 - [ ] 24 — Устаревшие выводы в `status` (5.3) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 32 — Пустое место и антресоль над холодильником (5.4) ([спека](docs/specs/stage-5-project-3d.md))
 - [ ] 25 — Черновик раскладки (5.2) ([спека](docs/specs/stage-5-project-3d.md))
 
 ## Этап 6. Скиллы
