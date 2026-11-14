@@ -109,8 +109,28 @@ def main() -> int:
         encoding="utf-8",
     )
     print(f"{len(installed)} skills installed in .claude/skills")
+    use_git_hooks()
     # Our own kitchen-* links share .claude/skills; link-skills leaves managed skills alone.
     return subprocess.run([sys.executable, str(ROOT / "scripts" / "link-skills")], check=False).returncode
+
+
+def use_git_hooks() -> None:
+    """Point git at .githooks, so commits from any agent run scripts/check."""
+    if not (ROOT / ".githooks").is_dir():
+        return
+    current = subprocess.run(
+        ["git", "-C", str(ROOT), "config", "--get", "core.hooksPath"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    if current == ".githooks":
+        return
+    if current:
+        print(f"core.hooksPath is {current}; set it to .githooks to check commits from every agent")
+        return
+    git("-C", str(ROOT), "config", "core.hooksPath", ".githooks")
+    print("git hooks: .githooks")
 
 
 if __name__ == "__main__":

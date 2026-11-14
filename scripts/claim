@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Claim a ticket so that two agents never build the same one.
+
+A claim is a file in the git common directory, so every worktree and every agent (Claude Code,
+Codex, opencode) sees it, and nothing goes into a commit.
+
+  scripts/claim 05 --by implementer     take ticket 05, or fail and name who holds it
+  scripts/claim 05 --release            give it back once the ticket passes review
+  scripts/claim --list                  show open claims
+"""
+
+import argparse
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def claims_dir() -> Path:
+    done = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if done.returncode:
+        sys.exit("scripts/claim needs a git repository")
+    return Path(done.stdout.strip()) / "claims"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("ticket", nargs="?")
+    parser.add_argument("--by", default="agent", help="who takes the ticket")
+    parser.add_argument("--release", action="store_true")
+    parser.add_argument("--force", action="store_true", help="take over a stale claim")
+    parser.add_argument("--list", action="store_true")
+    args = parser.parse_args()
+    folder = claims_dir()
+
+    if args.list:
+        for claim in sorted(folder.glob("*")) if folder.is_dir() else []:
+            print(f"{claim.name}: {claim.read_text(encoding='utf-8').strip()}")
+        return 0
+    if not args.ticket or not re.fullmatch(r"[\w.-]+", args.ticket):
+        parser.error("name a ticket, such as 05")
+
+    claim = folder / args.ticket
+    if args.release:
+        claim.unlink(missing_ok=True)
+        print(f"released {args.ticket}")
+        return 0
+    if claim.exists() and not args.force:
+        print(f"ticket {args.ticket} is already claimed: {claim.read_text(encoding='utf-8').strip()}")
+        print("Stop and report this; --force takes over only a claim you know is stale.")
+        return 1
+    folder.mkdir(parents=True, exist_ok=True)
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    claim.write_text(
+        f"{args.by}, branch {branch or '(detached)'}, {Path.cwd()}, {time.strftime('%Y-%m-%d %H:%M')}\n",
+        encoding="utf-8",
+    )
+    print(f"claimed {args.ticket}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

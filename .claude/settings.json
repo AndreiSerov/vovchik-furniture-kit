@@ -29,6 +29,12 @@
             "args": [],
             "timeout": 600,
             "onFailure": "block"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/edit-with-edit-tool.sh",
+            "args": [],
+            "timeout": 30
           }
         ]
       }
