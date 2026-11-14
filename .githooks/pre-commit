@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Runs scripts/check before a commit made outside Claude Code, such as by Codex, opencode or a person.
+# Claude Code checks its commits in .claude/hooks/check-before-commit.sh, so this skips them
+# instead of running the same check twice. scripts/sync-skills turns this folder on.
+set -u
+[ "${CLAUDECODE:-}" = 1 ] && exit 0
+root=$(git rev-parse --show-toplevel) || exit 1
+if [ ! -x "$root/scripts/check" ]; then
+  echo 'Commit blocked: scripts/check is missing or not executable.' >&2
+  exit 1
+fi
+if ! output=$(cd "$root" && scripts/check 2>&1); then
+  printf 'Commit blocked: scripts/check failed.\n%s\n' "$(printf '%s\n' "$output" | tail -n 40)" >&2
+  exit 1
+fi

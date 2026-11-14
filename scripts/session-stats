@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""Numbers for a retro: where the agents' time went in this repository.
+
+Reads the local session logs of Claude Code subagents, Codex and opencode, and the git log.
+  scripts/session-stats               all sessions
+  scripts/session-stats --since 2026-11-14
+
+Per ticket, from commits prefixed `NN: `: commits, review-fix commits, and the minutes from the
+first commit to the last fix. Per subagent: duration, review returns into the same context,
+responses cut off mid-stream, Bash timeouts, file writes through Bash versus Edit, peak context.
+The log formats are not public APIs; a source that fails to parse is reported and skipped.
+"""
+
+import argparse
+import json
+import re
+import sqlite3
+import subprocess
+import sys
+from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+HOME = Path.home()
+FIX = re.compile(r"review|ревью|fix|исправ|добить|правки", re.IGNORECASE)
+BASH_WRITE = re.compile(r"python3? - <<|\bcat > |\bsed -i|\btee ")
+
+
+def stamp(value) -> float:
+    if isinstance(value, (int, float)):
+        return value / 1000
+    return datetime.fromisoformat(value).timestamp()
+
+
+def tickets(since: float) -> None:
+    log = subprocess.run(
+        ["git", "-C", str(ROOT), "log", "--all", "--format=%at|%s"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout
+    by_ticket = defaultdict(list)
+    for line in log.splitlines():
+        when, subject = line.split("|", 1)
+        match = re.match(r"(\d+): ", subject)
+        if match and int(when) >= since:
+            by_ticket[match[1]].append((int(when), subject))
+    print("ticket  commits  fixes  first→last fix")
+    for ticket in sorted(by_ticket, key=int):
+        rows = sorted(set(by_ticket[ticket]))
+        fixes = [t for t, s in rows if FIX.search(s)]
+        span = (fixes[-1] - rows[0][0]) / 60 if fixes else 0
+        print(f"{ticket:>6}  {len(rows):>7}  {len(fixes):>5}  {span:>8.0f} min")
+
+
+def claude(since: float) -> None:
+    folder = HOME / ".claude/projects" / re.sub(r"[^A-Za-z0-9]", "-", str(ROOT))
+    print("\nClaude Code subagents")
+    print("type         min  returns  cut-offs  timeouts  bash-writes  edits  peak-context  description")
+    for path in sorted(folder.glob("*/subagents/*.jsonl")):
+        meta_path = path.with_suffix(".meta.json")
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        times, returns, cutoffs, timeouts, peak = [], 0, 0, 0, 0
+        bash_writes, edits = set(), set()
+        for line in path.read_text(encoding="utf-8").splitlines():
+            entry = json.loads(line)
+            if "timestamp" in entry:
+                times.append(stamp(entry["timestamp"]))
+            message = entry.get("message") or {}
+            content = message.get("content")
+            if entry.get("type") == "user":
+                returns += "coordinator sent a message" in line
+                cutoffs += "cut off mid-stream" in line
+                timeouts += "did not complete within its" in line
+            peak = max(peak, (message.get("usage") or {}).get("cache_read_input_tokens", 0))
+            for block in content if isinstance(content, list) else []:
+                if block.get("type") != "tool_use":
+                    continue
+                if block["name"] in ("Edit", "Write", "MultiEdit"):
+                    edits.add(block["id"])
+                elif block["name"] == "Bash" and BASH_WRITE.search(block["input"].get("command", "")):
+                    bash_writes.add(block["id"])
+        bash_writes, edits = len(bash_writes), len(edits)
+        if not times or times[0] < since:
+            continue
+        minutes = (max(times) - min(times)) / 60
+        print(
+            f"{meta.get('agentType', '?'):<11} {minutes:>4.0f}  {returns:>7}  {cutoffs:>8}  {timeouts:>8}"
+            f"  {bash_writes:>11}  {edits:>5}  {peak // 1000:>10}k  {meta.get('description', '')}"
+        )
+
+
+def codex(since: float) -> None:
+    print("\nCodex sessions")
+    for path in sorted((HOME / ".codex/sessions").glob("**/*.jsonl")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if not lines or json.loads(lines[0]).get("payload", {}).get("cwd") != str(ROOT):
+            continue
+        entries = [json.loads(line) for line in lines]
+        times = [stamp(e["timestamp"]) for e in entries if "timestamp" in e]
+        if not times or min(times) < since:
+            continue
+        calls = sum(e.get("payload", {}).get("type") in ("function_call", "custom_tool_call") for e in entries)
+        source = entries[0]["payload"].get("source")
+        kind = "subagent" if isinstance(source, dict) else "root"
+        print(f"{kind:<9} {(max(times) - min(times)) / 60:>4.0f} min  {calls:>4} calls  {path.name}")
+
+
+def opencode(since: float) -> None:
+    database = HOME / ".local/share/opencode/opencode.db"
+    if not database.exists():
+        return
+    print("\nopencode sessions")
+    connection = sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    query = (
+        "select s.title, min(m.time_created), max(m.time_updated), count(*) from session_v2 s "
+        "join session_message m on m.session_id = s.id where s.directory = ? group by s.id"
+    )
+    for title, start, end, messages in connection.execute(query, (str(ROOT),)):
+        if start / 1000 >= since:
+            print(f"{(end - start) / 60000:>4.0f} min  {messages:>4} messages  {title}")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--since", help="YYYY-MM-DD")
+    args = parser.parse_args()
+    since = datetime.fromisoformat(args.since).timestamp() if args.since else 0
+    for source in (tickets, claude, codex, opencode):
+        try:
+            source(since)
+        except Exception as error:  # noqa: BLE001 — one unreadable log format must not hide the others
+            print(f"\n{source.__name__}: skipped, {type(error).__name__}: {error}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

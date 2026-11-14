@@ -8,9 +8,9 @@ The user starts each `/`-prefixed step, because the agent can't invoke those ski
 2. **Spec**: `/to-spec` turns the grilling into a spec, and the user confirms its test seams.
 3. **Tickets**: `/to-tickets` splits a multi-session build into tracer-bullet tickets with blocking edges. Work that fits one session goes straight to step 4.
 4. **Build**: `/implement` runs per ticket, with a cleared context between tickets, or `/implement-spec` runs the whole spec on one integration branch. Implementers drive `tdd`, one red-green slice at a time.
-5. **Review**: `code-review` checks the diff against the standards and the spec, and every finding is fixed or reported.
+5. **Review**: `code-review` checks the diff against the standards and the spec, and every finding is fixed or reported. The rounds follow [Review rounds](#review-rounds).
 6. **Ship**: push the feature branch and open a PR with `pr`. The user merges.
-7. **Retro**: `/retro` runs before the session is cleared. Mark each finding `project` or `harness`. Apply `project` findings here, and send `harness` findings as a change to the template named in `.copier-answers.yml`, so other repositories get them through `copier update`.
+7. **Retro**: `/retro` runs before the session is cleared, with `scripts/session-stats` for the numbers. Mark each finding `project` or `harness`. Apply `project` findings here, and send `harness` findings as a change to the template named in `.copier-answers.yml`, so other repositories get them through `copier update`.
 
 Keep steps 1-3 in one unbroken context, so the spec and tickets build on the grilling.
 
@@ -19,6 +19,17 @@ Keep steps 1-3 in one unbroken context, so the spec and tickets build on the gri
 - The main session on the strongest model grills, specs, reviews and verifies the result.
 - The `implementer` subagent builds on Sonnet, and the `reviewer` subagent reviews each step independently.
 - Work from any model passes the same `scripts/check` and review. A ticket that fails review goes back to its implementer, at most three times. After the third failed review, stop and report what keeps failing to the user, because the ticket or the environment may be wrong.
+- One ticket, one agent: the implementer takes it with `scripts/claim`, and the main session releases it with `scripts/claim <ticket> --release` once the ticket passes review.
+
+## Review rounds
+
+Most of a ticket's time goes to rounds of review and fixes, not to the first build. Each rule below removes a round.
+
+- **Before the build**, check the ticket for open decisions: where each input comes from, behaviour at the edges, and anything the user still has to rule on. Ask the user then, not mid-ticket. List in the ticket the checks the reviewer will run, so the implementer runs them first.
+- **One report, one fix commit.** Send the implementer every finding of a review in one message, blocking and minor together. A re-review checks the fix commits and the earlier findings; its new minor findings wait in a list for the end of the stage.
+- **Fresh context on the second return.** The first return goes to the same implementer, who still knows the code. From the second return on, or once its context passes about 150k tokens, or when the user changes a decision on the ticket, start a new implementer. Hand it the commit hash, the findings, the reviewer's reproductions and the related entries of the decision log.
+- **Keep building during review.** While the reviewer reads ticket N, a second implementer can take the next ticket that doesn't depend on N, in its own worktree.
+- **Stronger model for hard tickets.** For an algorithm or layout ticket, where reviews keep finding edge cases, run the implementer on the main session's model and compare the rounds in `scripts/session-stats`.
 
 ## Harness upkeep
 

@@ -4,6 +4,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -11,14 +12,25 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS = ROOT / ".claude" / "skills"
-REQUIRED_IGNORES = [".claude/skills/", ".claude/settings.local.json", ".claude/worktrees/", ".agents/", ".qwen/"]
+REQUIRED_IGNORES = [
+    ".claude/skills/",
+    ".claude/settings.local.json",
+    ".claude/worktrees/",
+    ".agents/",
+    ".qwen/",
+]
+# Tools agents call. Required ones fail the check; recommended ones are named but don't.
+REQUIRED_TOOLS = ["git", "python3"]
+RECOMMENDED_TOOLS = {
+    "rg": "search (ripgrep)",
+    "sd": "text replace across files",
+    "ast-grep": "structural code edits",
+}
 REQUIRED_FILES = ["AGENTS.md", "docs/agents/workflow.md", "docs/agents/agreements.md"]
 
 
 def ignored(path: str) -> bool:
-    done = subprocess.run(
-        ["git", "-C", str(ROOT), "check-ignore", "-q", "--no-index", path], check=False
-    )
+    done = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", "--no-index", path], check=False)
     return done.returncode == 0
 
 
@@ -75,15 +87,35 @@ def check_settings() -> list[str]:
     return problems
 
 
+def check_git_hooks() -> list[str]:
+    if not (ROOT / ".githooks").is_dir():
+        return []
+    hooks = subprocess.run(
+        ["git", "-C", str(ROOT), "config", "--get", "core.hooksPath"],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    if hooks == ".githooks":
+        return []
+    return ["git hooks are off, so commits outside Claude Code skip scripts/check; run scripts/sync-skills"]
+
+
 def main() -> int:
     problems = [f"missing file: {f}" for f in REQUIRED_FILES if not (ROOT / f).is_file()]
     check = ROOT / "scripts/check"
     if not os.access(check, os.X_OK):
         problems.append("scripts/check is missing or not executable")
     problems += [f"not gitignored: {p}" for p in REQUIRED_IGNORES if not ignored(p)]
-    problems += check_skills() + check_kitchen_links() + check_references() + check_settings()
+    problems += (
+        check_git_hooks() + check_skills() + check_kitchen_links() + check_references() + check_settings()
+    )
+    problems += [f"tool not installed: {t}" for t in REQUIRED_TOOLS if not shutil.which(t)]
     for problem in problems:
         print(f"- {problem}")
+    for tool, use in RECOMMENDED_TOOLS.items():
+        if not shutil.which(tool):
+            print(f"- note: {tool} is not installed ({use}); see harness-template README, Prerequisites")
     print("Harness OK" if not problems else f"{len(problems)} problem(s) found")
     return 1 if problems else 0
 

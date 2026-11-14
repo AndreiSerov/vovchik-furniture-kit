@@ -15,6 +15,7 @@ dependencies = [
 dev = [
     "pypdf>=7.1.0",
     "pytest>=8",
+    "pytest-timeout>=2.4.0",
     "ruff>=0.6",
 ]
 
@@ -35,3 +36,5 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Зависший тест падает с ошибкой, а не ждёт таймаута агента. Самый медленный тест — около 3 с.
+timeout = 30
