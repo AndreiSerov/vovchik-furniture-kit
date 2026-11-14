@@ -2,6 +2,7 @@
 
 import json
 import re
+import sqlite3
 import typing
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pytest
 import typer
 from kitchen import api
 from kitchen.cli import app
+from kitchen.errors import OrderError
 from kitchen.result import MOCK_BANNER
 from typer.testing import CliRunner
 
@@ -54,6 +56,7 @@ def test_v2_marks_every_v1_output_with_version_and_command(home):
     for stale in r.stale:
         line = next(ln for ln in section.splitlines() if stale.path in ln)
         assert "версия 1" in line and f"`{stale.command}`" in line
+        assert api.OUTPUT_RECOMPUTE[stale.kind].label in line
     commands = {s.kind: s.command for s in r.stale}
     assert commands["cutting"] == f"kitchen cut {ORDER}"
     assert commands["edging"] == f"kitchen edges {ORDER}"
@@ -79,18 +82,18 @@ def test_production_and_estimate_leave_section_empty(home):
     api.estimate_and_save(ORDER, home)
     r = api.status(ORDER, home)
     assert r.stale == []
-    assert _stale_section(r.text).strip() == "Пока ничего"
+    assert _stale_section(r.text).strip() == "Пока ничего."
 
 
 def test_no_outputs_section_follows_empty_rule(home):
     _petrov_v1(home)
     r = api.status(ORDER, home)
-    assert r.stale == [] and _stale_section(r.text).strip() == "Пока ничего"
+    assert r.stale == [] and _stale_section(r.text).strip() == "Пока ничего."
 
 
 def test_no_project_section_follows_empty_rule(home):
     api.order_new(ORDER, client="Петров П. П.", home=home)
-    assert _stale_section(api.status(ORDER, home).text).strip() == "Пока ничего"
+    assert _stale_section(api.status(ORDER, home).text).strip() == "Пока ничего."
 
 
 def test_fresh_outputs_are_not_marked(home):
@@ -146,3 +149,62 @@ def test_every_output_kind_has_an_existing_cli_command():
 @pytest.mark.parametrize("kind", sorted(typing.get_args(api.OutputKind)))
 def test_registry_entry_has_russian_label(kind):
     assert api.OUTPUT_RECOMPUTE[kind].label
+
+
+def test_command_from_each_line_recomputes_that_output(home):
+    _petrov_v1(home)
+    api.production_and_save(ORDER, home)
+    api.estimate_and_save(ORDER, home)
+    _import_v2(home)
+    while stale := api.status(ORDER, home).stale:
+        first = stale[0]
+        result = runner.invoke(app, first.command.split()[1:])
+        assert result.exit_code == 0, result.output
+        assert first.kind not in _stale_kinds(home), f"{first.command} не пересчитал {first.kind}"
+
+
+def test_three_versions_show_own_source_version(home):
+    _petrov_v1(home)
+    api.production_and_save(ORDER, home)
+    _import_v2(home)
+    api.cut_and_save(ORDER, home)
+    project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
+    project["ceiling_height"] = 2600
+    path = home / "project-v3.json"
+    path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    assert api.import_project(ORDER, path, home=home).version == 3
+    r = api.status(ORDER, home)
+    versions = {s.kind: s.source_version for s in r.stale}
+    assert versions == {"cutting": 2, "edging": 1, "purchase_md": 1, "purchase_json": 1}
+    line = next(ln for ln in _stale_section(r.text).splitlines() if "cutting-map.pdf" in ln)
+    assert "версия 2" in line
+
+
+def test_other_orders_outputs_are_not_listed(home):
+    other = "2026-048-ivanov"
+    api.order_new(ORDER, client="Петров П. П.", home=home)
+    api.order_new(other, client="Иванов И. И.", home=home)
+    for order in (ORDER, other):
+        project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
+        project["order"] = order
+        path = home / f"{order}.json"
+        path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+        api.import_project(order, path, home=home)
+        api.production_and_save(order, home)
+    _import_v2(home)
+    assert len(api.status(ORDER, home).stale) == 4
+    assert all(ORDER in s.path for s in api.status(ORDER, home).stale)
+    assert api.status(other, home).stale == []
+
+
+def test_unknown_output_kind_in_db_is_russian_error(home):
+    _petrov_v1(home)
+    api.production_and_save(ORDER, home)
+    _import_v2(home)
+    with sqlite3.connect(home / "orders" / "kitchen.db") as conn:
+        conn.execute(
+            "INSERT INTO outputs (order_id, kind, path, source_version, created_at) "
+            "SELECT id, 'model_3d', 'orders/x/out/3d.html', 1, '2026-01-01T00:00:00+00:00' FROM orders"
+        )
+    with pytest.raises(OrderError, match="model_3d.*обновите kitchen"):
+        api.status(ORDER, home)
