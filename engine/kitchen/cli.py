@@ -12,7 +12,7 @@ from typing import Annotated, NoReturn, TypeVar
 import typer
 
 from kitchen import api
-from kitchen.errors import KitchenError
+from kitchen.errors import InputError, KitchenError
 from kitchen.result import MOCK_BANNER, Result
 
 app = typer.Typer(help="Движок мастерской: проверка данных, заказы, раскрой, смета.", no_args_is_help=True)
@@ -153,6 +153,28 @@ def export(
     emit(result, lambda r: f"Заказ {r.order}: версия {r.version} проекта записана в {r.path}.", json)
 
 
+@app.command("diff")
+def diff(
+    order: OrderArg,
+    from_version: Annotated[str, typer.Argument(help="Исходная версия, например v1.")],
+    to_version: Annotated[str, typer.Argument(help="Новая версия, например v2.")],
+    json: JsonOpt = False,
+) -> None:
+    """Показать изменения модулей между версиями проекта."""
+
+    def version(value: str) -> int:
+        number = value.removeprefix("v")
+        if not number.isascii() or not number.isdigit() or int(number) < 1:
+            raise typer.BadParameter("Ожидается номер версии: v1, v2, …")
+        return int(number)
+
+    try:
+        result = api.diff_project(order, version(from_version), version(to_version))
+    except KitchenError as e:
+        fail(e)
+    emit(result, lambda r: "\n".join(r.changes) if r.changes else "Изменений модулей нет.", json)
+
+
 @app.command("log")
 def log(
     order: OrderArg,
@@ -176,6 +198,259 @@ def status(order: OrderArg, json: JsonOpt = False) -> None:
     except KitchenError as e:
         fail(e)
     emit(result, lambda r: f"{r.text}\nФайл: {r.path}", json)
+
+
+def _render_source(src: api.PartsSource) -> str:
+    if src.kind == "order":
+        head = f"Источник: заказ {src.order}, версия {src.version} проекта"
+    else:
+        version = f"версия {src.version}" if src.version else "версия в файле не записана"
+        head = f"Источник: файл {src.path} (проект {src.order}, {version})"
+    head += f", хеш {src.content_hash[:12]}"
+    if src.brief_id is None:
+        return head + "; брифа нет"
+    brief = f"бриф №{src.brief_id} от {src.brief_saved_at}"
+    if src.version_brief_id is not None and src.version_brief_id != src.brief_id:
+        brief += f" (у версии записан бриф №{src.version_brief_id})"
+    return f"{head}; {brief}"
+
+
+def _plural(n: int, forms: tuple[str, str, str]) -> str:
+    """«1 ошибка», «2 ошибки», «5 ошибок»."""
+    if n % 100 in range(11, 15):
+        return f"{n} {forms[2]}"
+    return f"{n} {forms[0] if n % 10 == 1 else forms[1] if n % 10 in (2, 3, 4) else forms[2]}"
+
+
+def _render_parts(r: api.PartsResult) -> str:
+    errors = sum(f.level == "error" for f in r.findings)
+    summary = (
+        f"Проверки: {_plural(errors, ('ошибка', 'ошибки', 'ошибок'))}, "
+        f"{_plural(len(r.findings) - errors, ('предупреждение', 'предупреждения', 'предупреждений'))}"
+    )
+    lines = [f"Детали проекта {r.order}:", _render_source(r.source), summary]
+    for m in r.modules:
+        lines.append(f"  Модуль {m.module} ({m.template}) — {len(m.parts)} дет.")
+        for p in m.parts:
+            edged = ", ".join(f"{side} {edge}" for side, edge in p.edges.items() if edge)
+            tail = f", кромка: {edged}" if edged else ""
+            grain = "текстура вдоль длины" if p.texture else "без текстуры"
+            lines.append(
+                f"    {p.id} — {p.name} {p.length}×{p.width}×{p.thickness} мм, {p.material}, {grain}{tail}"
+            )
+    hw = ", ".join(f"{pid} ×{n}" for pid, n in r.hardware.items())
+    lines.append(f"Фурнитура: {hw}")
+    for edge_id, e in r.edges.items():
+        lines.append(
+            f"Кромка {edge_id}: чистая {e.clean_m:.3f} м, с припуском "
+            f"{e.with_allowance_m:.3f} м, к закупке {e.purchase_m:.1f} м"
+        )
+    lines.append(f"Фасады: {r.facade_area:.4f} м²")
+    for color, area in r.facade_area_by_color.items():
+        lines.append(f"  {color}: {area:.4f} м²")
+    lines.append("Общие позиции:")
+    for c in r.common:
+        note = " (уже в фурнитуре)" if c.in_hardware else ""
+        lines.append(f"  {c.item} — {c.name}: {c.quantity} {c.unit}{note}; {c.basis}")
+    if r.findings:
+        lines.append("Находки проверок:")
+        for f in r.findings:
+            lines.append(f"  [{'ОШИБКА' if f.level == 'error' else 'предупреждение'}] {f.message}")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("parts")
+def parts(
+    order: Annotated[
+        str | None,
+        typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project."),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Детали проекта: по модулям, фурнитура, кромка, фасады, общие позиции, находки проверок."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError("Укажите либо заказ (kitchen parts petrov), либо файл: --project project.json.")
+        result = api.parts_from_order(order) if order is not None else api.parts_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_parts, json)
+
+
+def _render_edges(r: api.EdgingResult) -> str:
+    lines = ["Карта кромления:", _render_source(r.source)]
+    for p in r.parts:
+        sides = ", ".join(f"{side}: {edge}" for side, edge in p.edges.items() if edge)
+        lines.append(f"  {p.id} {p.length}×{p.width} мм — {sides}")
+    for edge_id, e in r.edges.items():
+        lines.append(
+            f"Кромка {edge_id}: чистая {e.clean_m:.3f} м, с припуском {e.with_allowance_m:.3f} м, "
+            f"к закупке {e.purchase_m:.3f} м"
+        )
+    if r.output:
+        lines.append(f"Карта кромления PDF: {r.output.file} (версия проекта {r.output.source_version})")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("edges")
+def edges(
+    order: Annotated[
+        str | None, typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project.")
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Кромление: детали, стороны и метраж; для заказа также PDF карты."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError("Укажите либо заказ (kitchen edges petrov), либо файл: --project project.json.")
+        result = api.edges_and_save(order) if order is not None else api.edges_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_edges, json)
+
+
+def _render_cut(r: api.CutResult) -> str:
+    lines = [
+        f"Раскрой проекта {r.order}:",
+        _render_source(r.source),
+        f"Пила: пропил {r.kerf} мм, обрезка по периметру {r.trim} мм, макс. рез {r.max_cut_length} мм",
+    ]
+    for m in r.materials:
+        grain = ", текстура вдоль первой стороны" if m.texture else ""
+        lines.append(
+            f"Материал {m.material} — {m.name}: листов {m.sheet_count} ({m.sheet_size[0]}×{m.sheet_size[1]} мм"
+            f"{grain}), деталей {m.parts_count}, использование {m.utilization:.1%}, отход {m.waste_m2:.3f} м²"
+        )
+        for s in m.sheets:
+            lines.append(f"  Лист {s.number}: {len(s.placements)} дет., использование {s.utilization:.1%}")
+            for pl in s.placements:
+                turn = ", повёрнута" if pl.rotated else ""
+                lines.append(f"    {pl.part} {pl.w}×{pl.h} мм, x={pl.x} y={pl.y}{turn}")
+            for c in s.cuts:
+                axis = "вертикальный, x" if c.direction == "vertical" else "горизонтальный, y"
+                what = "обрезка отхода" if c.kind == "trim" else "разделяет детали"
+                lines.append(
+                    f"    Рез {c.number}: {axis}={c.position}, от {c.start} до {c.end} (длина {c.length} мм), {what}"
+                )
+    if r.countertop:
+        t = r.countertop
+        sheets = "; ".join(" + ".join(str(p) for p in sheet) for sheet in t.sheets)
+        lines.append(
+            f"Столешница {t.item} — {t.name}: листов {t.sheet_count} ({t.sheet_length} мм), куски, мм: {sheets}"
+        )
+    if r.output:
+        lines.append(f"Карта раскроя PDF: {r.output.file} (версия проекта {r.output.source_version})")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("cut")
+def cut(
+    order: Annotated[
+        str | None,
+        typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project."),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Раскрой: гильотинная укладка по листам с порядком резов, столешница линейно. Заказ — ещё и PDF карты."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError("Укажите либо заказ (kitchen cut petrov), либо файл: --project project.json.")
+        result = api.cut_and_save(order) if order is not None else api.cut_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_cut, json)
+
+
+def _render_purchase(r: api.PurchaseResult) -> str:
+    lines = ["Закупка:", _render_source(r.source)]
+    for shop in r.shops:
+        lines.append(f"Магазин {shop.name}:")
+        for item in shop.items:
+            details = []
+            if item.needed is not None:
+                details.append(f"нужно {item.needed} {item.needed_unit}")
+            if item.pack_size is not None:
+                details.append(f"в упаковке {item.pack_size} {item.needed_unit}")
+            if item.color:
+                details.append(f"цвет {item.color}")
+            if item.lead_days is not None:
+                details.append(f"срок {item.lead_days} раб. дней")
+            note = f" ({', '.join(details)})" if details else ""
+            lines.append(
+                f"  {item.id} — {item.name}{note}: {item.quantity} {item.unit} × "
+                f"{item.unit_price} ₽ = {item.amount:.2f} ₽"
+            )
+        lines.append(f"  Итого по магазину: {shop.total:.2f} ₽")
+    lines.append(f"Итого: {r.total:.2f} ₽")
+    for output in r.outputs:
+        lines.append(f"Файл: {output.file} (версия проекта {output.source_version})")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("purchase")
+def purchase(order: OrderArg, json: JsonOpt = False) -> None:
+    """Список закупки по магазинам: Markdown и JSON для текущей версии заказа."""
+    try:
+        result = api.purchase_and_save(order)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_purchase, json)
+
+
+def _render_production(r: api.ProductionResult) -> str:
+    lines = ["Производство:", _render_source(r.purchase.source)]
+    for material in r.cutting.materials:
+        lines.append(
+            f"Материал {material.material} — {material.name}: листов {material.sheet_count}, "
+            f"использование {material.utilization:.1%}"
+        )
+    if r.cutting.countertop:
+        top = r.cutting.countertop
+        lines.append(f"Столешница {top.item}: листов {top.sheet_count}")
+    purchase_edges = {
+        item.id: item.quantity for shop in r.purchase.shops for item in shop.items if item.kind == "edge"
+    }
+    for edge_id, edge in r.edging.edges.items():
+        lines.append(
+            f"Кромка {edge_id}: чистая {edge.clean_m} м, с припуском "
+            f"{edge.with_allowance_m} м, к закупке {purchase_edges[edge_id]} м"
+        )
+    for shop in r.purchase.shops:
+        lines.append(f"Магазин {shop.name}: {shop.total:.2f} ₽")
+    lines.append(f"Итого закупка: {r.purchase.total:.2f} ₽")
+    for output in (r.cutting.output, r.edging.output, *r.purchase.outputs):
+        if output:
+            lines.append(f"Файл: {output.file} (версия проекта {output.source_version})")
+    if r.purchase.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.purchase.warnings))
+    return "\n".join(lines)
+
+
+@app.command("production")
+def production(order: OrderArg, json: JsonOpt = False) -> None:
+    """Пересчитать раскрой, кромление и закупку текущей версии заказа."""
+    try:
+        result = api.production_and_save(order)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_production, json)
 
 
 # --- бриф и быстрая вилка ----------------------------------------------------

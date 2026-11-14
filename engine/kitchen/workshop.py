@@ -10,6 +10,8 @@ from pydantic import ValidationError
 
 from kitchen.errors import WorkshopError
 from kitchen.models import (
+    APPLIANCE_KINDS,
+    Appliances,
     Construction,
     Equipment,
     Hardware,
@@ -26,6 +28,7 @@ FILES: tuple[str, ...] = (
     "hardware.yaml",
     "labor.yaml",
     "pricing.yaml",
+    "appliances.yaml",
 )
 
 NOT_FOUND = (
@@ -131,20 +134,103 @@ def translate(name: str, err: ValidationError) -> list[str]:
 
 def _cross_refs(w: Workshop) -> list[str]:
     ids = {m.id for m in w.materials.sheets}
+    edge_ids = {m.id for m in w.materials.edges}
+    hw_ids = {i.id for i in w.hardware.items}
     probs = []
-    for path, ref in (
-        ("задняя_стенка.материал", w.construction.back_panel.material),
-        ("ящик_tandembox.материал", w.construction.tandembox.material),
+    kinds = APPLIANCE_KINDS
+    probs += [
+        f"construction.yaml: техника_в_столешницу: неизвестный вид «{kind}» (допустимы виды: {', '.join(sorted(kinds))})."
+        for kind in w.construction.countertop_appliances
+        if kind not in kinds
+    ]
+    for path, ref, known, where in (
+        (
+            "задняя_стенка.материал",
+            w.construction.back_panel.material,
+            ids,
+            "листовых материалах materials.yaml",
+        ),
+        (
+            "ящик_tandembox.материал",
+            w.construction.tandembox.material,
+            ids,
+            "листовых материалах materials.yaml",
+        ),
+        ("угловые_модули.карусель", w.construction.corner_rules.carousel, hw_ids, "позициях hardware.yaml"),
+        (
+            "угловые_модули.материал_заглушки",
+            w.construction.corner_rules.filler_material,
+            ids,
+            "листовых материалах materials.yaml",
+        ),
+        *(
+            (f"верхние_модули.{key}", ref, hw_ids, "позициях hardware.yaml")
+            for key, ref in (
+                ("навес", w.construction.upper_rules.hanger),
+                ("подъёмник", w.construction.upper_rules.lift),
+                ("сушка", w.construction.upper_rules.dryer),
+            )
+        ),
+        *(
+            (
+                f"правила_пенала.{key}",
+                ref,
+                {item.id for item in w.appliances.items if item.type == kind},
+                f"технике типа {kind} в appliances.yaml",
+            )
+            for key, ref, kind in (
+                ("духовка", w.construction.tall_rules.oven, "oven"),
+                ("свч", w.construction.tall_rules.microwave, "microwave"),
+            )
+        ),
+        (
+            "верхние_модули.вытяжка",
+            w.construction.upper_rules.hood,
+            {item.id for item in w.appliances.items if item.type == "hood"},
+            "вытяжках appliances.yaml",
+        ),
+        *(
+            (f"общие_позиции.{key}", ref, hw_ids, "позициях hardware.yaml")
+            for key, ref in (
+                ("цоколь.позиция", w.construction.common.plinth.item),
+                ("шина.позиция", w.construction.common.rail.item),
+                ("led.профиль", w.construction.common.led.profile),
+                ("led.блок_питания", w.construction.common.led.power_supply),
+            )
+        ),
+        *(
+            (f"фурнитура.{key}", ref, hw_ids, "позициях hardware.yaml")
+            for key, ref in (
+                ("петли", w.construction.furniture.hinges),
+                ("ответные_планки", w.construction.furniture.plates),
+                ("конфирматы", w.construction.furniture.confirmats),
+                ("заглушки", w.construction.furniture.caps),
+                ("полкодержатели", w.construction.furniture.shelf_pins),
+                ("опоры", w.construction.furniture.legs),
+                ("саморезы", w.construction.furniture.screws),
+            )
+        ),
     ):
-        if ref not in ids:
+        if ref not in known:
             probs.append(
-                f"construction.yaml: ключ «{path}»: значение «{ref}» — нет такого id в листовых "
-                f"материалах materials.yaml (есть: {', '.join(sorted(ids))})."
+                f"construction.yaml: ключ «{path}»: значение «{ref}» — нет такого id в {where} "
+                f"(есть: {', '.join(sorted(known))})."
+            )
+    for material_id, edge_id in w.materials.edge_by_material.items():
+        if material_id not in ids:
+            probs.append(
+                f"materials.yaml: ключ «кромка_к_материалу»: «{material_id}» — нет такого id в "
+                f"листовых материалах (есть: {', '.join(sorted(ids))})."
+            )
+        if edge_id not in edge_ids:
+            probs.append(
+                f"materials.yaml: ключ «кромка_к_материалу»: «{material_id}: {edge_id}» — нет такой "
+                f"кромки в кромке materials.yaml (есть: {', '.join(sorted(edge_ids))})."
             )
     return probs
 
 
-M = TypeVar("M", Equipment, Construction, Materials, Hardware, Labor, Pricing)
+M = TypeVar("M", Equipment, Construction, Materials, Hardware, Labor, Pricing, Appliances)
 
 
 @dataclass
@@ -179,6 +265,7 @@ def load(home: Path) -> Loaded:
     hardware = parse("hardware.yaml", Hardware)
     labor = parse("labor.yaml", Labor)
     pricing = parse("pricing.yaml", Pricing)
+    appliances = parse("appliances.yaml", Appliances)
 
     # Файл, который не прочитался или не прошёл проверку, считаем моком, пока он явно не `mock: false`.
     mock_files = [
@@ -188,7 +275,16 @@ def load(home: Path) -> Loaded:
     ]
 
     workshop = None
-    if not problems and equipment and construction and materials and hardware and labor and pricing:
+    if (
+        not problems
+        and equipment
+        and construction
+        and materials
+        and hardware
+        and labor
+        and pricing
+        and appliances
+    ):
         workshop = Workshop(
             equipment=equipment,
             construction=construction,
@@ -196,6 +292,7 @@ def load(home: Path) -> Loaded:
             hardware=hardware,
             labor=labor,
             pricing=pricing,
+            appliances=appliances,
             mock_files=mock_files,
         )
         problems = _cross_refs(workshop)

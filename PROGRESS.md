@@ -11,20 +11,20 @@
 
 ## Этап 1. Модуль → детали
 
-- [ ] 05 — Пробный ход через `base_door` (1.1, 1.2, 1.3) ([спека](docs/specs/stage-1-modules-to-parts.md))
-- [ ] 06 — Полная схема в импорте и `diff` (1.1, 0.4) ([спека](docs/specs/stage-1-modules-to-parts.md))
-- [ ] 07 — Нижние шаблоны (1.4) ([спека](docs/specs/stage-1-modules-to-parts.md))
-- [ ] 08 — Верхние шаблоны и `appliances.yaml` (1.4) ([спека](docs/specs/stage-1-modules-to-parts.md))
-- [ ] 09 — Угловые и пенал (1.5) ([спека](docs/specs/stage-1-modules-to-parts.md))
-- [ ] 10 — Проверки проекта (1.6) ([спека](docs/specs/stage-1-modules-to-parts.md))
-- [ ] 11 — Заказ Петрова целиком (1.7) ([спека](docs/specs/stage-1-modules-to-parts.md))
+- [x] 05 — Пробный ход через `base_door` (1.1, 1.2, 1.3) ([спека](docs/specs/stage-1-modules-to-parts.md))
+- [x] 06 — Полная схема в импорте и `diff` (1.1, 0.4) ([спека](docs/specs/stage-1-modules-to-parts.md))
+- [x] 07 — Нижние шаблоны (1.4) ([спека](docs/specs/stage-1-modules-to-parts.md))
+- [x] 08 — Верхние шаблоны и `appliances.yaml` (1.4) ([спека](docs/specs/stage-1-modules-to-parts.md))
+- [x] 09 — Угловые и пенал (1.5) ([спека](docs/specs/stage-1-modules-to-parts.md))
+- [x] 10 — Проверки проекта (1.6) ([спека](docs/specs/stage-1-modules-to-parts.md))
+- [x] 11 — Заказ Петрова целиком (1.7) ([спека](docs/specs/stage-1-modules-to-parts.md))
 
 ## Этап 2. Раскрой, кромка, закупка
 
-- [ ] 12 — Раскрой (2.1) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
-- [ ] 13 — Слой PDF, карта раскроя, учёт выводов (2.2) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
-- [ ] 14 — Карта кромления (2.3) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
-- [ ] 15 — Закупка и `kitchen production` (2.4) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
+- [x] 12 — Раскрой (2.1) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
+- [x] 13 — Слой PDF, карта раскроя, учёт выводов (2.2) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
+- [x] 14 — Карта кромления (2.3) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
+- [x] 15 — Закупка и `kitchen production` (2.4) ([спека](docs/specs/stage-2-cutting-edging-purchase.md))
 
 **ВЕХА 1** — остановиться, показать результаты (пути к PDF, ключевые цифры), дождаться подтверждения.
 
@@ -49,6 +49,7 @@
 
 - [ ] 23 — Модули в комнате и 3D (5.1) ([спека](docs/specs/stage-5-project-3d.md))
 - [ ] 24 — Устаревшие выводы в `status` (5.3) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 32 — Пустое место и антресоль над холодильником (5.4) ([спека](docs/specs/stage-5-project-3d.md))
 - [ ] 25 — Черновик раскладки (5.2) ([спека](docs/specs/stage-5-project-3d.md))
 
 ## Этап 6. Скиллы

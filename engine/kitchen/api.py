@@ -2,34 +2,57 @@
 
 import hashlib
 import json
+import shutil
 import sqlite3
+import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import tzinfo
+from datetime import date, tzinfo
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 from kitchen import brief as brief_check
 from kitchen import store
+from kitchen.checks import Finding
+from kitchen.checks import check_project as run_checks
+from kitchen.common import CommonItem, CountertopCut, compute_common, plan_countertop
+from kitchen.cutting import MaterialCut, cut_parts
+from kitchen.cutting_pdf import write_cutting_map
+from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, OrderError
 from kitchen.models import Workshop
+from kitchen.parts import EdgeTotals, ModuleParts, Part, compute_parts
+from kitchen.project import Project, parse_project
+from kitchen.purchase import PurchaseShop, build_purchase
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
 __all__ = [
     "BriefSaveResult",
     "BriefShowResult",
+    "CheckResult",
+    "CommonItem",
+    "DiffResult",
+    "EdgeTotals",
+    "EdgingResult",
     "ExportResult",
     "FileSummary",
+    "Finding",
     "ImportResult",
     "LogEntry",
     "LogResult",
+    "ModuleParts",
     "OrderInfo",
     "OrderResult",
+    "OutputInfo",
+    "PartsResult",
+    "PartsSource",
+    "ProductionResult",
+    "PurchaseResult",
     "QuickEstimate",
     "StatusResult",
     "ValidationContext",
@@ -37,13 +60,27 @@ __all__ = [
     "WorkshopCheck",
     "brief_save",
     "brief_show",
+    "check_project",
     "check_workshop",
+    "cut_and_save",
+    "cut_from_order",
+    "cut_from_project",
+    "diff_project",
+    "edges_and_save",
+    "edges_from_order",
+    "edges_from_project",
     "export_project",
     "import_project",
+    "list_outputs",
     "load_workshop",
     "log_add",
     "order_new",
     "order_show",
+    "parts_from_order",
+    "parts_from_project",
+    "production_and_save",
+    "purchase_and_save",
+    "purchase_from_order",
     "quick_estimate",
     "resolve_home",
     "status",
@@ -65,6 +102,7 @@ class WorkshopCheck(Result):
 _LIST_KEYS = {
     "materials.yaml": ["листовые", "кромка", "столешницы", "фасады"],
     "hardware.yaml": ["позиции"],
+    "appliances.yaml": ["позиции"],
     "labor.yaml": ["нормы_минут"],
 }
 
@@ -129,6 +167,7 @@ class ImportResult(Result):
     previous_version: int | None
     content_hash: str
     warnings: list[str] = Field(default_factory=list)
+    brief_id: int | None = None  # бриф, с которым сверена техника
 
 
 class ExportResult(Result):
@@ -246,15 +285,23 @@ class ValidationContext:
     order_ref: str  # номер-фамилия
     order_number: str  # ГГГГ-NNN
     workshop: Workshop | None = None
+    workshop_problems: list[str] = field(default_factory=list)  # почему мастерская не загрузилась
+    brief: dict | None = None  # последний бриф заказа (техника сверяется с ним)
+    brief_id: int | None = None
 
 
 @dataclass
 class ValidationResult:
     errors: list[str] = field(default_factory=list)  # отклоняют импорт
     warnings: list[str] = field(default_factory=list)  # пишутся в журнал как note
+    brief_id: int | None = None  # какой бриф использован при проверке
 
 
 Validator = Callable[[Any, ValidationContext], ValidationResult]
+
+
+def _latest_brief(conn: sqlite3.Connection, pk: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT * FROM briefs WHERE order_id = ? ORDER BY id DESC LIMIT 1", (pk,)).fetchone()
 
 
 def _same_order(value: Any, ctx: ValidationContext) -> bool:
@@ -273,11 +320,7 @@ def _same_order(value: Any, ctx: ValidationContext) -> bool:
 
 
 def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
-    """Минимальная обёртка проекта до этапа 1: объект с полем `order` — номер заказа или `номер-фамилия`.
-
-    Шов для замены: тикет 06 подставит полную схему, тикет 10 — проверки правил (с мастерской из
-    контекста и предупреждениями).
-    """
+    """Проверить заказ, схему и конструкцию проекта (`kitchen.checks`): ошибки отклоняют импорт."""
     if not isinstance(data, dict):
         return ValidationResult(["Проект должен быть JSON-объектом ({...}), а не списком или значением."])
     if "order" not in data:
@@ -285,7 +328,30 @@ def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
     value = data["order"]
     if not _same_order(value, ctx):
         return ValidationResult([f"Поле «order» = «{value}» не совпадает с заказом {ctx.order_ref}."])
-    return ValidationResult()
+    try:
+        project = parse_project({k: v for k, v in data.items() if k != "version"})
+    except OrderError as e:
+        return ValidationResult(errors=e.problems)
+    seen = set()
+    for wall in project.walls:
+        for row in wall.rows:
+            for module in row.modules:
+                if module.label in seen:
+                    return ValidationResult(errors=[f"Метка модуля «{module.label}» не уникальна."])
+                seen.add(module.label)
+    if ctx.workshop is None:  # без мастерской проект не проверить, а непроверенный не принимаем
+        return ValidationResult(
+            errors=[
+                "Мастерская не загрузилась, проект проверить нельзя (см. kitchen check-workshop):",
+                *ctx.workshop_problems,
+            ]
+        )
+    findings = run_checks(project, ctx.workshop, ctx.brief)
+    return ValidationResult(
+        errors=[f.message for f in findings if f.level == "error"],
+        warnings=[f.message for f in findings if f.level == "warning"],
+        brief_id=ctx.brief_id,
+    )
 
 
 def _canonical(data: dict) -> str:
@@ -325,7 +391,15 @@ def import_project(
         loaded = load(home)
         mock = _mock_of(loaded)
         current = _current_version(o.conn, o.pk)
-        ctx = ValidationContext(o.ref, o.row["number"], loaded.workshop)
+        latest = _latest_brief(o.conn, o.pk)
+        ctx = ValidationContext(
+            o.ref,
+            o.row["number"],
+            loaded.workshop,
+            loaded.problems,
+            json.loads(latest["data"]) if latest else None,
+            latest["id"] if latest else None,
+        )
         checked = validate(data, ctx)
         if checked.errors:
             tail = "Проект отклонён, текущая версия не изменена." if current else "Проект отклонён."
@@ -344,16 +418,25 @@ def import_project(
                 previous_version=prev,
                 content_hash=digest,
                 warnings=checked.warnings,
+                brief_id=current["brief_id"],  # бриф, записанный у версии, а не новый
                 **mock,
             )
         version = (prev or 0) + 1
         o.conn.execute(
-            "INSERT INTO project_versions (order_id, version, data, content_hash, created_at)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (o.pk, version, text, digest, store.now()),
+            "INSERT INTO project_versions (order_id, version, data, content_hash, created_at, brief_id)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (o.pk, version, text, digest, store.now(), checked.brief_id),
         )
         for warning in checked.warnings:
             _insert_log(o.conn, o.pk, "note", f"Предупреждение при импорте: {warning}", version)
+        if checked.brief_id is not None:
+            _insert_log(
+                o.conn,
+                o.pk,
+                "note",
+                f"Проверки проекта: техника сверена с брифом №{checked.brief_id}",
+                version,
+            )
         o.changed = True
         return ImportResult(
             order=o.ref,
@@ -362,6 +445,7 @@ def import_project(
             previous_version=prev,
             content_hash=digest,
             warnings=checked.warnings,
+            brief_id=checked.brief_id,
             **mock,
         )
 
@@ -388,6 +472,118 @@ def export_project(
         )
         return ExportResult(
             order=o.ref, version=found["version"], path=str(target), project=project, **_mock(o.home)
+        )
+
+
+class DiffResult(Result):
+    order: str
+    from_version: int
+    to_version: int
+    changes: list[str]
+
+
+def _modules(data: dict) -> dict[str, tuple[dict, str, str, int]]:
+    modules = {}
+    for wall in data.get("walls", []):
+        for row in wall.get("rows", []):
+            for index, module in enumerate(row.get("modules", [])):
+                label = module["label"]
+                if not isinstance(label, str) or label in modules or row["kind"] not in ("lower", "upper"):
+                    raise ValueError("повторная метка или неверный ряд")
+                modules[label] = (module, wall["label"], row["kind"], index)
+    return modules
+
+
+_DIFF_NAMES = {
+    "template": "шаблон",
+    "width": "ширина",
+    "height": "высота",
+    "depth": "глубина",
+    "shelves": "полки",
+    "doors": "двери",
+    "drawers": "ящики",
+    "materials": "материалы",
+    "body": "корпус",
+    "facades": "фасады",
+    "facade_color": "цвет фасада",
+    "handles": "ручки",
+    "countertop": "столешница",
+    "contents": "наполнение",
+    "inserts": "вставки",
+    "lift": "подъёмник",
+    "without_back": "без задней стенки",
+    "corner": "угол",
+    "adjacent_wall": "соседняя стена",
+}
+
+
+def _value(value: Any) -> str:
+    if value is None:
+        return "не задано"
+    if isinstance(value, bool):
+        return "да" if value else "нет"
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
+def _changes(before: dict, after: dict, prefix: str = "") -> list[str]:
+    changes = []
+    for key in sorted(before.keys() | after.keys()):
+        if key == "label":
+            continue
+        left, right = before.get(key), after.get(key)
+        if left == right:
+            continue
+        name = f"{prefix}{_DIFF_NAMES.get(key, key)}"
+        if (
+            (isinstance(left, dict) or isinstance(right, dict))
+            and (left is None or isinstance(left, dict))
+            and (right is None or isinstance(right, dict))
+        ):
+            changes.extend(_changes(left or {}, right or {}, name + ": "))
+        else:
+            changes.append(f"{name} {_value(left)} → {_value(right)}")
+    return changes
+
+
+def diff_project(order: str, from_version: int, to_version: int, home: Path | None = None) -> DiffResult:
+    """Сравнить сохранённые версии проекта по меткам модулей."""
+    with _open_order(order, home) as o:
+        projects = []
+        for version in (from_version, to_version):
+            row = o.conn.execute(
+                "SELECT data FROM project_versions WHERE order_id = ? AND version = ?", (o.pk, version)
+            ).fetchone()
+            if not row:
+                raise OrderError(f"У заказа {o.ref} нет версии {version} проекта.")
+            data = json.loads(row["data"])
+            try:
+                projects.append(_modules(data))
+            except (TypeError, KeyError, ValueError, AttributeError) as e:
+                raise OrderError(
+                    f"Версия {version} не соответствует текущей схеме проекта: "
+                    "невозможно определить модули, стены или ряды."
+                ) from e
+        before, after = projects
+        changes = []
+        for label in sorted(before.keys() | after.keys()):
+            if label not in before:
+                changes.append(f"{label}: добавлен модуль")
+            elif label not in after:
+                changes.append(f"{label}: удалён модуль")
+            else:
+                old, old_wall, old_row, old_pos = before[label]
+                new, new_wall, new_row, new_pos = after[label]
+                changes.extend(f"{label}: {line}" for line in _changes(old, new))
+                if (old_wall, old_row, old_pos) != (new_wall, new_row, new_pos):
+                    rows = {"lower": "нижний", "upper": "верхний"}
+                    changes.append(
+                        f"{label}: положение {old_wall}, {rows[old_row]}, {old_pos + 1} → "
+                        f"{new_wall}, {rows[new_row]}, {new_pos + 1}"
+                    )
+        return DiffResult(
+            order=o.ref, from_version=from_version, to_version=to_version, changes=changes, **_mock(o.home)
         )
 
 
@@ -584,7 +780,579 @@ def brief_show(order: str, home: Path | None = None) -> BriefShowResult:
         )
 
 
-# --- быстрая вилка -----------------------------------------------------------
+# --- детали проекта -----------------------------------------------------------
+
+
+class PartsSource(BaseModel):
+    """Откуда посчитан вывод: версия проекта заказа или файл; бриф, с которым прошли проверки."""
+
+    kind: Literal["order", "file"]
+    order: str  # номер-фамилия (из БД) или поле order файла
+    version: int | None  # версия проекта; у файла — только если она записана в самом файле
+    content_hash: str  # sha256 канонического JSON без поля version (как у версии в БД)
+    path: str | None = None  # путь файла проекта
+    brief_id: int | None = None  # последний бриф заказа: с ним посчитаны проверки
+    brief_saved_at: str | None = None
+    version_brief_id: int | None = None  # бриф, записанный у версии при импорте
+
+
+class PartsResult(Result):
+    """Детали по модулям, фурнитура, кромка, площадь фасадов, находки проверок, версия-источник."""
+
+    order: str  # поле order проекта
+    source: PartsSource
+    modules: list[ModuleParts]
+    hardware: dict[str, int]
+    edges: dict[str, EdgeTotals]
+    facade_area: float  # м², округлено до 4 знаков
+    facade_area_by_color: dict[str, float]  # м² по цветам фасадов проекта
+    common: list[CommonItem]  # общие позиции кухни: цоколь, шина, навесы, LED, столешница
+    findings: list[Finding]
+    warnings: list[str]
+
+
+def _project_hash(data: dict) -> str:
+    return hashlib.sha256(_canonical({k: v for k, v in data.items() if k != "version"}).encode()).hexdigest()
+
+
+def _build_parts(
+    project: Project,
+    home: Path,
+    source: PartsSource,
+    brief: sqlite3.Row | None,
+    extra_warnings: list[str],
+    workshop: Workshop | None = None,
+) -> PartsResult:
+    workshop = workshop or load_workshop(home)
+    computed = compute_parts(project, workshop)
+    source = source.model_copy(
+        update={
+            "brief_id": brief["id"] if brief else None,
+            "brief_saved_at": brief["created_at"] if brief else None,
+        }
+    )
+    return PartsResult(
+        order=project.order,
+        source=source,
+        modules=computed.modules,
+        hardware=computed.hardware,
+        edges=computed.edges,
+        facade_area=computed.facade_area,
+        facade_area_by_color=computed.facade_by_color,
+        common=compute_common(project, workshop, computed.hardware),
+        findings=run_checks(project, workshop, json.loads(brief["data"]) if brief else None),
+        warnings=[*computed.warnings, *extra_warnings],
+        mock=workshop.is_mock,
+        mock_files=workshop.mock_files,
+    )
+
+
+def _brief_of_project(home: Path, order: str) -> sqlite3.Row | None:
+    """Последний бриф заказа из БД; заказа или БД ещё нет — `None` (проект проверяют как черновик)."""
+    if not store.db_path(home).exists():
+        return None
+    with store.connect(home) as conn:
+        try:
+            return _latest_brief(conn, store.find_order(conn, order)["id"])
+        except OrderError:
+            return None
+
+
+def parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
+    """`kitchen parts --project <файл>`: детали проекта из файла (черновик до импорта)."""
+    home = home or resolve_home()
+    data = _read_json(Path(path), "Файл проекта")
+    project = parse_project(data)
+    source = PartsSource(
+        kind="file",
+        order=project.order,
+        version=project.version,
+        content_hash=_project_hash(data),
+        path=str(path),
+    )
+    return _build_parts(project, home, source, _brief_of_project(home, project.order), [])
+
+
+def _order_project(order: str, home: Path) -> tuple[Project, PartsSource, sqlite3.Row | None, list[str]]:
+    """Текущая версия проекта заказа: проект, источник, последний бриф, предупреждения об устаревшем брифе."""
+    with _open_order(order, home) as o:
+        current = _current_version(o.conn, o.pk)
+        if not current:
+            raise OrderError(f"У заказа {o.ref} проекта ещё нет. Сначала kitchen import.")
+        project = parse_project({**json.loads(current["data"]), "version": current["version"]})
+        latest = _latest_brief(o.conn, o.pk)
+    warnings = []
+    if latest and latest["id"] != current["brief_id"]:
+        was = f"№{current['brief_id']}" if current["brief_id"] else "никакой"
+        warnings.append(
+            f"Бриф №{latest['id']} новее брифа, с которым проверена версия {current['version']} "
+            f"({was}): расчёт и проверки идут с последним брифом. "
+            "Импортируйте проект заново (kitchen import), чтобы записать его у версии."
+        )
+    source = PartsSource(
+        kind="order",
+        order=o.ref,
+        version=current["version"],
+        content_hash=current["content_hash"],
+        version_brief_id=current["brief_id"],
+    )
+    return project, source, latest, warnings
+
+
+def parts_from_order(order: str, home: Path | None = None) -> PartsResult:
+    """`kitchen parts <заказ>`: детали текущей версии проекта, проверки с последним брифом заказа."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
+    return _build_parts(project, home, source, latest, warnings)
+
+
+# --- раскрой ------------------------------------------------------------------
+
+
+OutputKind = store.OutputKind
+
+
+class OutputInfo(BaseModel):
+    """Вывод заказа: файл в `orders/<заказ>/out/` и версия проекта, из которой он посчитан."""
+
+    kind: OutputKind
+    path: str  # относительно KITCHEN_HOME, как в БД
+    file: str  # полный путь
+    source_version: int
+    # Время записи в БД. В результате команды не заполняется: вывод детерминирован.
+    created_at: str | None = None
+
+
+class CutResult(Result):
+    """Раскрой листовых деталей по материалам, с порядком резов; версия-источник."""
+
+    order: str
+    source: PartsSource
+    kerf: int  # пропил, мм (equipment.yaml)
+    trim: int  # обрезка по периметру, мм
+    max_cut_length: int  # макс. длина реза станка, мм
+    materials: list[MaterialCut]
+    countertop: CountertopCut | None  # линейный раскрой столешницы; нет столешницы в проекте — `None`
+    warnings: list[str]
+    output: OutputInfo | None = None  # PDF карты раскроя; только после `cut_and_save`
+
+
+def _build_cut(
+    project: Project,
+    home: Path,
+    source: PartsSource,
+    brief: sqlite3.Row | None,
+    extra: list[str],
+    workshop: Workshop | None = None,
+) -> CutResult:
+    workshop = workshop or load_workshop(home)
+    computed = compute_parts(project, workshop)
+    saw = workshop.equipment.saw
+    return CutResult(
+        order=project.order,
+        source=source.model_copy(
+            update={
+                "brief_id": brief["id"] if brief else None,
+                "brief_saved_at": brief["created_at"] if brief else None,
+            }
+        ),
+        kerf=round(saw.kerf),
+        trim=round(workshop.equipment.sheet.perimeter_trim),
+        max_cut_length=round(saw.max_cut_length),
+        materials=cut_parts(computed.modules, workshop),
+        countertop=plan_countertop(project, workshop),
+        warnings=[*computed.warnings, *extra],
+        mock=workshop.is_mock,
+        mock_files=workshop.mock_files,
+    )
+
+
+def cut_from_project(path: Path, home: Path | None = None) -> CutResult:
+    """`kitchen cut --project <файл>`: раскрой деталей проекта из файла (черновик до импорта)."""
+    home = home or resolve_home()
+    data = _read_json(Path(path), "Файл проекта")
+    project = parse_project(data)
+    source = PartsSource(
+        kind="file",
+        order=project.order,
+        version=project.version,
+        content_hash=_project_hash(data),
+        path=str(path),
+    )
+    return _build_cut(project, home, source, _brief_of_project(home, project.order), [])
+
+
+def cut_from_order(order: str, home: Path | None = None) -> CutResult:
+    """`kitchen cut <заказ>`: раскрой деталей текущей версии проекта."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
+    return _build_cut(project, home, source, latest, warnings)
+
+
+CUTTING_PDF = "cutting-map.pdf"
+
+
+def _output_info(home: Path, source: PartsSource, kind: OutputKind, filename: str) -> OutputInfo:
+    if source.version is None:
+        raise OrderError(f"У заказа {source.order} нет версии проекта.")
+    rel = f"orders/{source.order}/out/{filename}"
+    return OutputInfo(kind=kind, path=rel, file=str(home / rel), source_version=source.version)
+
+
+def _save_outputs(
+    home: Path, source: PartsSource, files: list[tuple[OutputInfo, Callable[[Path], None]]]
+) -> None:
+    """Регистрирует и устанавливает комплект файлов под одной блокировкой; сбой восстанавливает старый комплект."""
+    if source.version is None:
+        raise OrderError(f"У заказа {source.order} нет версии проекта.")
+    directory = home / "orders" / source.order / "out"
+    directory.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".output-", dir=directory))
+    installed: list[tuple[Path, Path | None]] = []
+    preserve_staging = False
+    try:
+        for info, write in files:
+            write(staging / Path(info.file).name)
+        with store.connect(home) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = store.find_order(conn, source.order)
+                current = _current_version(conn, row["id"])
+                if current is None or current["version"] != source.version:
+                    raise OrderError("Изменилась версия проекта во время расчёта. Повторите команду.")
+                for index, (info, _) in enumerate(files):
+                    path = Path(info.file)
+                    backup_name = "previous.pdf" if index == 0 else f"backup-{index}"
+                    backup = staging / backup_name if path.exists() else None
+                    if backup is not None:
+                        shutil.copy2(path, backup)
+                    store.register_output(conn, row["id"], info.kind, info.path, source.version)
+                    (staging / path.name).replace(path)
+                    installed.append((path, backup))
+                conn.execute("UPDATE orders SET updated_at = ? WHERE id = ?", (store.now(), row["id"]))
+                conn.commit()
+            except BaseException as error:
+                failures = []
+                try:
+                    for path, backup in reversed(installed):
+                        try:
+                            if backup is not None:
+                                backup.replace(path)
+                            else:
+                                path.unlink(missing_ok=True)
+                        except BaseException as restore_error:  # noqa: BLE001 — сохранить резерв и продолжить откат при прерывании
+                            failures.append(f"{path}: {restore_error}")
+                finally:
+                    conn.rollback()
+                if failures:
+                    preserve_staging = True
+                    raise OrderError(
+                        f"Не удалось восстановить файлы после ошибки: {'; '.join(failures)}. "
+                        f"Резервные копии сохранены в {staging}. Первоначальная ошибка: {error}"
+                    ) from error
+                raise
+    finally:
+        if not preserve_staging:
+            shutil.rmtree(staging, ignore_errors=True)
+
+
+def _save_output(
+    home: Path, source: PartsSource, kind: OutputKind, filename: str, write_pdf: Callable[[Path], None]
+) -> OutputInfo:
+    info = _output_info(home, source, kind, filename)
+    _save_outputs(home, source, [(info, write_pdf)])
+    return info
+
+
+def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -> CutResult:
+    """`kitchen cut <заказ>`: раскрой и сохранённый PDF карты."""
+    home = home or resolve_home()
+    result = cut_from_order(order, home)
+    output = _save_output(
+        home,
+        result.source,
+        store.CUTTING,
+        CUTTING_PDF,
+        lambda path: write_cutting_map(
+            path,
+            result.materials,
+            kerf=result.kerf,
+            trim=result.trim,
+            order=result.source.order,
+            version=result.source.version,
+            mock=result.mock,
+            on=on or store.today(),
+        ),
+    )
+    return result.model_copy(update={"output": output})
+
+
+class EdgingResult(Result):
+    """Детали с кромкой и итоговый метраж из расчёта деталей."""
+
+    source: PartsSource
+    parts: list[Part]
+    edges: dict[str, EdgeTotals]
+    warnings: list[str]
+    output: OutputInfo | None = None
+
+
+def _edging(parts: PartsResult) -> EdgingResult:
+    return EdgingResult(
+        source=parts.source,
+        parts=[p for m in parts.modules for p in m.parts if any(p.edges.values())],
+        edges=parts.edges,
+        warnings=parts.warnings,
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+    )
+
+
+def edges_from_order(order: str, home: Path | None = None) -> EdgingResult:
+    return _edging(parts_from_order(order, home))
+
+
+def edges_from_project(path: Path, home: Path | None = None) -> EdgingResult:
+    return _edging(parts_from_project(path, home))
+
+
+def edges_and_save(order: str, home: Path | None = None, on: date | None = None) -> EdgingResult:
+    """Карта кромления текущей версии и её регистрация в заказе."""
+    home = home or resolve_home()
+    result = edges_from_order(order, home)
+    output = _save_output(
+        home,
+        result.source,
+        store.EDGING,
+        "edging-map.pdf",
+        lambda path: write_edging_map(
+            path,
+            result.parts,
+            result.edges,
+            order=result.source.order,
+            version=result.source.version,
+            mock=result.mock,
+            on=on or store.today(),
+        ),
+    )
+    return result.model_copy(update={"output": output})
+
+
+class PurchaseResult(Result):
+    """Позиции закупки с количеством, ценами и суммами по магазинам."""
+
+    source: PartsSource
+    shops: list[PurchaseShop]
+    total: float
+    warnings: list[str]
+    mock_notice: str | None = None
+    outputs: list[OutputInfo] = Field(default_factory=list)
+
+
+def _purchase(project: Project, parts: PartsResult, cut: CutResult, workshop: Workshop) -> PurchaseResult:
+    shops, total = build_purchase(
+        project,
+        workshop,
+        parts.modules,
+        parts.hardware,
+        parts.edges,
+        parts.common,
+        cut.materials,
+        cut.countertop,
+    )
+    return PurchaseResult(
+        source=parts.source,
+        shops=shops,
+        total=total,
+        warnings=parts.warnings,
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+        mock_notice=MOCK_BANNER if parts.mock else None,
+    )
+
+
+def purchase_from_order(order: str, home: Path | None = None) -> PurchaseResult:
+    home = home or resolve_home()
+    project, source, brief, warnings = _order_project(order, home)
+    workshop = load_workshop(home)
+    return _purchase(
+        project,
+        _build_parts(project, home, source, brief, warnings, workshop),
+        _build_cut(project, home, source, brief, warnings, workshop),
+        workshop,
+    )
+
+
+def _purchase_markdown(result: PurchaseResult) -> str:
+    """Телефонная версия закупки: все суммы и количества из единой модели."""
+    lines = []
+    if result.mock_notice:
+        lines += [f"**{result.mock_notice}**", ""]
+    lines += ["# Закупка", "", f"Заказ {result.source.order} · версия проекта {result.source.version}", ""]
+    if result.warnings:
+        lines += ["## Предупреждения", "", *(f"- {warning}" for warning in result.warnings), ""]
+    for shop in result.shops:
+        lines += [f"## {shop.name}", ""]
+        for item in shop.items:
+            details = []
+            if item.needed is not None:
+                details.append(f"нужно {item.needed} {item.needed_unit}")
+            if item.pack_size is not None:
+                details.append(f"в упаковке {item.pack_size} {item.needed_unit}")
+            if item.color:
+                details.append(f"цвет {item.color}")
+            if item.lead_days is not None:
+                details.append(f"срок {item.lead_days} раб. дней")
+            suffix = f" ({', '.join(details)})" if details else ""
+            lines.append(
+                f"- {item.name} [{item.id}]{suffix}: {item.quantity} {item.unit} × "
+                f"{item.unit_price} ₽ = {item.amount:.2f} ₽"
+            )
+        lines += ["", f"**Итого по магазину: {shop.total:.2f} ₽**", ""]
+    lines += [f"**Итого: {result.total:.2f} ₽**", ""]
+    return "\n".join(lines)
+
+
+def _purchase_files(
+    home: Path, result: PurchaseResult
+) -> tuple[PurchaseResult, list[tuple[OutputInfo, Callable]]]:
+    outputs = [
+        _output_info(home, result.source, store.PURCHASE_MD, "purchase.md"),
+        _output_info(home, result.source, store.PURCHASE_JSON, "purchase.json"),
+    ]
+    result = result.model_copy(update={"outputs": outputs})
+    return result, [
+        (outputs[0], lambda path: path.write_text(_purchase_markdown(result), encoding="utf-8")),
+        (outputs[1], lambda path: path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")),
+    ]
+
+
+def purchase_and_save(order: str, home: Path | None = None) -> PurchaseResult:
+    home = home or resolve_home()
+    result, files = _purchase_files(home, purchase_from_order(order, home))
+    _save_outputs(home, result.source, files)
+    return result
+
+
+class ProductionResult(Result):
+    """Все производственные выводы одной версии проекта."""
+
+    cutting: CutResult
+    edging: EdgingResult
+    purchase: PurchaseResult
+    mock_notice: str | None = None
+
+
+def production_and_save(order: str, home: Path | None = None, on: date | None = None) -> ProductionResult:
+    home = home or resolve_home()
+    project, source, brief, warnings = _order_project(order, home)
+    workshop = load_workshop(home)
+    parts = _build_parts(project, home, source, brief, warnings, workshop)
+    cut = _build_cut(project, home, source, brief, warnings, workshop)
+    edging = _edging(parts)
+    purchase, purchase_files = _purchase_files(home, _purchase(project, parts, cut, workshop))
+    cut_output = _output_info(home, source, store.CUTTING, CUTTING_PDF)
+    edging_output = _output_info(home, source, store.EDGING, "edging-map.pdf")
+    day = on or store.today()
+    files = [
+        (
+            cut_output,
+            lambda path: write_cutting_map(
+                path,
+                cut.materials,
+                kerf=cut.kerf,
+                trim=cut.trim,
+                order=source.order,
+                version=source.version,
+                mock=cut.mock,
+                on=day,
+            ),
+        ),
+        (
+            edging_output,
+            lambda path: write_edging_map(
+                path,
+                edging.parts,
+                edging.edges,
+                order=source.order,
+                version=source.version,
+                mock=edging.mock,
+                on=day,
+            ),
+        ),
+        *purchase_files,
+    ]
+    _save_outputs(home, source, files)
+    return ProductionResult(
+        cutting=cut.model_copy(update={"output": cut_output}),
+        edging=edging.model_copy(update={"output": edging_output}),
+        purchase=purchase,
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+        mock_notice=MOCK_BANNER if parts.mock else None,
+    )
+
+
+def list_outputs(order: str, home: Path | None = None) -> list[OutputInfo]:
+    """Выводы заказа из БД с версиями-источниками, по времени записи."""
+    home = home or resolve_home()
+    with _open_order(order, home) as o:
+        rows = o.conn.execute("SELECT * FROM outputs WHERE order_id = ? ORDER BY id", (o.pk,)).fetchall()
+    return [
+        OutputInfo(
+            kind=r["kind"],
+            path=r["path"],
+            file=str(home / r["path"]),
+            source_version=r["source_version"],
+            created_at=r["created_at"],
+        )
+        for r in rows
+    ]
+
+
+# --- проверки проекта ---------------------------------------------------------
+
+
+class CheckResult(Result):
+    """Находки проверок проекта: ошибки отклоняют импорт, предупреждения идут в журнал."""
+
+    order: str
+    findings: list[Finding]
+    brief_id: int | None = None  # какой бриф использован (последний сохранённый заказа)
+    brief_saved_at: str | None = None
+
+    @property
+    def errors(self) -> list[Finding]:
+        return [f for f in self.findings if f.level == "error"]
+
+    @property
+    def warnings(self) -> list[Finding]:
+        return [f for f in self.findings if f.level == "warning"]
+
+
+def check_project(path: Path, home: Path | None = None) -> CheckResult:
+    """`проверки проекта` из файла без БД: все находки сразу."""
+    home = home or resolve_home()
+    project = parse_project(_read_json(Path(path), "Файл проекта"))
+    workshop = load_workshop(home)
+    latest = None
+    if store.db_path(home).exists():
+        with store.connect(home) as conn:
+            try:
+                latest = _latest_brief(conn, store.find_order(conn, project.order)["id"])
+            except OrderError:  # заказа ещё нет: проект проверяют как черновик
+                latest = None
+    return CheckResult(
+        order=project.order,
+        findings=run_checks(project, workshop, json.loads(latest["data"]) if latest else None),
+        brief_id=latest["id"] if latest else None,
+        brief_saved_at=latest["created_at"] if latest else None,
+        mock=workshop.is_mock,
+        mock_files=workshop.mock_files,
+    )
+
+
+# --- быстрая вилка ------------------------------------------------------------
 
 
 class QuickEstimate(Result):

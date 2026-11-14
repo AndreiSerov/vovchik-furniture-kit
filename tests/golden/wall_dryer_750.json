@@ -1,0 +1,190 @@
+{
+  "_проверить_мастеру": "ПРОВЕРИТЬ МАСТЕРУ: эталон посчитан вручную, мастер не подтвердил",
+  "_выкладка": "Сушка заменяет полку, днище отсутствует. Кромка 2×720+718=2158 мм; 3 стороны, 2248 мм с припуском.",
+  "order": "2026-047-petrov",
+  "modules": [
+    {
+      "module": "В1",
+      "template": "wall_dryer",
+      "parts": [
+        {
+          "id": "В1-бок-Л",
+          "module": "В1",
+          "name": "боковина",
+          "length": 720,
+          "width": 320,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "orientation": {
+            "length": "z",
+            "width": "y",
+            "thickness": "x"
+          }
+        },
+        {
+          "id": "В1-бок-П",
+          "module": "В1",
+          "name": "боковина",
+          "length": 720,
+          "width": 320,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 734,
+            "y": 0,
+            "z": 0
+          },
+          "orientation": {
+            "length": "z",
+            "width": "y",
+            "thickness": "x"
+          }
+        },
+        {
+          "id": "В1-крыш",
+          "module": "В1",
+          "name": "крыша",
+          "length": 718,
+          "width": 320,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 16,
+            "y": 0,
+            "z": 704
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        },
+        {
+          "id": "В1-зад",
+          "module": "В1",
+          "name": "задняя стенка",
+          "length": 746,
+          "width": 716,
+          "thickness": 3,
+          "material": "hdf_3_white",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 2,
+            "y": -3,
+            "z": 2
+          },
+          "orientation": {
+            "length": "x",
+            "width": "z",
+            "thickness": "y"
+          }
+        },
+        {
+          "id": "В1-фасад-Л",
+          "module": "В1",
+          "name": "фасад",
+          "length": 716,
+          "width": 372,
+          "thickness": 19,
+          "material": "mdf_enamel_matt",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 2,
+            "y": 320,
+            "z": 2
+          },
+          "orientation": {
+            "length": "z",
+            "width": "x",
+            "thickness": "y"
+          },
+          "area_m2": 0.266352
+        },
+        {
+          "id": "В1-фасад-П",
+          "module": "В1",
+          "name": "фасад",
+          "length": 716,
+          "width": 372,
+          "thickness": 19,
+          "material": "mdf_enamel_matt",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 376,
+            "y": 320,
+            "z": 2
+          },
+          "orientation": {
+            "length": "z",
+            "width": "x",
+            "thickness": "y"
+          },
+          "area_m2": 0.266352
+        }
+      ]
+    }
+  ],
+  "hardware": {
+    "hinge_71B3550": 4,
+    "plate_173L6100": 4,
+    "hanger_camar807": 2,
+    "handle_profile": 2,
+    "dryer_750": 1,
+    "confirmat_7x50": 4,
+    "confirmat_cap_white": 4,
+    "screw_3_5x16": 36
+  },
+  "edges": {
+    "edge_08_white": {
+      "clean_m": 2.158,
+      "with_allowance_m": 2.248,
+      "purchase_m": 2.5
+    }
+  },
+  "facade_area": 0.5327,
+  "warnings": []
+}

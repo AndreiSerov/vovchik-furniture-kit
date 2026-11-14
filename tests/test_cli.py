@@ -21,8 +21,8 @@ def test_check_workshop_json_equals_api(home):
     assert r.exit_code == 0
     assert json.loads(r.output) == json.loads(api.check_workshop(home).model_dump_json())
     assert json.loads(r.output)["mock"] is True
-    assert len(json.loads(r.output)["mock_files"]) == 6
-    assert MOCK_BANNER not in r.output
+    assert len(json.loads(r.output)["mock_files"]) == 7
+    assert json.loads(r.output)["warning"] == MOCK_BANNER
 
 
 def test_no_banner_when_nothing_is_mock(home):
@@ -66,7 +66,18 @@ def _api_json(result) -> dict:
 
 def _project_file(tmp_path, **extra):
     p = tmp_path / "project.json"
-    p.write_text(json.dumps({"order": "2026-047", **extra}), encoding="utf-8")
+    p.write_text(
+        json.dumps(
+            {
+                "order": "2026-047",
+                "ceiling_height": 2700,
+                "walls": [],
+                "materials": {"body": "a", "facades_lower": "b", "facades_upper": "c", "handles": "d"},
+                **extra,
+            }
+        ),
+        encoding="utf-8",
+    )
     return p
 
 

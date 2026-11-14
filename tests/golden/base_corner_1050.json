@@ -1,0 +1,241 @@
+{
+  "_проверить_мастеру": "ПРОВЕРИТЬ МАСТЕРУ: эталон посчитан вручную, мастер не подтвердил",
+  "_выкладка": "Низ: дно/царги 1018, заглушка 594, фасад 450; кромка 7114 + 9×30 = 7384 мм, закупка 8,2 м. Карусель одна.",
+  "order": "2026-047-petrov",
+  "modules": [
+    {
+      "module": "Н1",
+      "template": "base_corner",
+      "parts": [
+        {
+          "id": "Н1-бок-Л",
+          "module": "Н1",
+          "name": "боковина",
+          "length": 720,
+          "width": 560,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "orientation": {
+            "length": "z",
+            "width": "y",
+            "thickness": "x"
+          }
+        },
+        {
+          "id": "Н1-бок-П",
+          "module": "Н1",
+          "name": "боковина",
+          "length": 720,
+          "width": 560,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 1034,
+            "y": 0,
+            "z": 0
+          },
+          "orientation": {
+            "length": "z",
+            "width": "y",
+            "thickness": "x"
+          }
+        },
+        {
+          "id": "Н1-дно",
+          "module": "Н1",
+          "name": "дно",
+          "length": 1018,
+          "width": 560,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 16,
+            "y": 0,
+            "z": 0
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        },
+        {
+          "id": "Н1-царга-1",
+          "module": "Н1",
+          "name": "царга",
+          "length": 1018,
+          "width": 100,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 16,
+            "y": 460,
+            "z": 704
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        },
+        {
+          "id": "Н1-царга-2",
+          "module": "Н1",
+          "name": "царга",
+          "length": 1018,
+          "width": 100,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 16,
+            "y": 0,
+            "z": 704
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        },
+        {
+          "id": "Н1-зад",
+          "module": "Н1",
+          "name": "задняя стенка",
+          "length": 1046,
+          "width": 716,
+          "thickness": 3,
+          "material": "hdf_3_white",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 2,
+            "y": -3,
+            "z": 2
+          },
+          "orientation": {
+            "length": "x",
+            "width": "z",
+            "thickness": "y"
+          }
+        },
+        {
+          "id": "Н1-загл",
+          "module": "Н1",
+          "name": "заглушка",
+          "length": 716,
+          "width": 594,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "edge_08_white",
+            "W1": "edge_08_white",
+            "W2": "edge_08_white"
+          },
+          "position": {
+            "x": 454,
+            "y": 560,
+            "z": 2
+          },
+          "orientation": {
+            "length": "z",
+            "width": "x",
+            "thickness": "y"
+          }
+        },
+        {
+          "id": "Н1-фасад",
+          "module": "Н1",
+          "name": "фасад",
+          "length": 716,
+          "width": 450,
+          "thickness": 19,
+          "material": "mdf_enamel_matt",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 2,
+            "y": 560,
+            "z": 2
+          },
+          "orientation": {
+            "length": "z",
+            "width": "x",
+            "thickness": "y"
+          },
+          "area_m2": 0.3222
+        }
+      ]
+    }
+  ],
+  "hardware": {
+    "corner_carousel": 1,
+    "confirmat_7x50": 8,
+    "confirmat_cap_white": 8,
+    "leg_100": 6,
+    "screw_3_5x16": 36,
+    "hinge_71B3550": 2,
+    "plate_173L6100": 2,
+    "handle_profile": 1
+  },
+  "edges": {
+    "edge_08_white": {
+      "clean_m": 7.114,
+      "with_allowance_m": 7.384,
+      "purchase_m": 8.2
+    }
+  },
+  "facade_area": 0.3222,
+  "warnings": []
+}

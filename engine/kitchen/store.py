@@ -12,10 +12,10 @@ from typing import Literal
 from kitchen.errors import OrderError
 from kitchen.workshop import resolve_home
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Миграции: номер схемы -> скрипт (операторы через «;», без «;» внутри комментариев).
-# Добавить v3: написать _SCHEMA_V3, внести в MIGRATIONS и поднять SCHEMA_VERSION.
+# Добавить v4: написать _SCHEMA_V4, внести в MIGRATIONS и поднять SCHEMA_VERSION.
 _SCHEMA_V1 = """
 CREATE TABLE orders (
     id INTEGER PRIMARY KEY,
@@ -66,7 +66,12 @@ _SCHEMA_V2 = """
 ALTER TABLE briefs ADD COLUMN check_result TEXT NOT NULL DEFAULT '{}'
 """
 
-MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2}
+# brief_id — бриф, с которым проверялась версия проекта (без внешнего ключа: ALTER в SQLite его не любит)
+_SCHEMA_V3 = """
+ALTER TABLE project_versions ADD COLUMN brief_id INTEGER
+"""
+
+MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2, 3: _SCHEMA_V3}
 
 
 def now() -> str:
@@ -245,3 +250,25 @@ def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
         listing = ", ".join(order_ref_of(r) for r in hits)
         raise OrderError(f"«{query}» подходит к нескольким заказам: {listing}. Уточните номер.")
     return hits[0]
+
+
+# --- выводы -----------------------------------------------------------------
+
+OutputKind = Literal[
+    "cutting", "edging", "purchase_md", "purchase_json"
+]  # виды выводов; этапы 2-4 добавляют свои
+CUTTING: OutputKind = "cutting"
+EDGING: OutputKind = "edging"
+PURCHASE_MD: OutputKind = "purchase_md"
+PURCHASE_JSON: OutputKind = "purchase_json"
+
+
+def register_output(
+    conn: sqlite3.Connection, order_pk: int, kind: OutputKind, path: str, source_version: int
+) -> None:
+    """Записывает вывод с версией-источником. Тот же файл пересчитывают на месте: прежняя запись заменяется."""
+    conn.execute("DELETE FROM outputs WHERE order_id = ? AND path = ?", (order_pk, path))
+    conn.execute(
+        "INSERT INTO outputs (order_id, kind, path, source_version, created_at) VALUES (?, ?, ?, ?, ?)",
+        (order_pk, kind, path, source_version, now()),
+    )

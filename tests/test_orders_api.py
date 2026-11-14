@@ -6,13 +6,25 @@ import sys
 from datetime import UTC, timedelta, timezone
 
 import pytest
-from kitchen import api
+from kitchen import api, store
 from kitchen.errors import OrderError
 
 
 def _project(tmp_path, order="2026-047", name="project.json", **extra):
     p = tmp_path / name
-    p.write_text(json.dumps({"order": order, "walls": [], **extra}, ensure_ascii=False), encoding="utf-8")
+    p.write_text(
+        json.dumps(
+            {
+                "order": order,
+                "walls": [],
+                "ceiling_height": 2700,
+                "materials": {"body": "a", "facades_lower": "b", "facades_upper": "c", "handles": "d"},
+                **extra,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     return p
 
 
@@ -75,7 +87,7 @@ def test_schema_version_stored_and_newer_db_rejected(home):
     api.order_new("2026-047-petrov")
     db = home / "orders" / "kitchen.db"
     conn = sqlite3.connect(db)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
     conn.execute("PRAGMA user_version = 99")
     conn.commit()
     conn.close()
@@ -100,13 +112,14 @@ def test_reimport_same_is_unchanged(order, tmp_path):
 def test_key_order_and_whitespace_do_not_make_a_version(order, tmp_path):
     api.import_project(order, _project(tmp_path))
     p = tmp_path / "other.json"
-    p.write_text('{ "walls": [],\n  "order": "2026-047" }', encoding="utf-8")
+    data = json.loads(_project(tmp_path).read_text(encoding="utf-8"))
+    p.write_text(json.dumps(dict(reversed(list(data.items()))), indent=4), encoding="utf-8")
     assert not api.import_project(order, p).changed
 
 
 def test_changed_project_is_v2(order, tmp_path):
     api.import_project(order, _project(tmp_path))
-    r = api.import_project(order, _project(tmp_path, walls=[{"label": "А"}]))
+    r = api.import_project(order, _project(tmp_path, walls=[{"label": "А", "length": 2000}]))
     assert r.changed and r.version == 2 and r.previous_version == 1
 
 
@@ -193,14 +206,17 @@ def test_export_has_version_and_roundtrips_without_new_version(order, tmp_path):
     api.import_project(order, _project(tmp_path))
     out = tmp_path / "exported.json"
     r = api.export_project(order, out=out)
-    assert json.loads(out.read_text(encoding="utf-8")) == {"order": "2026-047", "walls": [], "version": 1}
+    assert json.loads(out.read_text(encoding="utf-8")) == {
+        **json.loads(_project(tmp_path).read_text()),
+        "version": 1,
+    }
     assert r.version == 1 and r.path == str(out)
     assert not api.import_project(order, out).changed
 
 
 def test_export_default_path_and_specific_version(order, home, tmp_path):
     api.import_project(order, _project(tmp_path))
-    api.import_project(order, _project(tmp_path, walls=[1]))
+    api.import_project(order, _project(tmp_path, walls=[{"label": "А", "length": 2000}]))
     r = api.export_project(order, version=1)
     assert r.version == 1 and r.project["walls"] == []
     assert r.path == str(home / "orders" / "2026-047-petrov" / "project.json")
@@ -296,7 +312,7 @@ def test_concurrent_first_use_of_fresh_db(home):
     results = [(p.wait(), p.stderr.read().decode()) for p in procs]
     assert all(rc == 0 for rc, _ in results), results
     conn = sqlite3.connect(home / "orders" / "kitchen.db")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == store.SCHEMA_VERSION
 
 
 def test_not_a_database_file(home):

@@ -1,0 +1,423 @@
+{
+  "_проверить_мастеру": "ПРОВЕРИТЬ МАСТЕРУ: эталон посчитан вручную, мастер не подтвердил",
+  "_выкладка": "Три Tandembox, фасады 140 + 286 + 286 с зазорами 2 мм. Корпус: кромка 3144 мм, припуск 150 мм, закупка 3.7 м. Внутренняя ширина 568: дно 493×490, задняя стенка ящика 481×68 мм.",
+  "order": "2026-047-petrov",
+  "modules": [
+    {
+      "module": "Н1",
+      "template": "base_drawers",
+      "parts": [
+        {
+          "id": "Н1-бок-Л",
+          "module": "Н1",
+          "name": "боковина",
+          "length": 720,
+          "width": 560,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "z": 0
+          },
+          "orientation": {
+            "length": "z",
+            "width": "y",
+            "thickness": "x"
+          }
+        },
+        {
+          "id": "Н1-бок-П",
+          "module": "Н1",
+          "name": "боковина",
+          "length": 720,
+          "width": 560,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 584,
+            "y": 0,
+            "z": 0
+          },
+          "orientation": {
+            "length": "z",
+            "width": "y",
+            "thickness": "x"
+          }
+        },
+        {
+          "id": "Н1-дно",
+          "module": "Н1",
+          "name": "дно",
+          "length": 568,
+          "width": 560,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 16,
+            "y": 0,
+            "z": 0
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        },
+        {
+          "id": "Н1-царга-1",
+          "module": "Н1",
+          "name": "царга",
+          "length": 568,
+          "width": 100,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 16,
+            "y": 460,
+            "z": 704
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        },
+        {
+          "id": "Н1-царга-2",
+          "module": "Н1",
+          "name": "царга",
+          "length": 568,
+          "width": 100,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "edge_08_white",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 16,
+            "y": 0,
+            "z": 704
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        },
+        {
+          "id": "Н1-зад",
+          "module": "Н1",
+          "name": "задняя стенка",
+          "length": 716,
+          "width": 596,
+          "thickness": 3,
+          "material": "hdf_3_white",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 2,
+            "y": -3,
+            "z": 2
+          },
+          "orientation": {
+            "length": "z",
+            "width": "x",
+            "thickness": "y"
+          }
+        },
+        {
+          "id": "Н1-фасад-1",
+          "module": "Н1",
+          "name": "фасад",
+          "length": 596,
+          "width": 286,
+          "thickness": 19,
+          "material": "mdf_enamel_matt",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 2,
+            "y": 560,
+            "z": 2
+          },
+          "orientation": {
+            "length": "x",
+            "width": "z",
+            "thickness": "y"
+          },
+          "area_m2": 0.170456
+        },
+        {
+          "id": "Н1-дно-ящ-1",
+          "module": "Н1",
+          "name": "дно ящика",
+          "length": 493,
+          "width": 490,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 53,
+            "y": 70,
+            "z": 18
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        },
+        {
+          "id": "Н1-зад-ящ-1",
+          "module": "Н1",
+          "name": "задняя стенка ящика",
+          "length": 481,
+          "width": 68,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 59,
+            "y": 54,
+            "z": 18
+          },
+          "orientation": {
+            "length": "x",
+            "width": "z",
+            "thickness": "y"
+          }
+        },
+        {
+          "id": "Н1-фасад-2",
+          "module": "Н1",
+          "name": "фасад",
+          "length": 596,
+          "width": 286,
+          "thickness": 19,
+          "material": "mdf_enamel_matt",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 2,
+            "y": 560,
+            "z": 290
+          },
+          "orientation": {
+            "length": "x",
+            "width": "z",
+            "thickness": "y"
+          },
+          "area_m2": 0.170456
+        },
+        {
+          "id": "Н1-дно-ящ-2",
+          "module": "Н1",
+          "name": "дно ящика",
+          "length": 493,
+          "width": 490,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 53,
+            "y": 70,
+            "z": 306
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        },
+        {
+          "id": "Н1-зад-ящ-2",
+          "module": "Н1",
+          "name": "задняя стенка ящика",
+          "length": 481,
+          "width": 68,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 59,
+            "y": 54,
+            "z": 306
+          },
+          "orientation": {
+            "length": "x",
+            "width": "z",
+            "thickness": "y"
+          }
+        },
+        {
+          "id": "Н1-фасад-3",
+          "module": "Н1",
+          "name": "фасад",
+          "length": 596,
+          "width": 140,
+          "thickness": 19,
+          "material": "mdf_enamel_matt",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 2,
+            "y": 560,
+            "z": 578
+          },
+          "orientation": {
+            "length": "x",
+            "width": "z",
+            "thickness": "y"
+          },
+          "area_m2": 0.08344
+        },
+        {
+          "id": "Н1-дно-ящ-3",
+          "module": "Н1",
+          "name": "дно ящика",
+          "length": 493,
+          "width": 490,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 53,
+            "y": 70,
+            "z": 594
+          },
+          "orientation": {
+            "length": "x",
+            "width": "y",
+            "thickness": "z"
+          }
+        },
+        {
+          "id": "Н1-зад-ящ-3",
+          "module": "Н1",
+          "name": "задняя стенка ящика",
+          "length": 481,
+          "width": 68,
+          "thickness": 16,
+          "material": "ldsp_16_white",
+          "texture": false,
+          "edges": {
+            "L1": "",
+            "L2": "",
+            "W1": "",
+            "W2": ""
+          },
+          "position": {
+            "x": 59,
+            "y": 54,
+            "z": 594
+          },
+          "orientation": {
+            "length": "x",
+            "width": "z",
+            "thickness": "y"
+          }
+        }
+      ]
+    }
+  ],
+  "hardware": {
+    "confirmat_7x50": 8,
+    "confirmat_cap_white": 8,
+    "handle_profile": 3,
+    "leg_100": 4,
+    "screw_3_5x16": 42,
+    "tandembox_M_500": 3
+  },
+  "edges": {
+    "edge_08_white": {
+      "clean_m": 3.144,
+      "with_allowance_m": 3.294,
+      "purchase_m": 3.7
+    }
+  },
+  "facade_area": 0.4244,
+  "warnings": []
+}
