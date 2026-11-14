@@ -20,12 +20,12 @@ from kitchen import store
 from kitchen.checks import Finding
 from kitchen.checks import check_project as run_checks
 from kitchen.common import CommonItem, CountertopCut, compute_common, plan_countertop
-from kitchen.cutting import MaterialCut, cut_parts
+from kitchen.cutting import MaterialCut, cut_parts, kerf_warnings
 from kitchen.cutting_pdf import write_cutting_map
 from kitchen.edging_pdf import write_edging_map
-from kitchen.errors import InputError, OrderError
+from kitchen.errors import InputError, KitchenError, OrderError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
-from kitchen.models import Workshop
+from kitchen.models import Appliances, Hardware, Labor, Materials, Workshop
 from kitchen.parts import EdgeTotals, ModuleParts, Part, compute_parts
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
@@ -106,18 +106,21 @@ class WorkshopCheck(Result):
     errors: list[str]
 
 
-_LIST_KEYS = {
-    "materials.yaml": ["листовые", "кромка", "столешницы", "фасады"],
-    "hardware.yaml": ["позиции"],
-    "appliances.yaml": ["позиции"],
-    "labor.yaml": ["нормы_минут"],
+# Что считать в сводке файла: поля моделей; русские ключи берём из алиасов моделей, а не повторяем здесь.
+_COUNTED = {
+    "materials.yaml": (Materials, ("sheets", "edges", "countertops", "facades")),
+    "hardware.yaml": (Hardware, ("items",)),
+    "appliances.yaml": (Appliances, ("items",)),
+    "labor.yaml": (Labor, ("norms_min",)),
 }
 
 
 def _counts(name: str, data: dict) -> dict[str, int]:
-    keys = _LIST_KEYS.get(name)
-    if keys:
-        return {k: len(data.get(k) or []) for k in keys}
+    if name in _COUNTED:
+        model, fields = _COUNTED[name]
+        keys = [model.model_fields[f].alias or f for f in fields]
+        # Скаляр под списочным ключом не считаем: его назовёт ошибка загрузки (файл и ключ).
+        return {k: len(v) if isinstance(v := data.get(k), list | dict) else 0 for k in keys}
     return {"ключей": len([k for k in data if k != "mock"])}
 
 
@@ -205,6 +208,14 @@ def _info(row: sqlite3.Row) -> OrderInfo:
 def _mock_of(loaded: Loaded) -> dict[str, Any]:
     """Плашка мока на всех командах заказа: показываем, пока хоть один файл мастерской мок."""
     return {"mock": bool(loaded.mock_files), "mock_files": loaded.mock_files}
+
+
+def is_mock(home: Path | None = None) -> bool:
+    """Мок ли мастерская сейчас; мастерской нет — `False` (выводить нечего). Для плашки на сообщении об ошибке."""
+    try:
+        return bool(load(home or resolve_home()).mock_files)
+    except KitchenError:
+        return False
 
 
 def _mock(home: Path) -> dict[str, Any]:
@@ -382,11 +393,47 @@ def _read_json(path: Path, what: str) -> Any:
     if not path.is_file():
         raise OrderError(f"{what} {path} не найден.")
     try:
-        return json.loads(path.read_text(encoding="utf-8"), parse_constant=_reject_constant)
+        return json.loads(path.read_text(encoding="utf-8-sig"), parse_constant=_reject_constant)
     except json.JSONDecodeError as e:
         raise OrderError(f"{path.name}: не JSON (строка {e.lineno}, столбец {e.colno}).") from e
-    except ValueError as e:  # NaN/Infinity и ошибка кодировки
+    except UnicodeDecodeError as e:
+        raise OrderError(f"{path.name}: файл не в кодировке UTF-8; сохраните его как UTF-8.") from e
+    except ValueError as e:  # NaN/Infinity
         raise OrderError(f"{path.name}: не JSON ({e}).") from e
+
+
+_WRITE_REASONS: dict[type[OSError], str] = {
+    IsADirectoryError: "по этому пути папка, а не файл",
+    NotADirectoryError: "часть пути — не папка",
+    PermissionError: "нет доступа",
+    FileNotFoundError: "путь недоступен",
+    FileExistsError: "по этому пути уже есть файл вместо папки",
+    OSError: "ошибка записи",
+}
+
+
+def _write_text(path: Path, text: str) -> None:
+    """Запись файла заказа: папка вместо файла, нет доступа, нет места — русская ошибка, а не трейсбек."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    except OSError as e:
+        raise OrderError(
+            f"Не удалось записать файл {path}: {_WRITE_REASONS.get(type(e), 'ошибка записи')}."
+        ) from e
+
+
+def _same_project(version: sqlite3.Row, digest: str) -> bool:
+    """Версия в БД совпадает с проектом по нормализованному хешу.
+
+    Версии, записанные до нормализации, хранят хеш сырого JSON: их хеш пересчитывается из данных версии,
+    история не переписывается."""
+    if version["content_hash"] == digest:
+        return True
+    try:
+        return _data_hash(json.loads(version["data"])) == digest
+    except ValueError:
+        return False
 
 
 def import_project(
@@ -413,11 +460,11 @@ def import_project(
             raise OrderError([*checked.errors, tail])
         data = {k: v for k, v in data.items() if k != "version"}  # номер версии ставит движок
         text = _canonical(data)
-        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        digest = _data_hash(data)
         o.conn.execute("BEGIN IMMEDIATE")
         current = _current_version(o.conn, o.pk)  # перечитать под блокировкой
         prev = current["version"] if current else None
-        if current and current["content_hash"] == digest:
+        if current and _same_project(current, digest):
             return ImportResult(
                 order=o.ref,
                 changed=False,
@@ -473,10 +520,7 @@ def export_project(
                 raise OrderError(f"У заказа {o.ref} нет версии {version} проекта.")
         project = {**json.loads(found["data"]), "version": found["version"]}
         target = Path(out) if out else o.home / "orders" / o.ref / "project.json"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            json.dumps(project, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        _write_text(target, json.dumps(project, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
         return ExportResult(
             order=o.ref, version=found["version"], path=str(target), project=project, **_mock(o.home)
         )
@@ -667,9 +711,7 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
         text = "\n".join(lines).rstrip() + "\n"
         mock = _mock(o.home)
         target = o.home / "orders" / o.ref / "status.md"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        body = f"{MOCK_BANNER}\n\n{text}\n{MOCK_BANNER}\n" if mock["mock"] else text
-        target.write_text(body, encoding="utf-8")
+        _write_text(target, f"{MOCK_BANNER}\n\n{text}\n{MOCK_BANNER}\n" if mock["mock"] else text)
         return StatusResult(
             order=o.ref,
             stage=stage,
@@ -818,8 +860,18 @@ class PartsResult(Result):
     warnings: list[str]
 
 
-def _project_hash(data: dict) -> str:
-    return hashlib.sha256(_canonical({k: v for k, v in data.items() if k != "version"}).encode()).hexdigest()
+def _project_hash(project: Project) -> str:
+    """Хеш нормализованного проекта: написание `order`, `600` и `600.0`, порядок ключей хеш не меняют."""
+    normalized = project.model_dump(mode="json", exclude={"order", "version"})
+    return hashlib.sha256(_canonical(normalized).encode()).hexdigest()
+
+
+def _data_hash(data: dict) -> str:
+    """Хеш проекта из JSON. Проект, который схема не читает (старая версия, чужая проверка), — хеш сырого JSON."""
+    try:
+        return _project_hash(parse_project(data))
+    except OrderError:
+        return hashlib.sha256(_canonical(data).encode("utf-8")).hexdigest()
 
 
 def _build_parts(
@@ -874,7 +926,7 @@ def parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
         kind="file",
         order=project.order,
         version=project.version,
-        content_hash=_project_hash(data),
+        content_hash=_project_hash(project),
         path=str(path),
     )
     return _build_parts(project, home, source, _brief_of_project(home, project.order), [])
@@ -900,7 +952,7 @@ def _order_project(order: str, home: Path) -> tuple[Project, PartsSource, sqlite
         kind="order",
         order=o.ref,
         version=current["version"],
-        content_hash=current["content_hash"],
+        content_hash=_project_hash(project),  # нормализованный: версии со старым хешем в БД сходятся с файлом
         version_brief_id=current["brief_id"],
     )
     return project, source, latest, warnings
@@ -935,7 +987,8 @@ class CutResult(Result):
 
     order: str
     source: PartsSource
-    kerf: int  # пропил, мм (equipment.yaml)
+    kerf: int  # пропил, мм, как его учёл раскрой (дробный из equipment.yaml — вверх до целого)
+    kerf_declared: float  # пропил, как он записан в equipment.yaml
     trim: int  # обрезка по периметру, мм
     max_cut_length: int  # макс. длина реза станка, мм
     materials: list[MaterialCut]
@@ -963,12 +1016,13 @@ def _build_cut(
                 "brief_saved_at": brief["created_at"] if brief else None,
             }
         ),
-        kerf=round(saw.kerf),
-        trim=round(workshop.equipment.sheet.perimeter_trim),
-        max_cut_length=round(saw.max_cut_length),
+        kerf=saw.kerf_mm,
+        kerf_declared=saw.kerf,
+        trim=workshop.equipment.sheet.perimeter_trim,
+        max_cut_length=saw.max_cut_length,
         materials=cut_parts(computed.modules, workshop),
         countertop=plan_countertop(project, workshop),
-        warnings=[*computed.warnings, *extra],
+        warnings=[*computed.warnings, *extra, *kerf_warnings(saw)],
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,
     )
@@ -983,7 +1037,7 @@ def cut_from_project(path: Path, home: Path | None = None) -> CutResult:
         kind="file",
         order=project.order,
         version=project.version,
-        content_hash=_project_hash(data),
+        content_hash=_project_hash(project),
         path=str(path),
     )
     return _build_cut(project, home, source, _brief_of_project(home, project.order), [])
@@ -1084,6 +1138,7 @@ def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -
             path,
             result.materials,
             kerf=result.kerf,
+            kerf_declared=result.kerf_declared,
             trim=result.trim,
             order=result.source.order,
             version=result.source.version,
@@ -1296,7 +1351,7 @@ def estimate_from_project(path: Path, home: Path | None = None) -> EstimateResul
         kind="file",
         order=project.order,
         version=project.version,
-        content_hash=_project_hash(data),
+        content_hash=_project_hash(project),
         path=str(path),
     )
     workshop = load_workshop(home)
@@ -1395,6 +1450,7 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
                 path,
                 cut.materials,
                 kerf=cut.kerf,
+                kerf_declared=cut.kerf_declared,
                 trim=cut.trim,
                 order=source.order,
                 version=source.version,

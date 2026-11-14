@@ -1,5 +1,6 @@
 """Модели файлов мастерской. Поля английские, ключи YAML (русские) — алиасы."""
 
+import math
 import re
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from itertools import pairwise
@@ -26,8 +27,13 @@ def _not_bool(v):
 
 
 # Числа без молчаливого превращения true/false в 1/0.
-Num = Annotated[float, BeforeValidator(_not_bool)]
+# Конечные: `.inf` и `.nan` в YAML — ошибка загрузки, а не цена или норма.
+Num = Annotated[float, BeforeValidator(_not_bool), Field(allow_inf_nan=False)]
 Int = Annotated[int, BeforeValidator(_not_bool)]
+# Диапазоны живут в типах: цена, ставка, норма, доля — не меньше нуля; упаковка, шаг, размер листа — больше нуля.
+NonNegNum = Annotated[Num, Field(ge=0)]
+NonNegInt = Annotated[Int, Field(ge=0)]
+PosInt = Annotated[Int, Field(gt=0)]
 
 
 # Виды техники, которые знает движок: перечень брифа (тест сверяет с его схемой) и вытяжка из `appliances.hood`.
@@ -61,12 +67,17 @@ def _f(alias: str):
 
 class Saw(Section):
     type: str = _f("тип")
-    max_cut_length: Num = _f("макс_длина_реза")
-    kerf: Num = _f("пропил")
+    max_cut_length: PosInt = _f("макс_длина_реза")
+    kerf: NonNegNum = _f("пропил")  # решение мастера: дробный учитывается вверх до целого мм (`kerf_mm`)
+
+    @property
+    def kerf_mm(self) -> int:
+        """Пропил, который берёт раскрой: целый, дробный — вверх (иначе детали выйдут меньше номинала)."""
+        return math.ceil(self.kerf)
 
 
 class SheetTrim(Section):
-    perimeter_trim: Num = _f("обрезка_по_периметру")
+    perimeter_trim: NonNegInt = _f("обрезка_по_периметру")
 
 
 class EdgingMachine(Section):
@@ -120,7 +131,7 @@ class Shelf(Section):
     front_gap: Int = _f("отступ_спереди")
     pins: Int = _f("полкодержателей")
     height: Int = _f("высота")  # ДОБАВЛЕНО (МОК): положение полки от низа корпуса
-    step: Annotated[Int, Field(gt=0)] = _f("шаг")  # ДОБАВЛЕНО (МОК): расстояние между полками по высоте
+    step: PosInt = _f("шаг")  # ДОБАВЛЕНО (МОК): расстояние между полками по высоте
 
 
 class Legs(Section):
@@ -323,7 +334,7 @@ class ConstructionEdging(Section):
     case: Annotated[EdgeRule, BeforeValidator(parse_edge_rule)] = _f("корпус")
     rails: Annotated[EdgeRule, BeforeValidator(parse_edge_rule)] = _f("царги")
     shelves: Annotated[EdgeRule, BeforeValidator(parse_edge_rule)] = _f("полки")
-    reserve: Num = _f("запас")
+    reserve: NonNegNum = _f("запас")
     purchase_rounding: Annotated["MeterRounding", BeforeValidator(parse_meter_rounding)] = _f(
         "округление_закупки"
     )
@@ -459,12 +470,12 @@ class Construction(Section):
 class SheetMaterial(Section):
     id: str
     name: str = _f("название")
-    sheet: tuple[Num, Num] = _f("лист")
+    sheet: tuple[PosInt, PosInt] = _f("лист")
     texture: bool | str = _f("текстура")
     thickness: Int | None = Field(
         default=None, alias="толщина"
     )  # ДОБАВЛЕНО (МОК): у ХДФ — 3 (у ЛДСП корпуса толщина из construction.yaml)
-    price: Num = _f("цена")
+    price: NonNegNum = _f("цена")
     shop: str = _f("магазин")
 
     @field_validator("texture", mode="before")
@@ -478,7 +489,7 @@ class SheetMaterial(Section):
 class EdgeMaterial(Section):
     id: str
     name: str = _f("название")
-    price_per_m: Num = _f("цена_за_м")
+    price_per_m: NonNegNum = _f("цена_за_м")
     sale: str = _f("продажа")
     shop: str = _f("магазин")
 
@@ -486,8 +497,8 @@ class EdgeMaterial(Section):
 class Countertop(Section):
     id: str
     name: str = _f("название")
-    sheet: tuple[Num, Num] = _f("лист")
-    price: Num = _f("цена")
+    sheet: tuple[PosInt, PosInt] = _f("лист")
+    price: NonNegNum = _f("цена")
     shop: str = _f("магазин")
 
 
@@ -495,10 +506,19 @@ class FacadeMaterial(Section):
     id: str
     name: str = _f("название")
     thickness: Int | None = Field(default=None, alias="толщина")  # ДОБАВЛЕНО (МОК): 19 у МДФ
-    price_per_m2: Num = _f("цена_за_м2")
+    price_per_m2: NonNegNum = _f("цена_за_м2")
     outsourced: bool = _f("заказ_на_стороне")
-    lead_days: Int = _f("срок_раб_дней")
+    lead_days: NonNegInt = _f("срок_раб_дней")
     shop: str = _f("магазин")
+
+
+def _unique_ids(items: list, what: str) -> None:
+    """Повторный `id` в одном списке — ошибка загрузки: какая цена верна, решал бы порядок поиска."""
+    seen: set[str] = set()
+    repeated = sorted({i.id for i in items if i.id in seen or seen.add(i.id)})
+    if repeated:
+        listed = ", ".join(f"«{i}»" for i in repeated)
+        raise ValueError(f"повторяется id {what}: {listed}")
 
 
 class Materials(Section):
@@ -507,6 +527,18 @@ class Materials(Section):
     edges: list[EdgeMaterial] = _f("кромка")
     countertops: list[Countertop] = _f("столешницы")
     facades: list[FacadeMaterial] = _f("фасады")
+
+    @model_validator(mode="after")
+    def _ids_unique(self) -> "Materials":
+        for items, what in (
+            (self.sheets, "листового материала"),
+            (self.edges, "кромки"),
+            (self.countertops, "столешницы"),
+            (self.facades, "фасада"),
+        ):
+            _unique_ids(items, what)
+        return self
+
     # ДОБАВЛЕНО (МОК): какая кромка клеится на какой материал корпуса
     edge_by_material: dict[str, str] = Field(default_factory=dict, alias="кромка_к_материалу")
 
@@ -517,8 +549,8 @@ class Materials(Section):
 class HardwareItem(Section):
     id: str
     name: str = _f("название")
-    pack: Int = _f("упаковка")
-    price: Num = _f("цена")
+    pack: PosInt = _f("упаковка")
+    price: NonNegNum = _f("цена")
     shop: str = _f("магазин")
 
 
@@ -526,27 +558,32 @@ class Hardware(Section):
     mock: StrictBool
     items: list[HardwareItem] = _f("позиции")
 
+    @model_validator(mode="after")
+    def _ids_unique(self) -> "Hardware":
+        _unique_ids(self.items, "позиции фурнитуры")
+        return self
+
 
 # --- labor.yaml -------------------------------------------------------------
 
 
 class LaborNorms(Section):
-    cut_per_part: Num = _f("распил_на_деталь")
-    edge_per_m: Num = _f("кромка_на_метр")
-    drill_per_part: Num = _f("присадка_на_деталь")
-    case_assembly: Num = _f("сборка_корпуса")
-    drawer_assembly_extra: Num = _f("сборка_доп_на_ящик")
-    install_per_module: Num = _f("монтаж_на_модуль")
-    sink_cutout: Num = _f("врезка_мойки")
-    hob_cutout: Num = _f("врезка_варочной")
-    site_visit: Num = _f("выезд")
-    measuring: Num = _f("замер")
-    design: Num = _f("проектирование")
+    cut_per_part: NonNegNum = _f("распил_на_деталь")
+    edge_per_m: NonNegNum = _f("кромка_на_метр")
+    drill_per_part: NonNegNum = _f("присадка_на_деталь")
+    case_assembly: NonNegNum = _f("сборка_корпуса")
+    drawer_assembly_extra: NonNegNum = _f("сборка_доп_на_ящик")
+    install_per_module: NonNegNum = _f("монтаж_на_модуль")
+    sink_cutout: NonNegNum = _f("врезка_мойки")
+    hob_cutout: NonNegNum = _f("врезка_варочной")
+    site_visit: NonNegNum = _f("выезд")
+    measuring: NonNegNum = _f("замер")
+    design: NonNegNum = _f("проектирование")
 
 
 class Labor(Section):
     mock: StrictBool
-    hourly_rate: Num = _f("ставка_в_час")
+    hourly_rate: NonNegNum = _f("ставка_в_час")
     norms_min: LaborNorms = _f("нормы_минут")
 
 
@@ -586,12 +623,22 @@ def parse_rounding(value: object) -> RoundingRule:
 
 class Pricing(Section):
     mock: StrictBool
-    materials_markup: Num = _f("наценка_на_материалы")
-    consumables_share: Num = _f("расходники_от_материалов")
-    materials_delivery: Num = _f("доставка_материалов")
+    materials_markup: NonNegNum = _f("наценка_на_материалы")
+    consumables_share: NonNegNum = _f("расходники_от_материалов")
+    materials_delivery: NonNegNum = _f("доставка_материалов")
     price_rounding: Annotated[RoundingRule, BeforeValidator(parse_rounding)] = _f("округление_цены")
-    prepayment: Num = _f("предоплата")
+    prepayment: NonNegNum = _f("предоплата")
     quick_estimate_per_m: tuple[Num, Num] = _f("быстрая_оценка_за_пог_м")
+
+    @field_validator("quick_estimate_per_m")
+    @classmethod
+    def _range_positive_ascending(cls, value: tuple[float, float]) -> tuple[float, float]:
+        low, high = value
+        if low <= 0 or high < low:
+            raise ValueError(
+                "вилка должна быть из двух положительных чисел по возрастанию, например [85000, 110000]"
+            )
+        return value
 
 
 class ApplianceItem(Section):
@@ -612,9 +659,7 @@ class Appliances(Section):
 
     @model_validator(mode="after")
     def unique_ids(self):
-        ids = [item.id for item in self.items]
-        if len(ids) != len(set(ids)):
-            raise ValueError("id техники должны быть уникальны")
+        _unique_ids(self.items, "прибора")
         return self
 
 

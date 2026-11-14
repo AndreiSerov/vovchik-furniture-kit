@@ -43,7 +43,7 @@ from rectpack import (
 
 from kitchen.checks import along_texture, part_fit_findings
 from kitchen.errors import KitchenError, OrderError
-from kitchen.models import SheetMaterial, Workshop
+from kitchen.models import Saw, SheetMaterial, Workshop
 from kitchen.parts import ModuleParts, Part
 
 __all__ = ["Cut", "MaterialCut", "Placement", "SheetCut", "cut_order", "cut_parts"]
@@ -246,19 +246,27 @@ def _score(layout: list[list[_Rect]], parts: dict[str, Part]):
     return (len(layout), -last)
 
 
+def kerf_warnings(saw: Saw) -> list[str]:
+    """Дробный пропил учтён вверх до целого мм (решение мастера): раскрой называет это в результате."""
+    if saw.kerf == saw.kerf_mm:
+        return []
+    note = "equipment.yaml: дробный пропил округляется вверх до целого мм"
+    return [f"пропил {saw.kerf:g} мм учтён как {saw.kerf_mm} мм ({note})"]
+
+
 def _material_axes(sheet: SheetMaterial) -> tuple[int, int]:
     """Размер листа по осям раскроя: x — вдоль текстуры; у нетекстурного — как записано в materials.yaml."""
     a, b = sheet.sheet
     if isinstance(sheet.texture, str):
         along, across = along_texture(sheet, sheet.sheet)
-        return round(along), round(across)
-    return round(a), round(b)
+        return int(along), int(across)
+    return a, b
 
 
 def _cut_material(sheet: SheetMaterial, parts: list[Part], ws: Workshop) -> MaterialCut:
-    kerf = round(ws.equipment.saw.kerf)
-    trim = round(ws.equipment.sheet.perimeter_trim)
-    max_cut = round(ws.equipment.saw.max_cut_length)
+    kerf = ws.equipment.saw.kerf_mm
+    trim = ws.equipment.sheet.perimeter_trim
+    max_cut = ws.equipment.saw.max_cut_length
     size = _material_axes(sheet)
     field = (size[0] - 2 * trim, size[1] - 2 * trim)
     textured = bool(sheet.texture)

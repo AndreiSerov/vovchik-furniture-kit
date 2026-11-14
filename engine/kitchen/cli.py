@@ -41,7 +41,9 @@ def emit(result: R, render: Callable[[R], str], as_json: bool, ok: bool = True) 
 
 
 def fail(err: KitchenError) -> NoReturn:
-    typer.echo("\n".join(err.problems), err=True)
+    text = "\n".join(err.problems)
+    # Принцип 4: цифры в тексте ошибки могли быть посчитаны из мок-мастерской, плашка нужна и здесь.
+    typer.echo(f"{MOCK_BANNER}\n\n{text}\n\n{MOCK_BANNER}" if api.is_mock() else text, err=True)
     raise typer.Exit(1)
 
 
