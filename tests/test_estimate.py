@@ -2,7 +2,7 @@
 
 import json
 import re
-from decimal import ROUND_CEILING, Decimal
+from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import pytest
@@ -148,8 +148,23 @@ def test_small_project_labor_is_minutes_times_rate(small):
     assert {op: line.minutes for op, line in got.items()} == minutes
     assert {op: line.amount for op, line in got.items()} == rubles
     assert result.labor.minutes == pytest.approx(947.764)
-    assert result.labor.total == 15796.06
+    assert result.labor.total == 15796.07  # Σ минут × ставка / 60, не сумма округлённых строк
     assert result.labor.rate_per_hour == 1000
+
+
+def test_labor_total_is_sum_minutes_times_rate(small):
+    r = api.estimate_from_order(ORDER, small)
+    assert r.labor.total == 15796.07  # 947.764 мин × 1000 / 60 = 15796.0667
+    assert sum(line.amount for line in r.labor.lines) == pytest.approx(15796.06)  # строки — до копеек
+
+
+def test_sink_with_tandembox_insert_counts_a_drawer_set(small):
+    """Ящик = комплект Tandembox в фурнитуре модулей: поведение зафиксировано, решение ждёт мастера."""
+    data = json.loads((small / "small.json").read_text(encoding="utf-8"))
+    data["walls"][0]["rows"][0]["modules"][0]["contents"] = {"inserts": ["tandembox_M_500"]}
+    path = small / "sink-insert.json"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert lines(api.estimate_from_project(path, small))["drawer_assembly_extra"].quantity == 4
 
 
 def test_petrov_quantities(home):
@@ -209,6 +224,21 @@ def test_price_formula_with_default_pricing(small):
     assert result.markup == pytest.approx(float(materials * Decimal("0.10")), abs=0.01)
     assert result.delivery == 2500
     assert result.rounding == "вверх до 1000"
+
+
+@pytest.mark.parametrize("markup,consumables", [("0.25", "0.07"), ("0.5", "0")])
+def test_markup_and_consumables_follow_pricing_yaml_on_petrov(home, markup, consumables):
+    petrov(home)
+    edit_workshop(home, "pricing.yaml", "наценка_на_материалы: 0.10", f"наценка_на_материалы: {markup}")
+    edit_workshop(
+        home, "pricing.yaml", "расходники_от_материалов: 0.03", f"расходники_от_материалов: {consumables}"
+    )
+    r = api.estimate_from_order(ORDER, home)
+    materials = Decimal(str(api.purchase_from_order(ORDER, home).total))
+    assert r.markup == float((materials * Decimal(markup)).quantize(Decimal("0.01"), ROUND_HALF_UP))
+    assert r.consumables == float((materials * Decimal(consumables)).quantize(Decimal("0.01"), ROUND_HALF_UP))
+    raw = materials * (1 + Decimal(markup) + Decimal(consumables)) + 2500 + Decimal(str(r.labor.total))
+    assert r.price == int((raw / 1000).to_integral_value(rounding=ROUND_CEILING)) * 1000
 
 
 def with_delivery(home, amount):

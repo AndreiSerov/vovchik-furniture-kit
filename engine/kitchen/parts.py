@@ -23,6 +23,8 @@ from kitchen.project import Appliance, ModuleSpec, Project, ProjectMaterials, Ro
 __all__ = [
     "APPLIANCE_ROWS",
     "BACK_PANEL",
+    "DRAWER_BACK",
+    "DRAWER_BOTTOM",
     "TEMPLATES",
     "EdgeTotals",
     "ModuleDims",
@@ -44,6 +46,8 @@ __all__ = [
 ]
 
 EDGE_SIDES = ("L1", "L2", "W1", "W2")
+DRAWER_BOTTOM = "дно ящика"  # детали ящика Tandembox: по именам их отличают смета и присадка
+DRAWER_BACK = "задняя стенка ящика"
 BACK_PANEL = "задняя стенка"  # деталь, по которой находится корпус без задней стенки
 
 Axis = Literal["x", "y", "z"]
@@ -686,10 +690,10 @@ def build_base_drawers(
             )
         )
         for suffix, name, sizes, axes, y in (
-            ("дно-ящ", "дно ящика", bottom_dims, ("x", "y"), dims.depth - bottom_dims[1]),
+            ("дно-ящ", DRAWER_BOTTOM, bottom_dims, ("x", "y"), dims.depth - bottom_dims[1]),
             (
                 "зад-ящ",
-                "задняя стенка ящика",
+                DRAWER_BACK,
                 back_dims,
                 ("x", "z"),
                 dims.depth - bottom_dims[1] - drawer_t,

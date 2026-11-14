@@ -1261,7 +1261,7 @@ class EstimateResult(Result):
 
 def _estimate(project: Project, parts: PartsResult, cut: CutResult, workshop: Workshop) -> EstimateResult:
     purchase = _purchase(project, parts, cut, workshop)
-    labor = build_labor(project, workshop, parts.modules, parts.hardware, parts.edges)
+    labor = build_labor(project, workshop, parts.modules, parts.hardware, parts.edges, cut.materials)
     pricing = build_pricing(workshop, purchase.total, labor.total)
     return EstimateResult(
         source=parts.source,
