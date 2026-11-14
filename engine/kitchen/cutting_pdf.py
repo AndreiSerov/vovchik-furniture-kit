@@ -448,11 +448,18 @@ def _what(page: list[Placed]) -> str:
     )
 
 
-def _sheet_pages(m: MaterialCut, s: SheetCut, kerf: int, trim: int) -> list[tuple[Callable, str]]:
+def _sheet_pages(
+    m: MaterialCut, s: SheetCut, kerf: int, trim: int, kerf_declared: float | None = None
+) -> list[tuple[Callable, str]]:
     """Страница листа и, если списки не помещаются, страницы-продолжения: [(рисовальщик, пометка)]."""
     lines = [("Детали", True)] + [(_part_line(n, pl), False) for n, pl in enumerate(s.placements, 1)]
     lines += [("Резы по порядку", True)] + [(_cut_line(c), False) for c in s.cuts]
     holder: dict[str, list[list[Placed]]] = {}
+    kerf_text = (
+        f"{kerf} мм"
+        if kerf_declared in (None, kerf)
+        else f"{kerf} мм (в equipment.yaml {kerf_declared:g} мм)"
+    )
 
     def first(canvas: Canvas, area: Area) -> None:
         y = area.y + area.h
@@ -475,7 +482,7 @@ def _sheet_pages(m: MaterialCut, s: SheetCut, kerf: int, trim: int) -> list[tupl
         canvas.drawString(
             area.x,
             y - 47,
-            f"Пропил {kerf} мм, обрезка {trim} мм — пунктир по периметру. Красные: линии — резы,"
+            f"Пропил {kerf_text}, обрезка {trim} мм — пунктир по периметру. Красные: линии — резы,"
             " пунктир — выноски; номер детали — строка списка.",
         )
         bottom = _scheme(canvas, area, y - 52, m, s, kerf, trim)
@@ -520,6 +527,7 @@ def write_cutting_map(
     materials: list[MaterialCut],
     *,
     kerf: int,
+    kerf_declared: float | None = None,
     trim: int,
     order: str,
     version: int | None,
@@ -530,6 +538,6 @@ def write_cutting_map(
     doc = PdfDocument(path, order=order, version=version, mock=mock, on=on, title=f"Карта раскроя {order}")
     for m in materials:
         for s in m.sheets:
-            for draw, note in _sheet_pages(m, s, kerf, trim):
+            for draw, note in _sheet_pages(m, s, kerf, trim, kerf_declared):
                 doc.add_page(draw, note)
     doc.save()

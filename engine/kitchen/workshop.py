@@ -1,6 +1,7 @@
 """Поиск мастерской и загрузка её файлов с русскими сообщениями об ошибках."""
 
 import os
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeVar
@@ -51,6 +52,34 @@ def resolve_home(start: Path | None = None) -> Path:
     raise WorkshopError(NOT_FOUND)
 
 
+class DuplicateKeyError(yaml.YAMLError):
+    """Один и тот же ключ дважды в одном разделе YAML: вторая запись молча затёрла бы первую."""
+
+    def __init__(self, key: object, mark: yaml.Mark | None):
+        super().__init__(f"повторный ключ {key}")
+        self.key = key
+        self.problem_mark = mark
+
+
+class _StrictLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        seen = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=True)
+            if isinstance(key, Hashable) and key in seen:
+                raise DuplicateKeyError(key, key_node.start_mark)
+            seen.add(key)
+        return super().construct_mapping(node, deep)
+
+
+def _syntax_problem(name: str, e: yaml.YAMLError) -> str:
+    mark = getattr(e, "problem_mark", None)
+    where = f"строка {mark.line + 1}, столбец {mark.column + 1}" if mark else "место не определено"
+    if isinstance(e, DuplicateKeyError):
+        return f"{name}: {where}: ключ «{e.key}» повторяется (вторая запись затёрла бы первую)."
+    return f"{name}: {where}: ошибка синтаксиса YAML."
+
+
 def read_raw(home: Path) -> tuple[dict[str, dict], list[str]]:
     """Читает YAML-файлы как есть. Возвращает (данные по файлам, проблемы чтения)."""
     raw: dict[str, dict] = {}
@@ -61,11 +90,12 @@ def read_raw(home: Path) -> tuple[dict[str, dict], list[str]]:
             problems.append(f"{name}: файл не найден в {path.parent}.")
             continue
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            data = yaml.load(path.read_text(encoding="utf-8-sig"), Loader=_StrictLoader)
+        except UnicodeDecodeError:
+            problems.append(f"{name}: файл не в кодировке UTF-8; сохраните его как UTF-8.")
+            continue
         except yaml.YAMLError as e:
-            mark = getattr(e, "problem_mark", None)
-            where = f"строка {mark.line + 1}, столбец {mark.column + 1}" if mark else "место не определено"
-            problems.append(f"{name}: {where}: ошибка синтаксиса YAML.")
+            problems.append(_syntax_problem(name, e))
             continue
         if not isinstance(data, dict):
             problems.append(f"{name}: ожидался набор «ключ: значение» в корне файла.")
@@ -89,8 +119,17 @@ _EXPECT = {
     "tuple_type": "ожидался список из нескольких значений",
     "too_short": "в списке не хватает значений",
     "too_long": "в списке лишние значения",
+    "finite_number": "ожидалось конечное число (не inf и не nan)",
     "model_type": "ожидался раздел с вложенными ключами",
     "dict_type": "ожидался раздел с вложенными ключами",
+}
+
+
+_BOUNDS = {
+    "greater_than": ("больше", "gt"),
+    "greater_than_equal": ("не меньше", "ge"),
+    "less_than": ("меньше", "lt"),
+    "less_than_equal": ("не больше", "le"),
 }
 
 
@@ -120,9 +159,14 @@ def translate(name: str, err: ValidationError) -> list[str]:
             expect = str(e["ctx"]["error"])
         elif e["type"] == "missing" and isinstance(e["loc"][-1], int):
             expect = "в строке списка не хватает значения"
+        elif e["type"] in _BOUNDS:
+            word, key = _BOUNDS[e["type"]]
+            expect = f"значение должно быть {word} {e['ctx'][key]:g}"
         else:
             expect = _EXPECT.get(e["type"]) or f"значение не подходит ({e['type']}: {e['msg']})"
-        if e["type"] == "missing" and not isinstance(e["loc"][-1], int):
+        if not e["loc"]:  # правило раздела целиком (повторный id и т. п.)
+            msgs.append(f"{name}: {expect}.")
+        elif e["type"] == "missing" and not isinstance(e["loc"][-1], int):
             msgs.append(f"{name}: ключ «{path}»: {expect}.")
         else:
             shown = f"«{e['input']}»"

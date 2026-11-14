@@ -5,6 +5,8 @@ from kitchen.errors import OrderError
 from kitchen.formulas import FormulaError
 from kitchen.models import Workshop
 from kitchen.parts import (
+    DRAWER_BACK,
+    DRAWER_BOTTOM,
     EDGE_SIDES,
     ModuleDims,
     Position,
@@ -142,8 +144,8 @@ def build_tall_oven(
     if D - bottom[1] - drawer_t < 0 or drawer_z < t or drawer_z + max(drawer_t, back[1]) > bottom_z:
         raise OrderError(f"Модуль {module.label}: ящик не помещается под дном ниши.")
     for pid, name, sizes, axes, y in (
-        ("дно-ящ-1", "дно ящика", bottom, ("x", "y"), D - bottom[1]),
-        ("зад-ящ-1", "задняя стенка ящика", back, ("x", "z"), D - bottom[1] - drawer_t),
+        ("дно-ящ-1", DRAWER_BOTTOM, bottom, ("x", "y"), D - bottom[1]),
+        ("зад-ящ-1", DRAWER_BACK, back, ("x", "z"), D - bottom[1] - drawer_t),
     ):
         out.parts.append(
             make_part(

@@ -81,3 +81,17 @@ def test_template_names_live_only_in_the_registry():
     assert not problems, (
         "Свойство шаблона берётся из реестра TEMPLATES, а не по имени шаблона:\n" + "\n".join(problems)
     )
+
+
+def test_drawer_part_names_live_only_in_parts():
+    pattern = re.compile(r"""["'](дно ящика|задняя стенка ящика)["']""")
+    problems = []
+    for path in sorted(ENGINE.glob("*.py")):
+        if path.name == "parts.py":
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if pattern.search(line):
+                problems.append(f"{path.name}:{number}: {line.strip()}")
+    assert not problems, "Имена деталей ящика берутся из parts.DRAWER_BOTTOM и DRAWER_BACK:\n" + "\n".join(
+        problems
+    )

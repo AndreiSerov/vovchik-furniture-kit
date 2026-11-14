@@ -144,12 +144,12 @@ def plan_countertop(project: Project, ws: Workshop) -> CountertopCut | None:
         known = ", ".join(sorted(t.id for t in ws.materials.countertops))
         raise OrderError(f"Столешница «{top_id}» не найдена в materials.yaml (столешницы: {known}).")
     runs = _runs(project, ("lower",), with_tall=False)
-    sheets = _countertop_sheets(runs, round(top.sheet[0]), round(ws.equipment.saw.kerf))
+    sheets = _countertop_sheets(runs, top.sheet[0], ws.equipment.saw.kerf_mm)
     return CountertopCut(
         item=top_id,
         name=top.name,
-        sheet_length=round(top.sheet[0]),
-        sheet_width=round(top.sheet[1]),
+        sheet_length=top.sheet[0],
+        sheet_width=top.sheet[1],
         sheets=sheets,
         sheet_count=len(sheets),
         total_length_mm=_total(runs),

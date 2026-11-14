@@ -41,7 +41,9 @@ def emit(result: R, render: Callable[[R], str], as_json: bool, ok: bool = True) 
 
 
 def fail(err: KitchenError) -> NoReturn:
-    typer.echo("\n".join(err.problems), err=True)
+    text = "\n".join(err.problems)
+    # Принцип 4: цифры в тексте ошибки могли быть посчитаны из мок-мастерской, плашка нужна и здесь.
+    typer.echo(f"{MOCK_BANNER}\n\n{text}\n\n{MOCK_BANNER}" if api.is_mock() else text, err=True)
     raise typer.Exit(1)
 
 
@@ -412,6 +414,56 @@ def purchase(order: OrderArg, json: JsonOpt = False) -> None:
     except KitchenError as e:
         fail(e)
     emit(result, _render_purchase, json)
+
+
+def _render_order_estimate(r: api.EstimateResult) -> str:
+    lines = [
+        "Смета:",
+        _render_source(r.source),
+        f"Себестоимость материалов (закупка): {r.materials_cost:.2f} ₽",
+    ]
+    lines.append(f"Труд (ставка {r.labor.rate_per_hour:g} ₽/ч):")
+    for line in r.labor.lines:
+        lines.append(
+            f"  {line.name}: {line.quantity:g} {line.unit} ({line.basis}) × {line.norm_min:g} мин = "
+            f"{line.minutes:g} мин = {line.amount:.2f} ₽"
+        )
+    lines += [
+        f"  Итого труд: {r.labor.minutes:g} мин, {r.labor.total:.2f} ₽",
+        f"Наценка на материалы: {r.markup:.2f} ₽",
+        f"Расходники: {r.consumables:.2f} ₽",
+        f"Доставка материалов: {r.delivery:.2f} ₽",
+        f"Итого до округления: {r.price_before_rounding:.2f} ₽",
+        f"Цена: {r.price} ₽ (округление: {r.rounding}); маржа {r.margin:.2f} ₽",
+    ]
+    for output in r.outputs:
+        lines.append(f"Файл: {output.file} (версия проекта {output.source_version})")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("estimate")
+def estimate(
+    order: Annotated[
+        str | None,
+        typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project."),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, файлы не пишутся).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Смета: себестоимость из закупки, труд по операциям, цена. Заказ — ещё и estimate.md, estimate.json."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError(
+                "Укажите либо заказ (kitchen estimate petrov), либо файл: --project project.json."
+            )
+        result = api.estimate_and_save(order) if order is not None else api.estimate_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_order_estimate, json)
 
 
 def _render_production(r: api.ProductionResult) -> str:
