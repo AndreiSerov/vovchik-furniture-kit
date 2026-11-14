@@ -31,10 +31,10 @@ def test_wall_corner_default_depth_comes_from_module_dims(home):
 
 
 def test_registry_build_uses_project_appliances(home):
-    # Пенал с духовкой высотой 700 вместо 590: ниша строится по технике проекта через реестр.
+    # Пенал с нишей духовки высотой 700 вместо 590: ниша строится по технике проекта через реестр.
     ws = workshop.load_workshop(home)
     proj = petrov_project()
-    proj.appliances[0].height = 700
+    proj.appliances[0].niche_height = 700
     row, module = find(proj, "П1")
     dims = parts.module_dims(module, row.kind, ws)
     ctx = parts.BuildContext(appliances=proj.appliances, row=row)
