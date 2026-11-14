@@ -129,7 +129,7 @@ def test_import_ignores_any_supplied_version(home, tmp_path):
 
 def test_parts_rejects_unsupported_contents(home, base_door_project):
     data = json.loads(base_door_project.read_text())
-    data["walls"][0]["rows"][0]["modules"][0]["contents"] = {"shelves": 0}
+    data["walls"][0]["rows"][0]["modules"][0]["contents"] = {"drawers": 2}
     write(base_door_project, data)
     with pytest.raises(OrderError, match="наполнение"):
         api.parts_from_project(base_door_project)

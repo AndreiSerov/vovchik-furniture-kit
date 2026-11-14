@@ -120,6 +120,7 @@ class Shelf(Section):
     front_gap: Int = _f("отступ_спереди")
     pins: Int = _f("полкодержателей")
     height: Int = _f("высота")  # ДОБАВЛЕНО (МОК): положение полки от низа корпуса
+    step: Annotated[Int, Field(gt=0)] = _f("шаг")  # ДОБАВЛЕНО (МОК): расстояние между полками по высоте
 
 
 class Legs(Section):
@@ -258,6 +259,8 @@ class Facades(Section):
     single_door_width: FormulaField = _f("одна_дверь_ширина")
     two_doors_if_wider_than: Num = _f("две_двери_если_ширина_больше")
     two_doors_width: FormulaField = _f("две_двери_ширина")
+    single_door_max_module_width: Num = _f("одна_дверь_макс_ширина_модуля")  # ДОБАВЛЕНО (МОК)
+    two_doors_min_module_width: Num = _f("две_двери_мин_ширина_модуля")  # ДОБАВЛЕНО (МОК)
     three_drawers: ThreeDrawers = _f("ящики_3_шт")
 
     @model_validator(mode="after")

@@ -294,6 +294,54 @@ class TemplateOut:
     warnings: list[str] = field(default_factory=list)
 
 
+DOOR_SUFFIXES = ("Л", "П")  # больше двух дверей на модуль шаблоны не строят
+
+
+def _shelf_count(module: ModuleSpec, dims: ModuleDims, c) -> int:
+    """Число полок: `contents.shelves`, иначе `shelves` модуля (по умолчанию 1). Полки стоят
+    с шагом из construction.yaml и должны помещаться под верхней деталью корпуса."""
+    count = module.shelves
+    if module.contents is not None and module.contents.shelves is not None:
+        count = module.contents.shelves  # новое поле перекрывает старое `shelves` модуля
+    t, shelf = c.case_thickness, c.shelf
+    room = (
+        (dims.height - 2 * t - shelf.height) // shelf.step + 1 if dims.height - 2 * t >= shelf.height else 0
+    )
+    if count > room:
+        raise OrderError(
+            f"Модуль {module.label}: при высоте {dims.height} мм помещается не более {room} полок "
+            f"(первая на {shelf.height} мм, шаг {shelf.step} мм), а задано {count}."
+        )
+    return count
+
+
+def _door_count(module: ModuleSpec, dims: ModuleDims, c, *, no_doors: bool, single_door: bool) -> int:
+    """Число дверей: по правилу ширины или из `contents.doors`, если оно допустимо для ширины модуля."""
+    f = c.facades
+    if no_doors:
+        return 0
+    if single_door:
+        return 1
+    requested = module.contents.doors if module.contents is not None else None
+    if requested is None:
+        return 2 if dims.width > f.two_doors_if_wider_than else 1
+    if requested > len(DOOR_SUFFIXES):
+        raise OrderError(
+            f"Модуль {module.label}: дверей задано {requested}, а модуль строит не более {len(DOOR_SUFFIXES)}."
+        )
+    if requested == 1 and dims.width > f.single_door_max_module_width:
+        raise OrderError(
+            f"Модуль {module.label}: одна дверь допустима при ширине модуля не более "
+            f"{f.single_door_max_module_width:g} мм, а ширина {dims.width} мм."
+        )
+    if requested == 2 and dims.width < f.two_doors_min_module_width:
+        raise OrderError(
+            f"Модуль {module.label}: две двери допустимы при ширине модуля не менее "
+            f"{f.two_doors_min_module_width:g} мм, а ширина {dims.width} мм."
+        )
+    return requested
+
+
 # --- шаблон base_door (1.3) ---------------------------------------------------
 
 
@@ -313,11 +361,6 @@ def build_base_door(
 ) -> TemplateOut:
     """Нижний распашной: боковины на всю высоту, дно и 2 царги между боковинами,
     накладная задняя ХДФ, полки, двери по правилу ширины, петли и конфирматы по ступеням."""
-    if module.shelves != 1:
-        raise OrderError(
-            f"Модуль {module.label}: пока поддерживается ровно одна полка, "
-            f"а задано полок: {module.shelves}. Наполнение придёт с полной схемой (тикет 06)."
-        )
     c = ws.construction
     hw = c.furniture
     t = c.case_thickness
@@ -325,6 +368,7 @@ def build_base_door(
     body = _material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
     edge_id = _edge_id(ws, body.id)
     textured = bool(body.texture)
+    n_shelves = 0 if no_shelf else _shelf_count(module, dims, c)
     out = TemplateOut()
 
     def carcass(pid: str, name: str, a: Span, b: Span, at: Position, rule: EdgeRule) -> None:
@@ -367,15 +411,15 @@ def build_base_door(
                 c.edging.rails,
             )
 
-    if not no_shelf:
-        # полка с отступами от боковин и спереди
-        shelf = c.shelf
+    # полки с отступами от боковин и спереди; i-я полка выше предыдущей на шаг
+    shelf = c.shelf
+    for n in range(1, n_shelves + 1):
         carcass(
-            "полка",
+            f"полка-{n}" if n_shelves > 1 else "полка",
             "полка",
             Span(W - 2 * t - 2 * shelf.side_gap, "x"),
             Span(D - shelf.front_gap, "y"),
-            Position(x=t + shelf.side_gap, y=0, z=shelf.height),
+            Position(x=t + shelf.side_gap, y=0, z=shelf.height + (n - 1) * shelf.step),
             c.edging.shelves,
         )
 
@@ -405,17 +449,14 @@ def build_base_door(
     facade_mat = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
     facade_t = _required_thickness(facade_mat, "фасадов")
     facade_h = _calc(module, dims, "высота фасада", f.height_lower, H=H, W=W)
-    if no_doors:
-        n_doors = 0
-        facade_w = 0
-    elif W > f.two_doors_if_wider_than and not single_door:
-        n_doors = 2
+    n_doors = _door_count(module, dims, c, no_doors=no_doors, single_door=single_door)
+    facade_w = 0
+    if n_doors == 2:
         facade_w = _calc(module, dims, "фасады", f.two_doors_width, H=H, W=W)
-    else:
-        n_doors = 1
+    elif n_doors == 1:
         facade_w = _calc(module, dims, "фасад", f.single_door_width, H=H, W=W)
     for i in range(n_doors):
-        suffix = ("Л", "П")[i] if n_doors == 2 else ""
+        suffix = DOOR_SUFFIXES[i] if n_doors == 2 else ""
         out.parts.append(
             make_part(
                 pid=f"{module.label}-фасад-{suffix}" if suffix else f"{module.label}-фасад",
@@ -444,8 +485,8 @@ def build_base_door(
     )
     out.hardware[hw.confirmats] += confirmats
     out.hardware[hw.caps] += confirmats * c.caps.per_unit
-    if not no_shelf:
-        out.hardware[hw.shelf_pins] += c.shelf.pins * module.shelves
+    if n_shelves:
+        out.hardware[hw.shelf_pins] += c.shelf.pins * n_shelves
     # ключи ножек «до_800»/«свыше_800» должны совпадать с порогом (DECISIONS, тикет 05)
     if not upper_carcass:
         out.hardware[hw.legs] += c.legs.up_to_800 if W <= c.legs.threshold else c.legs.over_800
@@ -454,7 +495,8 @@ def build_base_door(
         perimeter = 2 * (back_h + back_w)
         screws += _ceil_div(perimeter, bp.fastening_pitch)  # саморезы на ХДФ: периметр / шаг
     out.hardware[hw.screws] += screws
-    out.hardware[materials.handles] += n_doors * c.handles.per_unit
+    if n_doors:
+        out.hardware[materials.handles] += n_doors * c.handles.per_unit
     return out
 
 
@@ -1147,7 +1189,24 @@ def build_module(
         )
     ):
         raise OrderError(f"Модуль {module.label}: неподдерживаемое наполнение.")
-    if module.template not in (
+    if module.template in ("base_door", "wall_door"):
+        extra = [
+            name
+            for name, given in (
+                ("ящики", contents is not None and contents.drawers is not None),
+                ("вставки", contents is not None and bool(contents.inserts)),
+                ("подъёмник", contents is not None and contents.lift is not None),
+                ("«без задней стенки»", module.without_back),
+                ("угловые параметры", module.corner is not None),
+            )
+            if given
+        ]
+        if extra:
+            raise OrderError(
+                f"Модуль {module.label}: шаблон {module.template} строит только двери и полки, "
+                f"наполнение или параметры не поддерживаются: {', '.join(extra)}."
+            )
+    elif module.template not in (
         "tall_oven",
         "base_corner",
         "wall_corner",
