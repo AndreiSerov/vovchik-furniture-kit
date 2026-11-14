@@ -279,6 +279,43 @@ def parts(
     emit(result, _render_parts, json)
 
 
+def _render_edges(r: api.EdgingResult) -> str:
+    lines = ["Карта кромления:", _render_source(r.source)]
+    for p in r.parts:
+        sides = ", ".join(f"{side}: {edge}" for side, edge in p.edges.items() if edge)
+        lines.append(f"  {p.id} {p.length}×{p.width} мм — {sides}")
+    for edge_id, e in r.edges.items():
+        lines.append(
+            f"Кромка {edge_id}: чистая {e.clean_m:.3f} м, с припуском {e.with_allowance_m:.3f} м, "
+            f"к закупке {e.purchase_m:.3f} м"
+        )
+    if r.output:
+        lines.append(f"Карта кромления PDF: {r.output.file} (версия проекта {r.output.source_version})")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("edges")
+def edges(
+    order: Annotated[
+        str | None, typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project.")
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Кромление: детали, стороны и метраж; для заказа также PDF карты."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError("Укажите либо заказ (kitchen edges petrov), либо файл: --project project.json.")
+        result = api.edges_and_save(order) if order is not None else api.edges_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_edges, json)
+
+
 def _render_cut(r: api.CutResult) -> str:
     lines = [
         f"Раскрой проекта {r.order}:",

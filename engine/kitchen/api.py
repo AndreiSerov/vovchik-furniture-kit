@@ -22,9 +22,10 @@ from kitchen.checks import check_project as run_checks
 from kitchen.common import CommonItem, CountertopCut, compute_common, plan_countertop
 from kitchen.cutting import MaterialCut, cut_parts
 from kitchen.cutting_pdf import write_cutting_map
+from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, OrderError
 from kitchen.models import Workshop
-from kitchen.parts import EdgeTotals, ModuleParts, compute_parts
+from kitchen.parts import EdgeTotals, ModuleParts, Part, compute_parts
 from kitchen.project import Project, parse_project
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
@@ -36,6 +37,7 @@ __all__ = [
     "CommonItem",
     "DiffResult",
     "EdgeTotals",
+    "EdgingResult",
     "ExportResult",
     "FileSummary",
     "Finding",
@@ -61,6 +63,9 @@ __all__ = [
     "cut_from_order",
     "cut_from_project",
     "diff_project",
+    "edges_and_save",
+    "edges_from_order",
+    "edges_from_project",
     "export_project",
     "import_project",
     "list_outputs",
@@ -972,46 +977,35 @@ def cut_from_order(order: str, home: Path | None = None) -> CutResult:
 CUTTING_PDF = "cutting-map.pdf"
 
 
-def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -> CutResult:
-    """`kitchen cut <заказ>`: раскрой текущей версии, PDF карты в `orders/<заказ>/out/`, запись в БД."""
-    home = home or resolve_home()
-    result = cut_from_order(order, home)
-    version = result.source.version
-    if version is None:  # заказ из БД всегда с версией
-        raise OrderError(f"У заказа {result.source.order} нет версии проекта.")  # pragma: no cover
-    rel = f"orders/{result.source.order}/out/{CUTTING_PDF}"
+def _save_output(
+    home: Path, source: PartsSource, kind: OutputKind, filename: str, write_pdf: Callable[[Path], None]
+) -> OutputInfo:
+    """Сохраняет файл и регистрирует его под блокировкой, восстанавливая прежний при сбое БД."""
+    version = source.version
+    if version is None:
+        raise OrderError(f"У заказа {source.order} нет версии проекта.")
+    rel = f"orders/{source.order}/out/{filename}"
     path = home / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=".cutting-", dir=path.parent))
+    staging = Path(tempfile.mkdtemp(prefix=".output-", dir=path.parent))
     backup = staging / "previous.pdf"
     installed = False
     preserve_staging = False
     try:
-        new_pdf = staging / CUTTING_PDF
-        write_cutting_map(
-            new_pdf,
-            result.materials,
-            kerf=result.kerf,
-            trim=result.trim,
-            order=result.source.order,
-            version=version,
-            mock=result.mock,
-            on=on or store.today(),
-        )
+        new_pdf = staging / filename
+        write_pdf(new_pdf)
         with store.connect(home) as conn:
             # Блокировка удерживается до завершения commit или восстановления прежнего PDF.
             conn.execute("BEGIN IMMEDIATE")
             try:
-                row = store.find_order(conn, result.source.order)
+                row = store.find_order(conn, source.order)
                 current = _current_version(conn, row["id"])
                 if current is None or current["version"] != version:
-                    raise OrderError(
-                        "Изменилась версия проекта во время расчёта. Повторите команду kitchen cut."
-                    )
+                    raise OrderError("Изменилась версия проекта во время расчёта. Повторите команду.")
                 had_previous = path.exists()
                 if had_previous:
                     shutil.copy2(path, backup)
-                store.register_output(conn, row["id"], store.CUTTING, rel, version)
+                store.register_output(conn, row["id"], kind, rel, version)
                 new_pdf.replace(path)
                 installed = True
                 conn.execute("UPDATE orders SET updated_at = ? WHERE id = ?", (store.now(), row["id"]))
@@ -1033,7 +1027,80 @@ def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -
     finally:
         if not preserve_staging:
             shutil.rmtree(staging, ignore_errors=True)
-    output = OutputInfo(kind=store.CUTTING, path=rel, file=str(home / rel), source_version=version)
+    return OutputInfo(kind=kind, path=rel, file=str(path), source_version=version)
+
+
+def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -> CutResult:
+    """`kitchen cut <заказ>`: раскрой и сохранённый PDF карты."""
+    home = home or resolve_home()
+    result = cut_from_order(order, home)
+    output = _save_output(
+        home,
+        result.source,
+        store.CUTTING,
+        CUTTING_PDF,
+        lambda path: write_cutting_map(
+            path,
+            result.materials,
+            kerf=result.kerf,
+            trim=result.trim,
+            order=result.source.order,
+            version=result.source.version,
+            mock=result.mock,
+            on=on or store.today(),
+        ),
+    )
+    return result.model_copy(update={"output": output})
+
+
+class EdgingResult(Result):
+    """Детали с кромкой и итоговый метраж из расчёта деталей."""
+
+    source: PartsSource
+    parts: list[Part]
+    edges: dict[str, EdgeTotals]
+    warnings: list[str]
+    output: OutputInfo | None = None
+
+
+def _edging(parts: PartsResult) -> EdgingResult:
+    return EdgingResult(
+        source=parts.source,
+        parts=[p for m in parts.modules for p in m.parts if any(p.edges.values())],
+        edges=parts.edges,
+        warnings=parts.warnings,
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+    )
+
+
+def edges_from_order(order: str, home: Path | None = None) -> EdgingResult:
+    return _edging(parts_from_order(order, home))
+
+
+def edges_from_project(path: Path, home: Path | None = None) -> EdgingResult:
+    return _edging(parts_from_project(path, home))
+
+
+def edges_and_save(order: str, home: Path | None = None, on: date | None = None) -> EdgingResult:
+    """Карта кромления текущей версии и её регистрация в заказе."""
+    home = home or resolve_home()
+    result = edges_from_order(order, home)
+    output = _save_output(
+        home,
+        result.source,
+        store.EDGING,
+        "edging-map.pdf",
+        lambda path: write_edging_map(
+            path,
+            result.parts,
+            result.edges,
+            order=result.source.order,
+            version=result.source.version,
+            mock=result.mock,
+            on=on or store.today(),
+        ),
+    )
     return result.model_copy(update={"output": output})
 
 

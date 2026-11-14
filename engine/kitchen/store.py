@@ -254,8 +254,9 @@ def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
 
 # --- выводы -----------------------------------------------------------------
 
-OutputKind = Literal["cutting"]  # виды выводов; этапы 2-4 добавляют свои
+OutputKind = Literal["cutting", "edging"]  # виды выводов; этапы 2-4 добавляют свои
 CUTTING: OutputKind = "cutting"
+EDGING: OutputKind = "edging"
 
 
 def register_output(
