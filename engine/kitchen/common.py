@@ -135,8 +135,8 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
     items: list[CommonItem] = []
 
     corner = ws.construction.corner_rules.lower_offset
-    dead = sum(  # глухая часть угловых модулей нижних рядов цоколем не закрывается
-        round(m.corner.offset if m.corner.offset is not None else corner)
+    dead = corner * sum(  # глухая часть угловых модулей нижних рядов цоколем не закрывается
+        1
         for wall in project.walls
         for row in wall.rows
         if row.kind == "lower"

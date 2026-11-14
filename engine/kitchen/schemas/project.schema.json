@@ -131,18 +131,6 @@
         "adjacent_wall": {
           "title": "Adjacent Wall",
           "type": "string"
-        },
-        "offset": {
-          "anyOf": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Offset"
         }
       },
       "required": [

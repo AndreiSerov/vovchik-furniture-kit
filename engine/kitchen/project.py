@@ -36,7 +36,6 @@ class Contents(Section):
 
 class Corner(Section):
     adjacent_wall: str
-    offset: Num | None = None
 
 
 class ModuleSpec(Section):

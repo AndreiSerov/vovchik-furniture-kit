@@ -81,8 +81,7 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
                         )
                     )
                     continue
-                offset = m.corner.offset if m.corner.offset is not None else offsets[row.kind]
-                extra[(adjacent, row.kind)] = extra.get((adjacent, row.kind), 0) + offset
+                extra[(adjacent, row.kind)] = extra.get((adjacent, row.kind), 0) + offsets[row.kind]
     for wall in project.walls:
         for row in wall.rows:
             total = sum(m.width for m in row.modules) + extra.get((wall.label, row.kind), 0)

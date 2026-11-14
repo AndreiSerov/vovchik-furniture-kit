@@ -239,11 +239,12 @@ def test_corner_wall_must_exist_and_differ(home):
     assert findings(path, home, "corner_wall") == []
 
 
-def test_corner_offset_from_project_overrides_workshop(home):
+def test_corner_offset_is_a_workshop_key_not_a_module_field(home):
+    # Спека: смещения — ключи construction.yaml; в модуле проекта своего смещения нет.
     corner = module("Н1", "base_corner", 1050, corner={"adjacent_wall": "Б", "offset": 650})
-    other = ("Б", 1800, [("lower", [module("Н2", "base_door", 600), module("Н3", "base_door", 550)])])
-    path = make_project(home / "p.json", [("A", 1050, [("lower", [corner])]), other])
-    assert findings(path, home, "row_sum") == []  # 1150 + 650
+    path = make_project(home / "p.json", [("A", 1050, [("lower", [corner])])])
+    with pytest.raises(OrderError):
+        api.check_project(path, home)
 
 
 def test_import_rejects_when_workshop_did_not_load(home):

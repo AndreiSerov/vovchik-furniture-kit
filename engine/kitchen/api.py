@@ -514,7 +514,6 @@ _DIFF_NAMES = {
     "without_back": "без задней стенки",
     "corner": "угол",
     "adjacent_wall": "соседняя стена",
-    "offset": "угловое смещение",
 }
 
 

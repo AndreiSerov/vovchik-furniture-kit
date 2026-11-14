@@ -172,14 +172,6 @@ def test_common_rules_come_from_workshop(home):
     assert c["led"].quantity == 5  # 3.57 м вверх до кратного 5
 
 
-def test_corner_offset_of_module_overrides_workshop(home):
-    project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
-    project["walls"][0]["rows"][0]["modules"][4]["corner"]["offset"] = 450
-    path = home / "p.json"
-    path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
-    assert common(api.parts_from_project(path, home))["plinth"].length_mm == 3550
-
-
 def test_workshop_rejects_unknown_common_item_id(home):
     path = home / "workshop/construction.yaml"
     path.write_text(path.read_text().replace("позиция: plinth_100", "позиция: plinth_nope"))
