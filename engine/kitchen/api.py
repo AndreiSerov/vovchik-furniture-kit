@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import shutil
 import sqlite3
+import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -978,19 +980,59 @@ def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -
     if version is None:  # заказ из БД всегда с версией
         raise OrderError(f"У заказа {result.source.order} нет версии проекта.")  # pragma: no cover
     rel = f"orders/{result.source.order}/out/{CUTTING_PDF}"
-    write_cutting_map(
-        home / rel,
-        result.materials,
-        kerf=result.kerf,
-        trim=result.trim,
-        order=result.source.order,
-        version=version,
-        mock=result.mock,
-        on=on or store.today(),
-    )
-    with _open_order(order, home) as o:
-        store.register_output(o.conn, o.pk, store.CUTTING, rel, version)
-        o.changed = True
+    path = home / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".cutting-", dir=path.parent))
+    backup = staging / "previous.pdf"
+    installed = False
+    preserve_staging = False
+    try:
+        new_pdf = staging / CUTTING_PDF
+        write_cutting_map(
+            new_pdf,
+            result.materials,
+            kerf=result.kerf,
+            trim=result.trim,
+            order=result.source.order,
+            version=version,
+            mock=result.mock,
+            on=on or store.today(),
+        )
+        with store.connect(home) as conn:
+            # Блокировка удерживается до завершения commit или восстановления прежнего PDF.
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = store.find_order(conn, result.source.order)
+                current = _current_version(conn, row["id"])
+                if current is None or current["version"] != version:
+                    raise OrderError(
+                        "Изменилась версия проекта во время расчёта. Повторите команду kitchen cut."
+                    )
+                had_previous = path.exists()
+                if had_previous:
+                    shutil.copy2(path, backup)
+                store.register_output(conn, row["id"], store.CUTTING, rel, version)
+                new_pdf.replace(path)
+                installed = True
+                conn.execute("UPDATE orders SET updated_at = ? WHERE id = ?", (store.now(), row["id"]))
+                conn.commit()
+            except BaseException:
+                try:
+                    if installed:
+                        if had_previous:
+                            backup.replace(path)
+                        else:
+                            path.unlink(missing_ok=True)
+                except BaseException:
+                    # Не удалять резервную копию, если восстановление тоже не удалось.
+                    preserve_staging = True
+                    raise
+                finally:
+                    conn.rollback()
+                raise
+    finally:
+        if not preserve_staging:
+            shutil.rmtree(staging, ignore_errors=True)
     output = OutputInfo(kind=store.CUTTING, path=rel, file=str(home / rel), source_version=version)
     return result.model_copy(update={"output": output})
 

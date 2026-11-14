@@ -1,12 +1,17 @@
 """Карта раскроя PDF (2.2) и учёт выводов: через `kitchen.api`, PDF читаем обратно `pypdf`."""
 
 import json
+import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 
+import pytest
 from kitchen import api
 from kitchen.cutting import Cut, MaterialCut, Placement, SheetCut
 from kitchen.cutting_pdf import place_lines, scheme_labels, scheme_scale, write_cutting_map
+from kitchen.errors import OrderError
 from kitchen.pdf import FONT, FONT_BOLD, Area, page_area, register_fonts
 from pypdf import PdfReader
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -74,6 +79,152 @@ def test_output_registered_with_source_version_and_replaced_on_rerun(home):
     r2 = api.cut_and_save("petrov", home)
     assert [o.source_version for o in api.list_outputs("petrov", home)] == [2]
     assert "версия проекта 2" in pages_of(r2)[0]
+
+
+def test_failed_output_commit_preserves_previous_pdf_and_record(home):
+    petrov(home)
+    original = api.cut_and_save("petrov", home)
+    path = Path(original.output.file)
+    before = path.read_bytes()
+    previous = api.list_outputs("petrov", home)
+
+    project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
+    project["ceiling_height"] = 2650
+    p = home / "p2.json"
+    p.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    assert api.import_project(ORDER, p, home=home).version == 2
+
+    # Отложенный внешний ключ вызывает сбой именно при commit, после записи новой строки outputs.
+    with sqlite3.connect(home / "orders" / "kitchen.db") as conn:
+        conn.executescript("""
+            CREATE TABLE output_commit_failure (
+                order_id INTEGER REFERENCES orders(id) DEFERRABLE INITIALLY DEFERRED
+            );
+            CREATE TRIGGER fail_output_commit AFTER INSERT ON outputs BEGIN
+                INSERT INTO output_commit_failure VALUES (-1);
+            END;
+        """)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        api.cut_and_save("petrov", home)
+    assert path.read_bytes() == before
+    assert api.list_outputs("petrov", home) == previous
+    assert list(path.parent.iterdir()) == [path]
+
+
+def test_concurrent_failed_saves_restore_the_original_pdf(home, monkeypatch):
+    petrov(home)
+    original = api.cut_and_save("petrov", home, on=date(2026, 1, 1))
+    path = Path(original.output.file)
+    before = path.read_bytes()
+    previous = api.list_outputs("petrov", home)
+    with sqlite3.connect(home / "orders" / "kitchen.db") as conn:
+        conn.executescript("""
+            CREATE TABLE output_commit_failure (
+                order_id INTEGER REFERENCES orders(id) DEFERRABLE INITIALLY DEFERRED
+            );
+            CREATE TRIGGER fail_output_commit AFTER INSERT ON outputs BEGIN
+                INSERT INTO output_commit_failure VALUES (-1);
+            END;
+        """)
+
+    installed = threading.Event()
+    release = threading.Event()
+    restoring = threading.Event()
+    finish_restore = threading.Event()
+    second_ready = threading.Event()
+    copied = threading.Event()
+    replace = Path.replace
+    copy2 = api.shutil.copy2
+
+    def controlled_replace(source, target):
+        if threading.current_thread().name == "first" and source.name == "previous.pdf":
+            restoring.set()
+            assert finish_restore.wait(10)
+        result = replace(source, target)
+        if threading.current_thread().name == "first" and target == path and source.name != "previous.pdf":
+            installed.set()
+            assert release.wait(10)
+        if threading.current_thread().name == "second" and target.name == path.name and target != path:
+            second_ready.set()
+        return result
+
+    def observed_copy(source, target, *args, **kwargs):
+        if threading.current_thread().name == "second" and source == path:
+            copied.set()
+        return copy2(source, target, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "replace", controlled_replace)
+    monkeypatch.setattr(api.shutil, "copy2", observed_copy)
+
+    def save(name, day):
+        threading.current_thread().name = name
+        with pytest.raises(sqlite3.IntegrityError):
+            api.cut_and_save("petrov", home, on=date(2026, 1, day))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(save, "first", 2)
+        try:
+            assert installed.wait(10)
+            second = pool.submit(save, "second", 3)
+            assert second_ready.wait(10)
+            # Дать второму потоку подойти к установке, пока первый держит запись.
+            assert not copied.wait(1)
+            release.set()
+            assert restoring.wait(10)
+            # Блокировка должна пережить неудачный commit и дождаться восстановления.
+            assert not copied.wait(1)
+        finally:
+            release.set()
+            finish_restore.set()
+        first.result(timeout=10)
+        second.result(timeout=10)
+
+    assert path.read_bytes() == before
+    assert api.list_outputs("petrov", home) == previous
+    assert list(path.parent.iterdir()) == [path]
+
+
+def test_old_calculation_cannot_replace_newer_output(home, monkeypatch):
+    petrov(home)
+    prepared = threading.Event()
+    release = threading.Event()
+    write = api.write_cutting_map
+
+    def delayed_write(*args, **kwargs):
+        write(*args, **kwargs)
+        if threading.current_thread().name == "old-calculation":
+            prepared.set()
+            assert release.wait(10)
+
+    monkeypatch.setattr(api, "write_cutting_map", delayed_write)
+
+    def old_calculation():
+        threading.current_thread().name = "old-calculation"
+        with pytest.raises(OrderError, match="верси"):
+            api.cut_and_save("petrov", home)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        old = pool.submit(old_calculation)
+        try:
+            assert prepared.wait(10)
+            project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
+            project["ceiling_height"] = 2650
+            p = home / "p2.json"
+            p.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+            assert api.import_project(ORDER, p, home=home).version == 2
+            new = api.cut_and_save("petrov", home)
+            path = Path(new.output.file)
+            before = path.read_bytes()
+            assert [o.source_version for o in api.list_outputs("petrov", home)] == [2]
+        finally:
+            release.set()
+        old.result(timeout=10)
+
+    assert path.read_bytes() == before
+    assert [o.source_version for o in api.list_outputs("petrov", home)] == [2]
+    assert "версия проекта 2" in pages_of(new)[0]
+    assert list(path.parent.iterdir()) == [path]
 
 
 def test_cut_from_order_writes_nothing(home):
