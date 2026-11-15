@@ -20,10 +20,12 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 
 from kitchen.common import is_tall
 from kitchen.errors import OrderError
+from kitchen.format import num, plural
+from kitchen.geometry import turn
 from kitchen.models import Workshop
 from kitchen.parts import APPLIANCE_NAMES, ModuleParts, corner_on_left, gap_name, is_facade
 from kitchen.pdf import FONT, FONT_BOLD, Area, page_area, register_fonts
-from kitchen.placement import Placement, WallPlace, _turn, part_in_room
+from kitchen.placement import Placement, WallPlace, part_in_room
 from kitchen.project import Project, is_gap
 from kitchen.ral import UNKNOWN, ral_rgb
 
@@ -130,15 +132,11 @@ class ViewScene(BaseModel):
     ceiling: float
 
 
-def _num(value: float) -> int | float:
-    return int(value) if float(value).is_integer() else value
-
-
 def _footprint(
     start: tuple[float, float], rotation: int, x: float, width: float, v0: float, v1: float
 ) -> Footprint:
     """Полоса плана вдоль стены: участок `x`–`x + width` от начала стены на расстоянии `v0`–`v1` от неё."""
-    corners = [_turn(rotation, u, v) for u in (x, x + width) for v in (v0, v1)]
+    corners = [turn(rotation, u, v) for u in (x, x + width) for v in (v0, v1)]
     xs = [start[0] + c[0] for c in corners]
     ys = [start[1] + c[1] for c in corners]
     return Footprint(x0=min(xs), y0=min(ys), x1=max(xs), y1=max(ys))
@@ -150,7 +148,7 @@ def _plan_box(wall: WallPlace, x: float, width: float, depth: float) -> Footprin
 
 def _along(wall: WallPlace, x: float, y: float) -> float:
     """Отступ точки комнаты вдоль стены от её начала."""
-    back = _turn((360 - wall.rotation) % 360, x - wall.origin.x, y - wall.origin.y)
+    back = turn((360 - wall.rotation) % 360, x - wall.origin.x, y - wall.origin.y)
     return back[0]
 
 
@@ -182,7 +180,7 @@ def build_scene(project: Project, placed: Placement, parts: list[ModuleParts], w
             room = part_in_room(place, part)
             facades.append(
                 Rect(
-                    x=_num(_along(wall, room.position.x, room.position.y)),
+                    x=num(_along(wall, room.position.x, room.position.y)),
                     z=room.position.z,
                     width=room.size.x,
                     height=room.size.z,
@@ -255,7 +253,7 @@ def build_scene(project: Project, placed: Placement, parts: list[ModuleParts], w
                     front=Rect(x=o.start, z=corner.position.z, width=o.end - o.start, height=corner.size.z),
                 )
             )
-        end = _turn(w.rotation, w.length, 0)
+        end = turn(w.rotation, w.length, 0)
         depths = {}
         for kind in ("lower", "upper"):
             values = [
@@ -362,13 +360,7 @@ class ViewPage(BaseModel):
 
 def checks_banner(errors: int) -> str:
     """Плашка проекта с ошибками проверок: «Проверки: 2 ошибки — сверьте проект»."""
-    return f"Проверки: {_plural(errors, ('ошибка', 'ошибки', 'ошибок'))} — сверьте проект"
-
-
-def _plural(n: int, forms: tuple[str, str, str]) -> str:
-    if n % 100 in range(11, 15):
-        return f"{n} {forms[2]}"
-    return f"{n} {forms[0] if n % 10 == 1 else forms[1] if n % 10 in (2, 3, 4) else forms[2]}"
+    return f"Проверки: {plural(errors, 'ошибка', 'ошибки', 'ошибок')} — сверьте проект"
 
 
 _TITLE = 12.0
@@ -489,7 +481,7 @@ def _scale(width_mm: float, height_mm: float, room_w: float, room_h: float) -> i
         if width_mm / n * mm <= room_w and height_mm / n * mm <= room_h:
             return n
     raise OrderError(
-        f"Виды кухни: {_num(round(width_mm))}×{_num(round(height_mm))} мм не помещаются на лист даже в масштабе 1:{SCALES[-1]}."
+        f"Виды кухни: {num(round(width_mm))}×{num(round(height_mm))} мм не помещаются на лист даже в масштабе 1:{SCALES[-1]}."
     )
 
 
@@ -573,7 +565,7 @@ def _plan(scene: ViewScene, errors: int) -> ViewPage:
         (sx, sy), (ex, ey) = at(*w.start), at(*w.end)
         length = ((ex - sx) ** 2 + (ey - sy) ** 2) ** 0.5
         dx, dy = (ex - sx) / length, (ey - sy) / length
-        rx, ry = _turn(w.rotation, 0, -1)  # наружу от комнаты в осях комнаты
+        rx, ry = turn(w.rotation, 0, -1)  # наружу от комнаты в осях комнаты
         nx, ny = rx, -ry
         horizontal = abs(dy) < 1e-9
         for o in w.offsets:
@@ -585,13 +577,13 @@ def _plan(scene: ViewScene, errors: int) -> ViewPage:
                 Segment(x0=p0[0], y0=p0[1], x1=p1[0], y1=p1[1], line=0.8, dashed=o.row == "upper")
             )
             row = "нижних" if o.row == "lower" else "верхних"
-            text = f"смещение {row} {_num(round(o.end - o.start))}"
+            text = f"смещение {row} {num(round(o.end - o.start))}"
             mid = (sx + dx * (a + b) / 2, sy + dy * (a + b) / 2)
             placer.put(_outside([text], _SMALL, mid, (dx, dy), (nx, ny), horizontal, length), text)
         depth = ", ".join(
             f"{'нижние' if k == 'lower' else 'верхние'} {v}" for k, v in sorted(w.depths.items())
         )
-        lines = [f"Стена {w.label}, {_num(w.length)}"] + ([f"глубина: {depth}"] if depth else [])
+        lines = [f"Стена {w.label}, {num(w.length)}"] + ([f"глубина: {depth}"] if depth else [])
         mid = ((sx + ex) / 2, (sy + ey) / 2)
         placer.put(_outside(lines, 8.0, mid, (dx, dy), (nx, ny), horizontal, length, bold=True), lines[0])
     walls = {w.label: w for w in scene.walls}
@@ -664,9 +656,9 @@ def _chain_parts(scene: ViewScene, wall: ViewWall, kind: RowKind) -> list[tuple[
 def _wall(scene: ViewScene, wall: ViewWall, errors: int) -> ViewPage:
     area = page_area(landscape=True)
     placer = _Placer(area)
-    title = f"Стена {wall.label}, {_num(wall.length)} мм — вид спереди"
+    title = f"Стена {wall.label}, {num(wall.length)} мм — вид спереди"
     levels = _levels(scene, wall.label)
-    level_texts = [f"{_num(lv.z)} {lv.name}".strip() for lv in levels]
+    level_texts = [f"{num(lv.z)} {lv.name}".strip() for lv in levels]
     left = max(_width(t, _SMALL, False) for t in level_texts) + 14
     bottom, above = 46.0, 26.0
     header_h = _TITLE + 6 + (25 if errors else 0)
@@ -730,7 +722,7 @@ def _wall(scene: ViewScene, wall: ViewWall, errors: int) -> ViewPage:
         parts = _chain_parts(scene, wall, kind)
         if not parts:
             continue
-        chains.append(Chain(row=kind, values=[_num(w) for _, w in parts]))
+        chains.append(Chain(row=kind, values=[num(w) for _, w in parts]))
         tops = [m.front.z + m.front.height for m in mods if m.row == "upper" or m.tall]
         y = z0 - 6 if kind == "lower" else z0 + max(tops or [scene.top_of_uppers]) * s + 6
         segments.append(
@@ -740,7 +732,7 @@ def _wall(scene: ViewScene, wall: ViewWall, errors: int) -> ViewPage:
             for edge in (start, start + width):
                 segments.append(Segment(x0=x0 + edge * s, y0=y - 2, x1=x0 + edge * s, y1=y + 2))
         for start, width in parts:
-            text = str(_num(round(width, 1)))
+            text = str(num(round(width, 1)))
             cx = x0 + (start + width / 2) * s
             tw = _width(text, _SMALL, False)
             if kind == "lower":
@@ -753,7 +745,7 @@ def _wall(scene: ViewScene, wall: ViewWall, errors: int) -> ViewPage:
     # длина стены общей стрелкой
     y = lowest - 5
     segments.append(Segment(x0=x0, y0=y, x1=x0 + wall.length * s, y1=y, arrows=True))
-    total = str(_num(wall.length))
+    total = str(num(wall.length))
     tw = _width(total, _SMALL, True)
     cx = x0 + wall.length * s / 2
     placer.put(

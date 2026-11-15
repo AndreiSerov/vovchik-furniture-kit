@@ -11,8 +11,9 @@ from xml.sax.saxutils import escape
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph
 
+from kitchen.format import plural
 from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area
-from kitchen.quote import QuoteBody, money, percent, plural
+from kitchen.quote import QuoteBody, money, percent
 
 __all__ = ["write_quote"]
 

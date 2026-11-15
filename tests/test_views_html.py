@@ -345,3 +345,15 @@ def test_own_code_has_no_protocol_relative_addresses_or_loaders(home):
         assert not re.search(
             r"createElement\(\s*['\"](script|link|iframe|img)|importScripts|EventSource|\bWorker\(", body
         )
+
+
+def test_vendored_three_files_match_the_sha256_in_their_readme():
+    """Тикет 47: «файлы не правятся» закреплено суммами из `vendor/three/README.md`."""
+    import hashlib
+
+    folder = Path(api.__file__).parent / "vendor" / "three"
+    items = (folder / "README.md").read_text(encoding="utf-8").split("\n- ")
+    for name in ("three.min.js", "OrbitControls.js"):
+        item = next(i for i in items if i.lstrip("- ").startswith(f"`{name}`"))
+        expected = re.search(r"sha256 `([0-9a-f]{64})`", item).group(1)
+        assert hashlib.sha256((folder / name).read_bytes()).hexdigest() == expected, name

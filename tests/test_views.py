@@ -470,3 +470,13 @@ def test_order_views_draw_a_module_that_stopped_building_after_a_workshop_edit(h
     assert [(f.code, f.subject) for f in result.errors] == [("module_build", "Н3")]
     assert result.output is not None
     assert next(m for m in result.scene.modules if m.label == "Н3").facades == []
+
+
+def test_views_and_save_lays_pages_out_once(home, monkeypatch):
+    """Тикет 47: раскладка страниц считается в `_views` один раз; запись PDF берёт её же."""
+    petrov_order(home)
+    calls = []
+    real = api.views_page_layout
+    monkeypatch.setattr(api, "views_page_layout", lambda *a, **k: calls.append(1) or real(*a, **k))
+    api.views_and_save(ORDER, home)
+    assert len(calls) == 1

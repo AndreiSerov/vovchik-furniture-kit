@@ -178,3 +178,26 @@ def test_appliance_names_match_the_brief_wording():
     block = re.search(r"^APPLIANCE_NAMES = \{(.*?)^\}", source, re.DOTALL | re.MULTILINE).group(1)
     brief = dict(re.findall(r'"(\w+)": "([^"]+)"', block))
     assert brief and {k: APPLIANCE_NAMES[k] for k in brief} == brief
+
+
+# Тикет 47: склонение, целое число и поворот в оси комнаты живут в одном месте.
+SINGLE_HOME = {"plural": "format.py", "num": "format.py", "turn": "geometry.py"}
+# Свои, не дубли: `api._num` не округляет и работает с `inf`, `scene3d._num` — обёртка с четырьмя знаками.
+OWN_NUM = {"api.py", "scene3d.py"}
+
+
+def test_shared_helpers_are_defined_once():
+    problems = []
+    for path in sorted(ENGINE.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            name = node.name.lstrip("_")
+            if name not in SINGLE_HOME or path.name == SINGLE_HOME[name]:
+                continue
+            if node.name == "_num" and path.name in OWN_NUM:
+                continue
+            problems.append(f"{path.name}: def {node.name}")
+    assert not problems, "Склонение, число и поворот берутся из format.py и geometry.py:\n" + "\n".join(
+        problems
+    )

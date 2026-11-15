@@ -8,6 +8,7 @@ from collections import defaultdict
 
 from pydantic import BaseModel
 
+from kitchen.format import plural
 from kitchen.models import Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
@@ -20,7 +21,6 @@ from kitchen.parts import (
     resolve_materials,
 )
 from kitchen.project import Project
-from kitchen.quote import plural
 
 __all__ = [
     "AssemblyHardware",
@@ -144,7 +144,7 @@ def build_assembly(project: Project, built: list[ModuleParts], ws: Workshop) -> 
                     )
                     for p in module_parts.parts
                 ]
-                kinds = [APPLIANCE_NAMES[a.type] for a in project.appliances if a.module == module.label]
+                kinds = [APPLIANCE_NAMES[a.type] for a in project.appliances_at(module.label)]
                 common = {
                     "label": module.label,
                     "carcass": template.carcass,

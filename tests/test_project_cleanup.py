@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from kitchen import api
-from kitchen.common import row_layouts
+from kitchen.common import CornerOffsets, row_layouts
 from kitchen.errors import KitchenError, OrderError
 
 from tests.test_input_guards_project import lower, write
@@ -147,13 +147,14 @@ def test_row_layouts_raises_when_offsets_do_not_settle():
     tall = SimpleNamespace(label="П1", template="tall_oven", width=600)
     door = SimpleNamespace(label="Н1", template="base_door", width=600)
     wall = SimpleNamespace(
+        label="А",
         rows=[
             SimpleNamespace(kind="lower", modules=[door, door]),
             SimpleNamespace(kind="upper", modules=[wobbly, tall]),
-        ]
+        ],
     )
     with pytest.raises(KitchenError, match="не сходится"):
-        row_layouts(wall)
+        row_layouts(wall, CornerOffsets())
 
 
 def test_row_layouts_still_settles_on_petrov(home):

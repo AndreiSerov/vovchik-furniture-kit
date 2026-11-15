@@ -34,6 +34,7 @@ __all__ = [
     "side_of_face",
     "steps_pick",
     "to_mm",
+    "turn",
 ]
 
 Axis = Literal["x", "y", "z"]
@@ -65,6 +66,19 @@ Mm = int | float  # координата отверстия, мм: целая, �
 def to_mm(value: Decimal) -> Mm:
     """Миллиметры без хвостов float: целое — `int`, иначе `float` до десятых."""
     return int(value) if value == value.to_integral_value() else float(value.quantize(Decimal("0.1")))
+
+
+def turn(rotation: int, u: Mm, v: Mm) -> tuple[Mm, Mm]:
+    """Вектор (u вдоль стены, v от стены) в осях комнаты при повороте стены `rotation`.
+
+    Оси комнаты зеркальны (тикет 23): план PDF исправляет это переворотом y в `views._plan`, 3D — `toThree` в
+    `web/viewer.js`; правка здесь меняет оба места."""
+    return {
+        0: (u, v),
+        90: (-v, u),
+        180: (-u, -v),
+        270: (v, -u),
+    }[rotation % 360]
 
 
 class Point(BaseModel):

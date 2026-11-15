@@ -19,21 +19,23 @@ from typing import Literal
 from pydantic import BaseModel
 
 from kitchen.checks import Finding
-from kitchen.common import corner_offsets, is_tall, row_positions
+from kitchen.common import corner_modules, corner_offsets, corner_wall_message, is_tall, row_positions
 from kitchen.errors import OrderError
-from kitchen.geometry import Mm, Point
+from kitchen.format import num
+from kitchen.geometry import Mm, Point, turn
 from kitchen.models import Workshop
 from kitchen.parts import (
     NO_COLOR,
+    ROW_GEN,
     Part,
-    _material,
-    _required_thickness,
     corner_on_left,
     facade_color,
+    find_material,
     gap_width,
     is_facade,
     lower_facades,
     module_dims,
+    required_thickness,
     resolve_materials,
 )
 from kitchen.project import ModuleSpec, Project, Row, Wall, is_gap
@@ -53,20 +55,6 @@ __all__ = [
 RowKind = Literal["lower", "upper"]
 
 
-def _turn(rotation: int, u: Mm, v: Mm) -> tuple[Mm, Mm]:
-    """Вектор (u вдоль стены, v от стены) в осях комнаты при повороте стены `rotation`."""
-    return {
-        0: (u, v),
-        90: (-v, u),
-        180: (-u, -v),
-        270: (v, -u),
-    }[rotation % 360]
-
-
-def _mm(value: float) -> Mm:
-    return int(value) if float(value).is_integer() else value
-
-
 class Box(BaseModel):
     """Коробка в комнате: `position` — угол у стены слева внизу (начало осей коробки), `size` — по осям
     коробки (x вдоль стены, y от стены, z вверх), `rotation` — поворот осей коробки вокруг вертикали
@@ -78,7 +66,7 @@ class Box(BaseModel):
 
     def bounds(self) -> tuple[tuple[Mm, Mm, Mm], tuple[Mm, Mm, Mm]]:
         """Границы коробки в осях комнаты: (минимум, максимум)."""
-        dx, dy = _turn(self.rotation, self.size.x, self.size.y)
+        dx, dy = turn(self.rotation, self.size.x, self.size.y)
         xs = (self.position.x, self.position.x + dx)
         ys = (self.position.y, self.position.y + dy)
         z = (self.position.z, self.position.z + self.size.z)
@@ -142,7 +130,7 @@ def part_in_room(place: ModulePlace, part: Part) -> SceneObject:
     `orientation`) переводится той же расстановкой, что и коробка модуля."""
     size = {part.orientation.length: part.length, part.orientation.width: part.width}
     size[part.orientation.thickness] = part.thickness
-    du, dv = _turn(place.rotation, part.position.x, part.position.y)
+    du, dv = turn(place.rotation, part.position.x, part.position.y)
     return SceneObject(
         kind="part",
         label=part.id,
@@ -177,7 +165,7 @@ def _scene(
                 kind="wall",
                 label=w.label,
                 position=w.origin,
-                size=Point(x=w.length, y=0, z=_mm(project.ceiling_height)),
+                size=Point(x=w.length, y=0, z=num(project.ceiling_height)),
                 rotation=w.rotation,
             )
         )
@@ -190,7 +178,7 @@ def _scene(
             kind="floor",
             label="пол",
             position=Point(x=x0, y=y0, z=0),
-            size=Point(x=_mm(x1 - x0), y=_mm(y1 - y0), z=0),
+            size=Point(x=num(x1 - x0), y=num(y1 - y0), z=0),
             rotation=0,
         )
     )
@@ -217,9 +205,6 @@ class _Link:
     module: str
 
 
-_ROW_OF = {"lower": "нижнего", "upper": "верхнего"}
-
-
 def _listed(labels: list[str]) -> str:
     """«Н4 и Н5», «Н4, Н5 и Н7»."""
     return labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} и {labels[-1]}"
@@ -238,27 +223,20 @@ def _links(project: Project) -> list[_Link]:
     order = {w.label: i for i, w in enumerate(project.walls)}
     problems: list[str] = []
     found: list[_Link] = []
-    for wall in project.walls:
-        for row in wall.rows:
-            for m in row.cabinets:
-                adjacent = m.corner.adjacent_wall if m.corner else None
-                if adjacent is None:
-                    continue
-                place = next(i for i, e in enumerate(row.modules) if e is m)
-                if 0 < place < len(row.modules) - 1:
-                    problems.append(
-                        f"Модуль {m.label} стоит посередине ряда, угловой модуль должен быть первым или последним."
-                    )
-                    continue
-                if adjacent == wall.label or adjacent not in labels:
-                    problems.append(
-                        f"Модуль {m.label}: соседняя стена «{adjacent}» должна существовать и отличаться от стены «{wall.label}»."
-                    )
-                    continue
-                if corner_on_left(row, m):
-                    found.append(_Link(adjacent, wall.label, row.kind, m.label))
-                else:
-                    found.append(_Link(wall.label, adjacent, row.kind, m.label))
+    for wall, row, m, adjacent in corner_modules(project):
+        place = next(i for i, e in enumerate(row.modules) if e is m)
+        if 0 < place < len(row.modules) - 1:
+            problems.append(
+                f"Модуль {m.label} стоит посередине ряда, угловой модуль должен быть первым или последним."
+            )
+            continue
+        if adjacent == wall.label or adjacent not in labels:
+            problems.append(corner_wall_message(m.label, adjacent, wall.label))
+            continue
+        if corner_on_left(row, m):
+            found.append(_Link(adjacent, wall.label, row.kind, m.label))
+        else:
+            found.append(_Link(wall.label, adjacent, row.kind, m.label))
     pairs: dict[tuple[str, str], list[_Link]] = {}
     for link in found:
         key = tuple(sorted((link.end_of, link.start_of), key=order.__getitem__))
@@ -268,7 +246,7 @@ def _links(project: Project) -> list[_Link]:
         for kind, same in by_row.items():
             if len(same) > 1:
                 problems.append(
-                    f"В углу {a}–{b} два угловых модуля {_ROW_OF[kind]} ряда: {_listed([s.module for s in same])}."
+                    f"В углу {a}–{b} два угловых модуля {ROW_GEN[kind]} ряда: {_listed([s.module for s in same])}."
                 )
         lower, upper = by_row["lower"], by_row["upper"]
         if lower and upper and len(lower) == len(upper) == 1 and lower[0].end_of != upper[0].end_of:
@@ -327,8 +305,8 @@ def _chain(project: Project, links: list[_Link]) -> list[Wall]:
 def _facade_thickness(module: ModuleSpec, row: Row, project: Project, ws: Workshop) -> int:
     materials = resolve_materials(module, row, project.materials)
     facade_id = materials.facades_lower if lower_facades(module, row) else materials.facades_upper
-    facade = _material(ws.materials.facades, facade_id, "Материал фасадов", "фасады")
-    return _required_thickness(facade, "фасадов")
+    facade = find_material(ws.materials.facades, facade_id, "Материал фасадов", "фасады")
+    return required_thickness(facade, "фасадов")
 
 
 def place_project(project: Project, ws: Workshop) -> Placement:
@@ -367,7 +345,7 @@ def place_project(project: Project, ws: Workshop) -> Placement:
         row.kind == "upper" or is_tall(m) for w in project.walls for row in w.rows for m in row.cabinets
     )
     if rises and top > project.ceiling_height:
-        problems.append(f"Верх верхних модулей {top} мм выше потолка {_mm(project.ceiling_height)} мм.")
+        problems.append(f"Верх верхних модулей {top} мм выше потолка {num(project.ceiling_height)} мм.")
     try:
         links = _links(project)
     except OrderError as e:
@@ -386,23 +364,23 @@ def place_project(project: Project, ws: Workshop) -> Placement:
         for kind in ("lower", "upper"):
             o = offsets.of(w.label, kind)
             if o.at_start:
-                marks.append(OffsetPlace(row=kind, start=0, end=_mm(o.start), module=o.at_start[0]))
+                marks.append(OffsetPlace(row=kind, start=0, end=num(o.start), module=o.at_start[0]))
             if o.at_end:
                 marks.append(
-                    OffsetPlace(row=kind, start=_mm(w.length - o.end), end=_mm(w.length), module=o.at_end[0])
+                    OffsetPlace(row=kind, start=num(w.length - o.end), end=num(w.length), module=o.at_end[0])
                 )
         walls.append(
             WallPlace(
                 label=w.label,
                 origin=Point(x=origin[0], y=origin[1], z=0),
                 rotation=rotation,
-                length=_mm(w.length),
+                length=num(w.length),
                 offsets=marks,
             )
         )
         for row, entries in zip(w.rows, row_positions(w, offsets), strict=True):
             for at, entry in entries:
-                x = _mm(at)
+                x = num(at)
                 own = any(entry is e for e in row.modules)
                 if is_gap(entry):
                     gaps.append(
@@ -411,7 +389,7 @@ def place_project(project: Project, ws: Workshop) -> Placement:
                 elif own:
                     dims = module_dims(entry, row.kind, ws)
                     z = floor if row.kind == "lower" or is_tall(entry) else top - dims.height
-                    du, dv = _turn(rotation, x, 0)
+                    du, dv = turn(rotation, x, 0)
                     modules.append(
                         ModulePlace(
                             label=entry.label,
@@ -430,8 +408,8 @@ def place_project(project: Project, ws: Workshop) -> Placement:
                     )
                     color = facade_color(entry, row, project.materials)
                     colors[entry.label] = None if color == NO_COLOR else color
-        du, dv = _turn(rotation, w.length, 0)
-        origin = (_mm(origin[0] + du), _mm(origin[1] + dv))
+        du, dv = turn(rotation, w.length, 0)
+        origin = (num(origin[0] + du), num(origin[1] + dv))
         rotation = (rotation + 90) % 360
     return Placement(
         walls=walls,

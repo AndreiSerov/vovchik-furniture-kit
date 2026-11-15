@@ -40,7 +40,6 @@ __all__ = [
     "money",
     "parse_days",
     "percent",
-    "plural",
 ]
 
 MAX_DAYS = 365
@@ -100,13 +99,6 @@ class QuoteBody(BaseModel):
 
 
 # --- числа и деньги ---------------------------------------------------------
-
-
-def plural(count: int, one: str, few: str, many: str) -> str:
-    """«1 день», «2 дня», «5 дней», «21 день», «12 дней»."""
-    last, tens = count % 10, count % 100
-    form = one if last == 1 and tens != 11 else few if 2 <= last <= 4 and not 12 <= tens <= 14 else many
-    return f"{count} {form}"
 
 
 def money(value: int) -> str:
@@ -191,13 +183,13 @@ def describe_module(module: ModuleSpec, row: Row, built: ModuleParts, project: P
         if h in named:
             extras.append(_hardware_phrase(named[h], plural_names.get(h), count))
     text = template.title + (f" с {_enumerate(extras)}" if extras else "") + f", {module.width:g} мм"
-    kinds = [_appliance(a) for a in project.appliances if a.module == module.label]
+    kinds = [_appliance(a) for a in project.appliances_at(module.label)]
     return text + (f"; техника: {', '.join(kinds)}" if kinds else "")
 
 
 def describe_gap(gap: Gap, project: Project) -> str:
     """«место под холодильник, 600 мм»; без техники — «пустое место, 600 мм». Без цены."""
-    kinds = [gap_name(a.type, 2) for a in project.appliances if a.module == gap.label]
+    kinds = [gap_name(a.type, 2) for a in project.appliances_at(gap.label)]
     return (f"место под {_enumerate(kinds)}" if kinds else "пустое место") + f", {gap.width:g} мм"
 
 

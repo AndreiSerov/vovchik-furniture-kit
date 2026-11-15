@@ -13,7 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from kitchen import brief as brief_check
 from kitchen import placement, store
@@ -30,10 +30,12 @@ from kitchen.economy import EconomyLine, EconomyVariant, apply_rule
 from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError, ProjectFileError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
+from kitchen.format import plural
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
     PURPOSE_RU,
+    ROW_NOM,
     EdgeTotals,
     ModuleParts,
     Part,
@@ -44,7 +46,7 @@ from kitchen.parts import (
 from kitchen.placement import GapPlace, ModulePlace, SceneObject, WallPlace, place_project
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
-from kitchen.quote import DAYS_ERROR, QuoteBody, build_quote, check_days, money, parse_days, percent, plural
+from kitchen.quote import DAYS_ERROR, QuoteBody, build_quote, check_days, money, parse_days, percent
 from kitchen.quote_pdf import write_quote
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.scene3d import Scene3D, build_scene3d
@@ -663,7 +665,6 @@ def _modules(data: dict) -> dict[str, tuple[dict, str, str, int]]:
     return modules
 
 
-_ROWS_RU = {"lower": "нижний", "upper": "верхний"}
 _DIFF_NAMES = {
     "template": "шаблон",
     "width": "ширина",
@@ -752,7 +753,7 @@ def diff_project(order: str, from_version: int, to_version: int, home: Path | No
             if label not in before:
                 new, new_wall, new_row, new_pos = after[label]
                 if new.get("gap"):
-                    where = f"{new_wall}, {_ROWS_RU[new_row]}, {new_pos + 1}"
+                    where = f"{new_wall}, {ROW_NOM[new_row]}, {new_pos + 1}"
                     changes.append(f"{label}: добавлено пустое место {_value(new['width'])} мм ({where})")
                 else:
                     changes.append(f"{label}: добавлен модуль")
@@ -776,8 +777,8 @@ def diff_project(order: str, from_version: int, to_version: int, home: Path | No
                         )
                 if (old_wall, old_row, old_pos) != (new_wall, new_row, new_pos):
                     changes.append(
-                        f"{label}: положение {old_wall}, {_ROWS_RU[old_row]}, {old_pos + 1} → "
-                        f"{new_wall}, {_ROWS_RU[new_row]}, {new_pos + 1}"
+                        f"{label}: положение {old_wall}, {ROW_NOM[old_row]}, {old_pos + 1} → "
+                        f"{new_wall}, {ROW_NOM[new_row]}, {new_pos + 1}"
                     )
         return DiffResult(
             order=o.ref, from_version=from_version, to_version=to_version, changes=changes, **_mock(o.home)
@@ -2333,6 +2334,7 @@ class ViewsResult(Result):
     warnings: list[str]
     output: OutputInfo | None = None  # PDF видов
     output_html: OutputInfo | None = None  # HTML 3D
+    _pages: list[ViewPage] | None = PrivateAttr(default=None)  # раскладка из `_views`, в JSON не идёт
 
     @property
     def errors(self) -> list[Finding]:
@@ -2364,7 +2366,7 @@ def _views(
         module_parts, part_warnings = computed.modules, computed.warnings
     scene = build_scene(project, placed, module_parts, workshop)
     pages = views_page_layout(scene, errors)  # подписи, которым нет места, — ошибка уже здесь
-    return ViewsResult(
+    result = ViewsResult(
         order=project.order,
         source=source.model_copy(
             update={
@@ -2382,6 +2384,8 @@ def _views(
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,
     )
+    result._pages = pages
+    return result
 
 
 def views_from_project(path: Path, home: Path | None = None) -> ViewsResult:
@@ -2400,7 +2404,9 @@ def views_from_order(order: str, home: Path | None = None) -> ViewsResult:
 
 def views_layout(result: ViewsResult) -> list[ViewPage]:
     """Раскладка страниц видов (фигуры, линии, подписи, цепочки, высоты) — ровно то, что рисует PDF."""
-    return views_page_layout(result.scene, len(result.errors))
+    if result._pages is None:  # результат собран не `_views` (например, разобран из JSON)
+        return views_page_layout(result.scene, len(result.errors))
+    return result._pages
 
 
 def views_and_save(order: str, home: Path | None = None, on: date | None = None) -> ViewsResult:

@@ -25,6 +25,7 @@ RECOMMENDED_TOOLS = {
     "rg": "search (ripgrep)",
     "sd": "text replace across files",
     "ast-grep": "structural code edits",
+    "node": "tests of the 3D page script (tests/test_views_js.py); CI fails without it",
 }
 REQUIRED_FILES = ["AGENTS.md", "docs/agents/workflow.md", "docs/agents/agreements.md"]
 

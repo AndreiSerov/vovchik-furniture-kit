@@ -15,9 +15,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from kitchen.format import num
+from kitchen.geometry import turn
 from kitchen.models import Workshop
 from kitchen.parts import TEMPLATES, ModuleParts
-from kitchen.placement import Placement, _turn
+from kitchen.placement import Placement
 from kitchen.project import ModuleSpec, Project, Row, is_gap
 from kitchen.quote import describe_gap, describe_module
 from kitchen.views import Footprint, ViewGap, ViewModule, ViewScene
@@ -98,7 +100,7 @@ class Scene3D(BaseModel):
 
 
 def _num(value: float) -> int | float:
-    return int(value) if float(value).is_integer() else round(value, 4)
+    return num(value, 4)
 
 
 def _pair(x: float, y: float) -> list[float]:
@@ -118,6 +120,43 @@ def _depth_of(rotation: int, plan: Footprint) -> float:
     return plan.y1 - plan.y0 if rotation % 180 == 0 else plan.x1 - plan.x0
 
 
+def _scene_module(
+    view: ViewModule | ViewGap,
+    rotation: int,
+    *,
+    gap: bool,
+    caption: str,
+    depth: float,
+    color: str | None,
+    color_known: bool,
+    rgb: str,
+) -> SceneModule:
+    """Модуль или пустое место сцены: одна коробка корпуса с габаритом, подписью и цветом."""
+    z0 = view.front.z
+    return SceneModule(
+        label=view.label,
+        gap=gap,
+        wall=view.wall,
+        row=view.row,
+        caption=caption,
+        size_label=_size_label(view.front.width, view.front.height, depth),
+        width=_num(view.front.width),
+        height=_num(view.front.height),
+        depth=_num(depth),
+        front=_pair(*turn(rotation, 0, 1)),
+        color=color,
+        color_known=color_known,
+        boxes=[
+            SceneBox(
+                part="body",
+                min=[_num(view.plan.x0), _num(view.plan.y0), _num(z0)],
+                max=[_num(view.plan.x1), _num(view.plan.y1), _num(z0 + view.front.height)],
+                rgb=rgb,
+            )
+        ],
+    )
+
+
 def _module(
     spec: ModuleSpec,
     row: Row,
@@ -132,56 +171,28 @@ def _module(
     else:  # модуль не строится (ошибка проверок): подпись без наполнения, голая коробка
         title = TEMPLATES[spec.template].title if spec.template in TEMPLATES else "модуль"
         text = f"{title}, {spec.width:g} мм"
-    z0 = view.front.z
-    normal = _turn(rotation, 0, 1)
-    return SceneModule(
-        label=view.label,
+    return _scene_module(
+        view,
+        rotation,
         gap=False,
-        wall=view.wall,
-        row=view.row,
         caption=f"{view.label} — {text}",
-        size_label=_size_label(view.front.width, view.front.height, view.depth),
-        width=_num(view.front.width),
-        height=_num(view.front.height),
-        depth=_num(view.depth),
-        front=_pair(*normal),
+        depth=view.depth,
         color=view.color,
         color_known=view.color_known,
-        boxes=[
-            SceneBox(
-                part="body",
-                min=[_num(view.plan.x0), _num(view.plan.y0), _num(z0)],
-                max=[_num(view.plan.x1), _num(view.plan.y1), _num(z0 + view.front.height)],
-                rgb=_hex(view.rgb),
-            )
-        ],
+        rgb=_hex(view.rgb),
     )
 
 
 def _gap(gap, view: ViewGap, rotation: int, project: Project) -> SceneModule:
-    z0 = view.front.z
-    depth = _depth_of(rotation, view.plan)
-    return SceneModule(
-        label=view.label,
+    return _scene_module(
+        view,
+        rotation,
         gap=True,
-        wall=view.wall,
-        row=view.row,
         caption=f"{view.label} — {describe_gap(gap, project)}",
-        size_label=_size_label(view.front.width, view.front.height, depth),
-        width=_num(view.front.width),
-        height=_num(view.front.height),
-        depth=_num(depth),
-        front=_pair(*_turn(rotation, 0, 1)),
+        depth=_depth_of(rotation, view.plan),
         color=None,
         color_known=False,
-        boxes=[
-            SceneBox(
-                part="body",
-                min=[_num(view.plan.x0), _num(view.plan.y0), _num(z0)],
-                max=[_num(view.plan.x1), _num(view.plan.y1), _num(z0 + view.front.height)],
-                rgb="#D8D8D8",
-            )
-        ],
+        rgb="#D8D8D8",
     )
 
 
@@ -238,7 +249,7 @@ def build_scene3d(
             label=w.label,
             start=_pair(*w.start),
             end=_pair(*w.end),
-            normal=_pair(*_turn(w.rotation, 0, 1)),
+            normal=_pair(*turn(w.rotation, 0, 1)),
             height=_num(view.ceiling),
         )
         for w in view.walls
