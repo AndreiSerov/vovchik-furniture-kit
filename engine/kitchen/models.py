@@ -467,7 +467,7 @@ class ShelfPinDrilling(Section):
     @classmethod
     def _odd(cls, v: int) -> int:
         if v % 2 == 0:
-            raise ValueError("ожидалось нечётное число: среднее отверстие ряда — на высоте полки")
+            raise ValueError("ожидалось нечётное число: ряд симметричен относительно отверстия под полку")
         return v
 
     @field_validator("below_shelf")

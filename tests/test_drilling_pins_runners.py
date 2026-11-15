@@ -370,3 +370,11 @@ def test_row_hole_touching_the_bottom_stays(home, base_door_project):
     p = parts_of(api.parts_from_project(base_door_project, home))
     row = [18.5, 50.5, 82.5, 114.5, 146.5]
     assert rows(p["Н1-бок-Л"]) == {57: row, 523: row}
+
+
+def test_row_past_the_side_edge_without_a_cover_shifts(home, base_door_project):
+    """Повторное ревью тикета 20: ряд выходит за край боковины мимо царги — сдвиг по `_fits`, а не ошибка."""
+    edit_construction(home, "высота: 300, шаг: 300", "высота: 680, шаг: 300")
+    edit_construction(home, "отступ_спереди: 20", "отступ_спереди: 70")
+    p = parts_of(api.parts_from_project(base_door_project, home))
+    assert rows(p["Н1-бок-Л"])[107] == [581.5, 613.5, 645.5, 677.5, 709.5]
