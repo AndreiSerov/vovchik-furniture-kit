@@ -56,7 +56,7 @@
 
 ## Этап 6. Скиллы
 
-- [ ] 26 — Статические проверки скиллов (6.6) ([спека](docs/specs/stage-6-skills.md))
+- [x] 26 — Статические проверки скиллов (6.6) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 27 — Скилл `kitchen-project` (6.1, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 28 — Скилл `kitchen-production` (6.2, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 29 — Скилл `kitchen-estimate` (6.3, 6.4) ([спека](docs/specs/stage-6-skills.md))
