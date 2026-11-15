@@ -920,7 +920,7 @@ def brief_save(order: str, brief_path: Path, home: Path | None = None) -> BriefS
         _insert_log(conn, row["id"], "done", "бриф сохранён", current["version"] if current else None)
         conn.execute("UPDATE orders SET updated_at = ? WHERE id = ?", (ts, row["id"]))
         conn.commit()
-        return BriefSaveResult(
+        result = BriefSaveResult(
             order=store.order_ref_of(row),
             created=created,
             saved_at=ts,
@@ -929,6 +929,8 @@ def brief_save(order: str, brief_path: Path, home: Path | None = None) -> BriefS
             check=check,
             **mock,
         )
+    status(result.order, home)  # папка заказа и status.md: этап «Бриф», запись «бриф сохранён»
+    return result
 
 
 def brief_show(order: str, home: Path | None = None) -> BriefShowResult:
