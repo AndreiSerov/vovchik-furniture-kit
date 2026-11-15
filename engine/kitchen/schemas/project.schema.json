@@ -247,18 +247,6 @@
           ],
           "default": null,
           "title": "Handles"
-        },
-        "countertop": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Countertop"
         }
       },
       "title": "MaterialOverrides",

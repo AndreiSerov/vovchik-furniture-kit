@@ -728,7 +728,7 @@ def test_dishwasher_panel_is_not_listed_under_body(tmp_path):
     assert {m.label: m.text for m in quote.modules}["Н3"] == (
         "фасад посудомоечной машины, 450 мм; техника: посудомойка"
     )
-    assert "Н3" not in quote.facades_lower or quote.facades_lower.count("(") <= 1  # фасад у ПММ есть
+    assert quote.facades_lower == "МДФ 19 мм эмаль матовая, RAL 7044"  # фасад у ПММ есть, цвет один у всех
 
 
 def test_petrov_dishwasher_line_is_exact(petrov):
@@ -777,12 +777,146 @@ def test_two_same_inserts_are_counted_by_number(tmp_path):
     )
 
 
-def test_other_appliance_without_model_is_left_out_and_with_model_is_named(tmp_path):
+def test_other_appliance_is_named_without_model_in_quote(tmp_path):
+    """Решение тикета 45: клиенту идёт «другая техника»; модель (в ней бывает марка) остаётся в смете и цеху."""
     project = copy.deepcopy(SMALL)
     project["appliances"].append({"type": "other", "width": 300, "module": "Н1"})
     text = {m.label: m.text for m in small_quote(tmp_path, project).modules}["Н1"]
-    assert text == "нижний модуль с тремя ящиками, 600 мм" and "другая" not in text
+    assert text == "нижний модуль с тремя ящиками, 600 мм; техника: другая техника"
     project["appliances"][-1]["model"] = "Bosch XYZ"
     (tmp_path / "b").mkdir()
-    named = {m.label: m.text for m in small_quote(tmp_path / "b", project).modules}["Н1"]
-    assert named.endswith("техника: Bosch XYZ")
+    named = small_quote(tmp_path / "b", project)
+    assert {m.label: m.text for m in named.modules}["Н1"] == text
+    assert "Bosch" not in named.model_dump_json()
+
+
+# --- уборка тикета 45 -----------------------------------------------------------------------------
+
+WHITE, OAK = "ЛДСП Egger 16 мм, белый W1000 ST9", "ЛДСП Egger 16 мм, дуб Галифакс H1180"
+
+
+def doors(labels, width, kind="base_door", **extra):
+    return [{"label": label, "template": kind, "width": width, **extra} for label in labels]
+
+
+def ranged_project(lower, upper, oak):
+    """Нижний и верхний ряд из дверных модулей; `oak` — метки с дубовым корпусом."""
+    project = with_materials()
+    project["appliances"] = []
+    project["walls"][0]["length"] = 1800
+    project["walls"][0]["rows"][0]["modules"] = lower
+    project["walls"][0]["rows"][1]["modules"] = upper
+    for module in lower + upper:
+        if module["label"] in oak:
+            module["materials"] = {"body": "ldsp_16_oak"}
+    return project
+
+
+def test_label_ranges_stay_inside_one_row(tmp_path):
+    """Н1–Н3 и В1 с одним корпусом не склеиваются в «Н1–В1»: диапазон не идёт через ряды."""
+    project = ranged_project(
+        doors(["Н1", "Н2", "Н3", "Н4"], 450),
+        doors(["В1", "В2", "В3"], 600, "wall_door"),
+        {"Н1", "Н2", "Н3", "В1"},
+    )
+    quote = small_quote(tmp_path, project)
+    assert quote.body == f"{OAK} (Н1–Н3, В1), {WHITE} (Н4, В2, В3)"
+
+
+def test_label_ranges_stay_inside_one_letter(tmp_path):
+    project = ranged_project(
+        doors(["Н1", "Н2", "Н3", "К1", "К2", "К3"], 300),
+        doors(["В1"], 1800, "wall_door"),
+        {"Н1", "Н2", "Н3", "К1", "К2", "К3"},
+    )
+    quote = small_quote(tmp_path, project)
+    assert quote.body == f"{OAK} (Н1–Н3, К1–К3), {WHITE} (В1)"
+
+
+def test_bottle_rack_has_a_pull_out_facade_not_a_door(tmp_path):
+    project = ranged_project(
+        doors(["Н1"], 150, "base_bottle") + doors(["Н2"], 450), doors(["В1"], 1800, "wall_door"), set()
+    )
+    text = {m.label: m.text for m in small_quote(tmp_path, project).modules}["Н1"]
+    assert text == "нижний модуль-бутылочница с выдвижным фасадом, 150 мм"
+
+
+@pytest.fixture
+def broken_draft(tmp_path):
+    shutil.copytree(REPO / "workshop", tmp_path / "workshop")
+    project = copy.deepcopy(SMALL)
+    project["walls"][0]["length"] = 1000  # ряды 1350 мм: ошибка суммы ряда
+    return write_project(tmp_path, project), tmp_path
+
+
+def test_quote_project_with_check_errors_warns_like_estimate(broken_draft):
+    path, home = broken_draft
+    errors = [f.message for f in api.check_project(path, home).errors]
+    assert errors
+    for warnings in (
+        api.estimate_from_project(path, home).warnings,
+        api.quote_from_project(path, 20, home).warnings,
+    ):
+        for message in errors:
+            assert any(message in w for w in warnings), (message, warnings)
+
+
+def test_cli_quote_project_prints_the_check_warning(broken_draft, monkeypatch):
+    path, home = broken_draft
+    monkeypatch.setenv("KITCHEN_HOME", str(home))
+    result = runner.invoke(app, ["quote", "--project", str(path), "--days", "20"])
+    assert result.exit_code == 0 and "Предупреждения:" in result.output and "занимает" in result.output
+
+
+def test_valid_draft_has_no_check_warning(tmp_path):
+    shutil.copytree(REPO / "workshop", tmp_path / "workshop")
+    path = write_project(tmp_path, SMALL)
+    assert not [w for w in api.quote_from_project(path, 20, tmp_path).warnings if "проверк" in w]
+
+
+def test_quote_json_and_pdf_carry_no_check_warnings(home):
+    import_order(home)
+    quote = api.quote_and_save(SMALL_ORDER, 20, home)
+    assert "warnings" not in json.loads(Path(quote.outputs[1].file).read_text(encoding="utf-8"))
+
+
+def test_client_name_plural_without_client_name_is_a_check_workshop_warning(home):
+    assert api.check_workshop(home).warnings == []
+    edit(
+        home,
+        "hardware.yaml",
+        'для_клиента: "выдвижным ведром", ',
+        "",
+    )
+    result = api.check_workshop(home)
+    assert result.valid
+    assert any("bin_2sec" in w and "для_клиента_мн" in w for w in result.warnings), result.warnings
+
+
+def test_facade_is_one_rule_by_part_attribute_not_by_name():
+    root = REPO / "engine" / "kitchen"
+    assert '"фасад"' not in (root / "quote.py").read_text(encoding="utf-8")
+    assert "is_facade" in (root / "quote.py").read_text(encoding="utf-8")
+    assert "is_facade" in (root / "parts.py").read_text(encoding="utf-8")
+
+
+def test_describe_module_does_not_build_the_module_again():
+    assert "build_module" not in (REPO / "engine" / "kitchen" / "quote.py").read_text(encoding="utf-8")
+
+
+def test_project_schema_has_no_countertop_at_row_or_module():
+    defs = json.loads((REPO / "engine/kitchen/schemas/project.schema.json").read_text(encoding="utf-8"))[
+        "$defs"
+    ]
+    assert "countertop" not in defs["MaterialOverrides"]["properties"]
+    assert "countertop" in defs["ProjectMaterials"]["properties"]
+
+
+@pytest.mark.parametrize("where", ["row_lower:row", "row_lower:1", "row_upper:row"])
+def test_countertop_override_is_a_check_finding_and_reaches_parts(home, where):
+    path = write_project(home, with_materials(**{where: {"countertop": "top_38_marble"}}), "override.json")
+    finding = [f for f in api.check_project(path, home).errors if f.code == "countertop_override"]
+    assert len(finding) == 1 and "только для всего проекта" in finding[0].message
+    assert [
+        f.code for f in api.parts_from_project(path, home).findings if f.code == "countertop_override"
+    ] == ["countertop_override"]

@@ -47,12 +47,15 @@ def row_layouts(wall) -> list[list]:
     (и в ряд со своим пеналом тоже). Единственное место, где решается, что стоит в ряду: сумма ряда
     (`checks`), цоколь, шина и столешница берут модули отсюда. Место пенала — отступ от начала стены:
     его ряд считает отступ по своим модулям и пеналам, уже попавшим в этот ряд, поэтому отступы находятся
-    повторными проходами, пока не перестанут меняться."""
+    повторными проходами, пока не перестанут меняться. Отступ пенала записывается сразу, как только ряд его
+    посчитал: следующий ряд того же прохода уже видит его (иначе пеналы в разных рядах на одном месте
+    менялись бы местами на каждом проходе). Не сошлось за отведённое число проходов — ошибка."""
     at: dict[int, float] = {}  # id пенала -> отступ от начала стены
-    layouts: list[list] = []
     for _ in range(len(wall.rows) * 4 + 2):
-        layouts, found = [], {}
+        before = dict(at)
+        layouts: list[list] = []
         for number, row in enumerate(wall.rows):
+            found: dict[int, float] = {}
             talls = sorted(
                 (
                     (at[id(m)], m)
@@ -83,10 +86,12 @@ def row_layouts(wall) -> list[list]:
                 x += m.width
             merged += [t for _, t in talls] + unplaced
             layouts.append(merged)
-        if found == at:
-            break
-        at = found
-    return layouts
+            at.update(found)
+        if at == before:
+            return layouts
+    raise OrderError(
+        "Раскладка рядов стены не сходится: отступы пеналов не перестают меняться — проверьте ширины модулей."
+    )
 
 
 def _row_modules(wall, row) -> list:

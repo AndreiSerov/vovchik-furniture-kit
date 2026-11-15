@@ -30,6 +30,8 @@ LEGACY_INTERNAL_IMPORTS = {
     "test_input_guards_project.py": {"kitchen.parts"},
     "test_orders_api.py": {"kitchen.store"},
     "test_pdf.py": {"kitchen.pdf"},
+    # `row_layouts` не сходится только на искусственной стене: через проект её не собрать (тикет 45)
+    "test_project_cleanup.py": {"kitchen.common"},
     "test_project_import_diff.py": {"kitchen.project"},
     "test_row_sum_registry.py": {"kitchen.parts"},
     "test_structure_guards.py": {"kitchen.models", "kitchen.parts"},
@@ -60,6 +62,12 @@ def test_tests_reach_logic_through_the_api():
         if extra:
             problems.append(f"{path.name}: {sorted(extra)}")
     assert not problems, "ADR 0002: тесты логики идут через kitchen.api.\n" + "\n".join(problems)
+
+
+def test_every_legacy_import_exception_is_explained_in_decisions():
+    decisions = (ROOT / "DECISIONS.md").read_text(encoding="utf-8")
+    missing = [name for name in LEGACY_INTERNAL_IMPORTS if name not in decisions]
+    assert not missing, f"ADR 0002: исключение без причины в DECISIONS.md: {missing}"
 
 
 def test_legacy_list_only_shrinks():

@@ -126,8 +126,15 @@ class ModuleParts(BaseModel):
     module: str
     template: str
     parts: list[Part]
-    hardware: dict[str, int] = Field(default_factory=dict)
+    # вся фурнитура модуля («цех» и «объект»): КП описывает по ней модуль, сборочный лист берёт позиции «цех»;
+    # в JSON `kitchen parts` не входит
+    hardware: dict[str, int] = Field(default_factory=dict, exclude=True)
     plan: AssemblyPlan = Field(default_factory=AssemblyPlan, exclude=True)
+
+
+def is_facade(part: Part) -> bool:
+    """Фасад — деталь с площадью (`area_m2`): одно правило для площади, закупки, сметы и КП, не по имени."""
+    return part.area_m2 is not None
 
 
 @dataclass(frozen=True)
@@ -621,6 +628,7 @@ class Template:
     both_rows: bool = False  # модуль записан в одном ряду стены и занимает оба (пенал)
     default_depth: Callable[[Workshop], int] | None = None  # глубина по умолчанию вместо глубины ряда
     title: str = field(kw_only=True)  # русское название для строки состава КП: «нижний модуль», «пенал»
+    pull_out_front: bool = field(default=False, kw_only=True)  # фасад выдвижной, а не дверь (бутылочница)
 
 
 def _plain(build: Callable[[ModuleSpec, ModuleDims, ProjectMaterials, Workshop], TemplateOut]):
@@ -1080,7 +1088,9 @@ TEMPLATES = {
     "wall_hood": Template(build_hood_of_project, "upper", appliances=("hood",), title="модуль над вытяжкой"),
     "wall_dryer": Template(_plain(build_wall_dryer), "upper", title="верхний модуль"),
     "base_sink": Template(_plain(build_base_sink), "lower", appliances=("sink",), title="модуль под мойку"),
-    "base_bottle": Template(_plain(build_base_bottle), "lower", title="нижний модуль-бутылочница"),
+    "base_bottle": Template(
+        _plain(build_base_bottle), "lower", title="нижний модуль-бутылочница", pull_out_front=True
+    ),
     "base_drawers": Template(_plain(build_base_drawers), "lower", drawers=True, title="нижний модуль"),
     "dishwasher_panel": Template(
         _plain(build_dishwasher_panel),
@@ -1232,7 +1242,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
                 )
                 color = facade_color(module, row, project.materials)
                 for part in out.parts:
-                    if part.area_m2 is not None:
+                    if is_facade(part):
                         colored[color] = colored.get(color, Decimal(0)) + Decimal(str(part.area_m2))
                 hw.update(out.hardware)
                 warnings += [f"{module.label}: {w}" for w in out.warnings]
@@ -1242,7 +1252,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
         raise OrderError(f"Неизвестные позиции фурнитуры (нет в hardware.yaml): {', '.join(unknown)}.")
     all_parts = [p for m in modules for p in m.parts]
     # площадь фасадов — сумма площадей их деталей; округляется один раз, до 4 знаков
-    facade_area = sum((Decimal(str(p.area_m2)) for p in all_parts if p.area_m2 is not None), Decimal(0))
+    facade_area = sum((Decimal(str(p.area_m2)) for p in all_parts if is_facade(p)), Decimal(0))
     return PartsComputation(
         modules=modules,
         hardware=dict(sorted(hw.items())),
@@ -1382,6 +1392,7 @@ def build_module(
     dims = module_dims(module, row.kind, ws)
     out = template.build(module, dims, resolved_materials, ws, BuildContext(appliances, row))
     _check_sound(module, dims, out)
+    _check_part_sizes(out, ws.construction.min_part_size)
     _check_hinge_side(module, out)
     out.parts, drilled = apply_drilling(
         module.label, out.parts, out.joints, out.doors, ws, shelves=out.shelves, drawers=out.drawers
@@ -1409,6 +1420,27 @@ def _check_hinge_side(module: ModuleSpec, out: TemplateOut) -> None:
 def _negative_hardware(hardware: Counter) -> list[str]:
     """Позиции фурнитуры с количеством меньше нуля, «id количество»."""
     return sorted(f"{item} {n}" for item, n in hardware.items() if n < 0)
+
+
+class PartTooSmallError(OrderError):
+    """Деталь меньше `мин_размер_детали`: проверки проекта называют её находкой `part_too_small`."""
+
+    def __init__(self, parts: list[Part], limit: float):
+        self.parts = parts
+        self.limit = limit
+        super().__init__([part_too_small_message(part, limit) for part in parts])
+
+
+def part_too_small_message(part: Part, limit: float) -> str:
+    return f"{part.id} {part.length:g}×{part.width:g} мм: меньше {limit:g} мм — проверьте размеры модуля"
+
+
+def _check_part_sizes(out: TemplateOut, limit: float) -> None:
+    """Деталь, у которой длина или ширина меньше `мин_размер_детали`, — ошибка (толщина не проверяется).
+    Фасады тоже детали. Идёт до присадки: на невозможной детали отверстия мимо детали — следствие."""
+    small = [part for part in out.parts if min(part.length, part.width) < limit]
+    if small:
+        raise PartTooSmallError(small, limit)
 
 
 def _check_sound(module: ModuleSpec, dims: ModuleDims, out: TemplateOut) -> None:

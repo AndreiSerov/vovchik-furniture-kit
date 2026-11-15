@@ -6,6 +6,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
+from pydantic.json_schema import SkipJsonSchema
 
 from kitchen.errors import OrderError
 from kitchen.models import Num, PosNum
@@ -23,7 +24,9 @@ class MaterialOverrides(Section):
     facades: str | None = None
     facade_color: str | None = None
     handles: str | None = None
-    countertop: str | None = None
+    # Столешница одна на проект (`materials.countertop`): у ряда и модуля её в схеме нет. Ключ разбирается, чтобы
+    # проверки назвали его ошибкой `countertop_override`, а не «неизвестным ключом».
+    countertop: SkipJsonSchema[str | None] = None
 
 
 class Contents(Section):

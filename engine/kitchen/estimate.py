@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from kitchen.cutting import MaterialCut
 from kitchen.models import Workshop
-from kitchen.parts import DRAWER_BACK, DRAWER_BOTTOM, TEMPLATES, EdgeTotals, ModuleParts
+from kitchen.parts import DRAWER_BACK, DRAWER_BOTTOM, TEMPLATES, EdgeTotals, ModuleParts, is_facade
 from kitchen.project import Project
 
 # Детали ящиков Tandembox (GLOSSARY: дно-ящ, зад-ящ) присадки не требуют.
@@ -59,7 +59,7 @@ def _quantities(
             if part.material in sheets:
                 if part.material != hdf and part.name not in DRAWER_PART_NAMES:
                     drill += 1
-            elif part.area_m2 is not None:
+            elif is_facade(part):
                 drill += 1
     cases = sum(1 for module in modules if TEMPLATES[module.template].carcass)
     drawers = hardware.get(ws.construction.drawers.hardware, 0)

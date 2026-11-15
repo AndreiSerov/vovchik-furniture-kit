@@ -56,6 +56,9 @@ def _render_check(r: api.WorkshopCheck) -> str:
     if r.errors:
         lines.append("")
         lines += [f"ОШИБКА {e}" for e in r.errors]
+    if r.warnings:
+        lines.append("")
+        lines += [f"ПРЕДУПРЕЖДЕНИЕ {w}" for w in r.warnings]
     if r.mock:
         lines += [
             "",
@@ -592,6 +595,8 @@ def _render_quote(r: api.QuoteResult) -> str:
             f"разница {api.money(e.saving)}"
         )
     lines += [f"Файл: {output.file} (версия проекта {output.source_version})" for output in r.outputs]
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
     return "\n".join(lines)
 
 

@@ -141,6 +141,7 @@ class WorkshopCheck(Result):
     valid: bool
     files: list[FileSummary]
     errors: list[str]
+    warnings: list[str] = Field(default_factory=list)
 
 
 # Что считать в сводке файла: поля моделей; русские ключи берём из алиасов моделей, а не повторяем здесь.
@@ -162,6 +163,19 @@ def _counts(name: str, data: dict) -> dict[str, int]:
     return {"ключей": len([k for k in data if k != "mock"])}
 
 
+def _workshop_warnings(raw: dict[str, dict]) -> list[str]:
+    """Предупреждения, не ошибки: данные верны, но клиент увидит не то, что задумано."""
+    items = raw.get("hardware.yaml", {}).get("позиции")
+    found = []
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, dict) and item.get("для_клиента_мн") and not item.get("для_клиента"):
+            found.append(
+                f"hardware.yaml: позиция «{item.get('id')}»: есть для_клиента_мн, но нет для_клиента — "
+                "в КП название этой позиции не пишется."
+            )
+    return found
+
+
 def check_workshop(home: Path | None = None) -> WorkshopCheck:
     loaded = load(home or resolve_home())
     mock = loaded.mock_files
@@ -173,7 +187,12 @@ def check_workshop(home: Path | None = None) -> WorkshopCheck:
         if n in loaded.raw
     ]
     return WorkshopCheck(
-        valid=not loaded.problems, files=files, errors=loaded.problems, mock=bool(mock), mock_files=mock
+        valid=not loaded.problems,
+        files=files,
+        errors=loaded.problems,
+        warnings=_workshop_warnings(loaded.raw),
+        mock=bool(mock),
+        mock_files=mock,
     )
 
 
@@ -970,6 +989,13 @@ def _data_hash(data: dict) -> str:
         return hashlib.sha256(_canonical(data).encode("utf-8")).hexdigest()
 
 
+def _require_unique_labels(project: Project) -> None:
+    """Повтор метки — ошибка с тем же текстом, что у находки проверок и при импорте."""
+    repeated = duplicate_labels(project)
+    if repeated:
+        raise OrderError([f.message for f in repeated])
+
+
 def _build_parts(
     project: Project,
     home: Path,
@@ -979,9 +1005,7 @@ def _build_parts(
     workshop: Workshop | None = None,
 ) -> PartsResult:
     workshop = workshop or load_workshop(home)
-    repeated = duplicate_labels(project)
-    if repeated:  # тот же текст, что в находке проверок и при импорте
-        raise OrderError([f.message for f in repeated])
+    _require_unique_labels(project)
     computed = compute_parts(project, workshop)
     source = source.model_copy(
         update={
@@ -1097,9 +1121,7 @@ def _build_cut(
     workshop: Workshop | None = None,
 ) -> CutResult:
     workshop = workshop or load_workshop(home)
-    repeated = duplicate_labels(project)
-    if repeated:  # тот же текст, что в находке проверок и при импорте
-        raise OrderError([f.message for f in repeated])
+    _require_unique_labels(project)
     computed = compute_parts(project, workshop)
     saw = workshop.equipment.saw
     return CutResult(
@@ -1541,15 +1563,19 @@ class EstimateResult(Result):
     economy: EconomyVariant | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
+NO_SINK_WARNING = "в проекте нет мойки — врезка мойки не посчитана"
+
+
 def _estimate(project: Project, parts: PartsResult, cut: CutResult, workshop: Workshop) -> EstimateResult:
     purchase = _purchase(project, parts, cut, workshop)
     labor = build_labor(project, workshop, parts.modules, parts.hardware, parts.edges, cut.materials)
     pricing = build_pricing(workshop, purchase.total, labor.total)
+    no_sink = [] if any(a.type == "sink" for a in project.appliances) else [NO_SINK_WARNING]
     return EstimateResult(
         source=parts.source,
         materials_cost=purchase.total,
         labor=labor,
-        warnings=[*parts.warnings, *kerf_warnings(workshop.equipment.saw)],
+        warnings=[*parts.warnings, *no_sink, *kerf_warnings(workshop.equipment.saw)],
         mock=parts.mock,
         mock_files=parts.mock_files,
         mock_notice=MOCK_BANNER if parts.mock else None,
@@ -1630,6 +1656,18 @@ def _with_economy(
     return result.model_copy(update={"economy": variant})
 
 
+def _draft_warnings(source: PartsSource, parts: PartsResult) -> list[str]:
+    """Проект из файла (черновик до импорта) с ошибками проверок: расчёт идёт, но импорт такой проект отклонит.
+    Версия заказа таких ошибок не несёт."""
+    if source.kind != "file":
+        return []
+    return [
+        f"Проект с ошибкой проверки (импорт его отклонит): {f.message}"
+        for f in parts.findings
+        if f.level == "error"
+    ]
+
+
 def _estimate_run(
     project: Project,
     home: Path,
@@ -1643,6 +1681,8 @@ def _estimate_run(
     parts = _build_parts(project, home, source, brief, warnings, workshop)
     cut = _build_cut(project, home, source, brief, warnings, workshop)
     result = _estimate(project, parts, cut, workshop)
+    draft = _draft_warnings(source, parts)
+    result = result.model_copy(update={"warnings": [*result.warnings, *draft]}) if draft else result
     return _with_economy(result, project, home, workshop, economy), parts
 
 
@@ -1788,6 +1828,9 @@ class QuoteResult(QuoteBody, Result):
     """КП: то, что видит клиент. Цена — из сметы того же снимка проекта; себестоимости и наценки нет."""
 
     source: PartsSource
+    warnings: list[str] = Field(
+        default_factory=list
+    )  # для мастера (CLI, `--json`); в quote.json и PDF не идут
     outputs: list[OutputInfo] = Field(default_factory=list)
 
 
@@ -1809,6 +1852,7 @@ def _quote(
     return QuoteResult(
         **body.model_dump(),
         source=estimate.source,
+        warnings=estimate.warnings,
         mock=estimate.mock,
         mock_files=estimate.mock_files,
     )
@@ -1856,7 +1900,9 @@ def quote_and_save(
             ),
             (
                 outputs[1],
-                lambda path: path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8"),
+                lambda path: path.write_text(
+                    result.model_dump_json(indent=2, exclude={"warnings"}) + "\n", encoding="utf-8"
+                ),
             ),
         ],
     )

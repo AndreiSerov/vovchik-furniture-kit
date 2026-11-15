@@ -72,7 +72,8 @@ def _f(alias: str):
 class Saw(Section):
     type: str = _f("тип")
     max_cut_length: PosInt = _f("макс_длина_реза")
-    kerf: NonNegNum = _f("пропил")  # решение мастера: дробный учитывается вверх до целого мм (`kerf_mm`)
+    # решение мастера: дробный учитывается вверх до целого мм (`kerf_mm`); строка «3.2» в кавычках — не число
+    kerf: NonNegNum = Field(alias="пропил", strict=True)
 
     @property
     def kerf_mm(self) -> int:
@@ -546,6 +547,8 @@ ASSEMBLY_STAGES: tuple[str, ...] = AssemblyStage.__args__  # type: ignore[attr-d
 class Construction(Section):
     mock: StrictBool
     case_thickness: PosInt = _f("толщина_корпуса")
+    # ДОБАВЛЕНО (МОК): деталь с длиной или шириной меньше — ошибка проверок проекта `part_too_small`
+    min_part_size: PosNum = _f("мин_размер_детали")
     lower: LowerModule = _f("нижний")
     upper: UpperModule = _f("верхний")
     tall: TallModule = _f("пенал")

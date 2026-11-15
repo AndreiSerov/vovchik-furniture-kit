@@ -5,6 +5,7 @@
 """
 
 import re
+import unicodedata
 from typing import Literal
 
 from pydantic import BaseModel
@@ -21,6 +22,7 @@ from kitchen.parts import (
     TEMPLATES,
     ModuleDims,
     Part,
+    PartTooSmallError,
     TemplateOut,
     accepts,
     build_module,
@@ -28,6 +30,7 @@ from kitchen.parts import (
     drawer_depth_shortfall,
     module_dims,
     niche_item,
+    part_too_small_message,
     unknown_template_error,
 )
 from kitchen.project import ModuleSpec, Project
@@ -369,17 +372,22 @@ def _build(project: Project, ws: Workshop, found: list[Finding]):
             continue  # расчёт упёрся бы в ту же глубину
         try:
             built.append((module, build_module(module, row, project.materials, ws, project.appliances)))
+        except PartTooSmallError as e:
+            found += [_too_small_finding(module, part, e.limit) for part in e.parts]
         except KitchenError as e:
             found.append(_build_failure(module, e))
     return dims, built
 
 
-_LOOKALIKE = str.maketrans("ABCEHKMOPTXabcehkmoptx", "АВСЕНКМОРТХавсенкмортх")  # латиница → похожая кириллица
+_LOOKALIKE = str.maketrans("ABCEHKMOPTXYabcehkmoptxy", "АВСЕНКМОРТХУавсенкмортху")  # латиница → кириллица
 
 
 def _label_key(label: str) -> str:
-    """Метка для сравнения: без пробелов по краям, без различия регистра и латинских двойников кириллицы."""
-    return label.strip().translate(_LOOKALIKE).casefold()
+    """Метка для сравнения: NFKC (полноширинные цифры и буквы), без невидимых символов (категория Cf:
+    U+200B, U+FEFF, мягкий перенос) и пробелов по краям, без различия регистра и латинских двойников кириллицы."""
+    text = unicodedata.normalize("NFKC", label)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    return text.strip().translate(_LOOKALIKE).casefold()
 
 
 def duplicate_labels(project: Project) -> list[Finding]:
@@ -399,6 +407,17 @@ def duplicate_labels(project: Project) -> list[Finding]:
         for labels in groups.values()
         if len(labels) > 1
     ]
+
+
+def _too_small_finding(module: ModuleSpec, part: Part, limit: float) -> Finding:
+    return Finding(
+        code="part_too_small",
+        level="error",
+        subject=module.label,
+        message=part_too_small_message(part, limit),
+        value=min(part.length, part.width),
+        limit=limit,
+    )
 
 
 def _build_failure(module: ModuleSpec, error: KitchenError) -> Finding:

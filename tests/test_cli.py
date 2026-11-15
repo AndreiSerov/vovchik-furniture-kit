@@ -136,3 +136,15 @@ def test_order_commands_without_workshop_fail(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     r = runner.invoke(app, ["order", "new", "2026-047-petrov"])
     assert r.exit_code == 1 and "Мастерская не найдена" in r.output
+
+
+def test_check_workshop_prints_client_name_warning(home):
+    path = home / "workshop" / "hardware.yaml"
+    text = path.read_text(encoding="utf-8")
+    path.write_text(text.replace('для_клиента: "выдвижным ведром", ', ""), encoding="utf-8")
+    r = runner.invoke(app, ["check-workshop"])
+    assert r.exit_code == 0, r.output
+    assert (
+        "ПРЕДУПРЕЖДЕНИЕ hardware.yaml: позиция «bin_2sec»: есть для_клиента_мн, но нет для_клиента"
+        in r.output
+    )
