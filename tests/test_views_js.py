@@ -1,10 +1,11 @@
 """Тикет 42: скрипт страницы (`engine/kitchen/web/viewer.js`) под node с настоящим three.js r147, без WebGL.
 
 Проверяет то, что в браузере увидит глаз: кухня не зеркальна, стены видны только изнутри, камера на высоте
-1600 и вся кухня в кадре, нажатие подсвечивает модуль. Без `node` тесты пропускаются; WebGL, касания и
-щипок — `manual` (телефон)."""
+1600 и вся кухня в кадре, нажатие подсвечивает модуль. Без `node` тесты пропускаются (в CI — падают); WebGL,
+касания и щипок — `manual` (телефон)."""
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -21,9 +22,17 @@ CHECK = Path(__file__).parent / "js" / "check_viewer.js"
 PETROV = Path(__file__).parent / "fixtures" / "petrov_project.json"
 NODE = shutil.which("node")
 
+# В CI node есть всегда: без него тесты не пропускаются, а падают (тикет 47); локально без node — пропуск.
 pytestmark = pytest.mark.skipif(
-    NODE is None, reason="нет node: скрипт страницы проверяется в браузере (manual)"
+    NODE is None and not os.environ.get("CI"),
+    reason="нет node: скрипт страницы проверяется в браузере (manual)",
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _node_required_in_ci():
+    if NODE is None:
+        pytest.fail("в CI нужен node: без него страница 3D не проверяется (scripts/doctor называет его)")
 
 
 @pytest.fixture(scope="module")
@@ -83,3 +92,36 @@ def test_labels_sit_just_in_front_of_the_face_and_face_the_room(viewed):
 
 def test_box_is_width_by_height_by_depth(viewed):
     assert [round(x, 3) for x in viewed["n1box"]] == [0.6, 0.72, 0.579]
+
+
+CHECK_LAYOUTS = Path(__file__).parent / "js" / "check_viewer_layouts.js"
+
+
+def test_one_wall_and_u_shaped_kitchens_have_inward_walls_all_modules_pickable_and_are_in_frame(tmp_path):
+    """Не только угол Петрова: одна стена (6000 мм) и П-образная кухня (тикет 47)."""
+    from tests.test_views import long_wall, u_shaped
+
+    home = tmp_path / "home"
+    shutil.copytree(REPO / "workshop", home / "workshop")
+    files = {}
+    for name, views in (("one", long_wall(home)), ("u", u_shaped(home))):
+        path = tmp_path / f"{name}.json"
+        path.write_text(views.model_dump_json(), encoding="utf-8")
+        files[name] = (path, views)
+    done = subprocess.run(
+        [NODE, str(CHECK_LAYOUTS), str(THREE), str(VIEWER), *(str(p) for p, _ in files.values())],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr
+    seen = json.loads(done.stdout)
+    for name, expected_walls in (("one", 1), ("u", 3)):
+        path, views = files[name]
+        got = seen[str(path)]
+        assert len(got["walls"]) == expected_walls == len(views.scene.walls)
+        assert all(w["facing"] > 0 and w["frontOnly"] for w in got["walls"]), (name, got["walls"])
+        assert got["modules"] == len(views.scene3d.modules) == len(got["pickLabels"])
+        for aspect in ("1.6", "0.5"):
+            assert got["cameras"][aspect]["y"] == pytest.approx(1.6)
+            assert got["cameras"][aspect]["worst"] <= 0.93, (name, aspect)

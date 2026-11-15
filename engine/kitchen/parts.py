@@ -43,6 +43,11 @@ __all__ = [
     "DRAWER_BOTTOM",
     "GAP_NAMES",
     "PURPOSE_RU",
+    "ROW_GEN",
+    "ROW_LOC",
+    "ROW_NOM",
+    "ROW_PL_GEN",
+    "ROW_PL_NOM",
     "TEMPLATES",
     "AssemblyPlan",
     "EdgeTotals",
@@ -66,9 +71,11 @@ __all__ = [
     "drawer_depth_shortfall",
     "drawer_parts",
     "facade_color",
+    "find_material",
     "lower_facades",
     "module_dims",
     "niche_item",
+    "required_thickness",
     "resolve_materials",
     "steps_pick",
     "unknown_template_error",
@@ -261,7 +268,7 @@ def built_niche(appliance: Appliance | None, item: ApplianceItem) -> tuple[int, 
     )
 
 
-def _material(items: list, material_id: str, what: str, kind: str):
+def find_material(items: list, material_id: str, what: str, kind: str):
     """Материал по id из списка materials.yaml (`kind` — «листовые» или «фасады»)."""
     for m in items:
         if m.id == material_id:
@@ -280,7 +287,8 @@ def _edge_id(ws: Workshop, material_id: str) -> str:
     return edge_id
 
 
-def _required_thickness(material, where: str) -> int:
+def required_thickness(material, where: str) -> int:
+    """Толщина материала; не указана — ошибка мастерской (`where` — для чего она нужна)."""
     if material.thickness is None:
         raise WorkshopError(
             f"materials.yaml: у материала «{material.id}» не указана толщина "
@@ -428,7 +436,7 @@ def build_base_door(
     hw = c.furniture
     t = c.case_thickness
     W, H, D = dims.width, dims.height, dims.depth
-    body = _material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
+    body = find_material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
     edge_id = _edge_id(ws, body.id)
     textured = bool(body.texture)
     n_shelves = 0 if no_shelf else _shelf_count(module, dims, c)
@@ -517,8 +525,8 @@ def build_base_door(
     if not no_back:
         # задняя стенка ХДФ накладная, с отступом по контуру; сзади корпуса
         bp = c.back_panel
-        hdf = _material(ws.materials.sheets, bp.material, "Материал задней стенки", "листовые")
-        hdf_t = _required_thickness(hdf, "задней стенки")
+        hdf = find_material(ws.materials.sheets, bp.material, "Материал задней стенки", "листовые")
+        hdf_t = required_thickness(hdf, "задней стенки")
         back_h = H - 2 * bp.contour_offset
         back_w = W - 2 * bp.contour_offset
         out.parts.append(
@@ -537,8 +545,8 @@ def build_base_door(
 
     # двери по правилу ширины: одна при W ≤ порога, иначе две; высота — по формуле
     f = c.facades
-    facade_mat = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
-    facade_t = _required_thickness(facade_mat, "фасадов")
+    facade_mat = find_material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
+    facade_t = required_thickness(facade_mat, "фасадов")
     facade_h = _calc(module, dims, "высота фасада", f.height_lower, H=H, W=W)
     n_doors = _door_count(module, dims, c, no_doors=no_doors, single_door=single_door)
     facade_w = 0
@@ -668,7 +676,7 @@ def build_dishwasher_panel(
 ) -> TemplateOut:
     """Фасад ПММ: крепёж поставляется с техникой, корпус отсутствует."""
     f = ws.construction.facades
-    facade = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
+    facade = find_material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
     h = _calc(module, dims, "высота фасада", f.height_lower, H=dims.height, W=dims.width)
     w = _calc(module, dims, "ширина фасада", f.single_door_width, H=dims.height, W=dims.width)
     return TemplateOut(
@@ -679,7 +687,7 @@ def build_dishwasher_panel(
                 name="фасад",
                 a=Span(h, "z"),
                 b=Span(w, "x"),
-                thickness=_required_thickness(facade, "фасадов"),
+                thickness=required_thickness(facade, "фасадов"),
                 material_id=facade.id,
                 textured=False,
                 at=Position(x=f.gap, y=dims.depth, z=f.gap),
@@ -733,8 +741,8 @@ def drawer_depth_shortfall(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -
     правило для проверок и `drawer_parts`: дно ящика по формуле мастерской плюс толщина задней стенки ящика,
     но не меньше длины направляющей. Возвращает (нужная глубина, русский текст ошибки) или `None`."""
     c = ws.construction
-    material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
-    thickness = _required_thickness(material, "деталей ящика")
+    material = find_material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
+    thickness = required_thickness(material, "деталей ящика")
     _, bottom, _ = _drawer_sizes(module, dims, ws)
     guide = c.tandembox.guide_length
     need = max(guide, bottom[1] + thickness)
@@ -756,8 +764,8 @@ def drawer_parts(
     корпуса, — ошибка с цифрами, а не деталь отрицательного размера."""
     c = ws.construction
     t, D = c.case_thickness, dims.depth
-    material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
-    thickness = _required_thickness(material, "деталей ящика")
+    material = find_material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
+    thickness = required_thickness(material, "деталей ящика")
     shortfall = drawer_depth_shortfall(module, dims, ws)
     if shortfall:
         raise OrderError(shortfall[1])
@@ -820,7 +828,7 @@ def build_base_drawers(
     )
     if lower_height <= 0:
         raise OrderError(f"Модуль {module.label}: высота фасада ящика должна быть положительной.")
-    facade = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
+    facade = find_material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
     z = facades.gap
     for n, h in enumerate((lower_height, lower_height, top), 1):
         out.parts.append(
@@ -830,7 +838,7 @@ def build_base_drawers(
                 name="фасад",
                 a=Span(width, "x"),
                 b=Span(h, "z"),
-                thickness=_required_thickness(facade, "фасадов"),
+                thickness=required_thickness(facade, "фасадов"),
                 material_id=facade.id,
                 textured=False,
                 at=Position(x=facades.gap, y=dims.depth, z=z),
@@ -947,7 +955,7 @@ def build_wall_hood(
         no_bottom=True,
         lift=bool(module.contents and module.contents.lift),
     )
-    body = _material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
+    body = find_material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
     out.joints.extend(joined_to_sides(module.label, f"{module.label}-дно-выт-1"))
     out.parts.append(
         make_part(
@@ -1012,9 +1020,9 @@ def _build_corner(
         facade_h = _calc(module, dims, "высота фасада", c.facades.height_lower, H=dims.height, W=dims.width)
         if not shelf:
             out.hardware[rules.carousel] += 1
-    body = _material(ws.materials.sheets, rules.filler_material, "Материал заглушки", "листовые")
+    body = find_material(ws.materials.sheets, rules.filler_material, "Материал заглушки", "листовые")
     facade_id = materials.facades_upper if upper else materials.facades_lower
-    facade = _material(ws.materials.facades, facade_id, "Материал фасадов", "фасады")
+    facade = find_material(ws.materials.facades, facade_id, "Материал фасадов", "фасады")
     out.parts.append(
         make_part(
             pid=f"{module.label}-загл",
@@ -1022,7 +1030,7 @@ def _build_corner(
             name="заглушка",
             a=Span(facade_h, "z"),
             b=Span(filler_width, "x"),
-            thickness=_required_thickness(body, "заглушки"),
+            thickness=required_thickness(body, "заглушки"),
             material_id=body.id,
             textured=bool(body.texture),
             at=Position(x=filler_x, y=dims.depth, z=gap),
@@ -1036,7 +1044,7 @@ def _build_corner(
             name="фасад",
             a=Span(facade_h, "z"),
             b=Span(facade_width, "x"),
-            thickness=_required_thickness(facade, "фасадов"),
+            thickness=required_thickness(facade, "фасадов"),
             material_id=facade.id,
             textured=False,
             at=Position(x=facade_x, y=dims.depth, z=gap),
@@ -1176,7 +1184,12 @@ def accepts(template: str, appliance_type: str, ws: Workshop) -> bool:
     return appliance_type in t.appliances or (on_top and t.carcass and t.row_kind == "lower")
 
 
-_ROW_RU = {"lower": "нижнем ряду", "upper": "верхнем ряду", "tall": "пенале"}
+# Названия рядов по падежам: одно место для текстов проверок, расстановки и сравнения версий (тикет 47).
+ROW_NOM = {"lower": "нижний", "upper": "верхний"}
+ROW_GEN = {"lower": "нижнего", "upper": "верхнего"}
+ROW_PL_NOM = {"lower": "нижние", "upper": "верхние"}
+ROW_PL_GEN = {"lower": "нижних", "upper": "верхних"}
+ROW_LOC = {"lower": "нижнем ряду", "upper": "верхнем ряду", "tall": "пенале"}
 
 
 # --- расчёт деталей проекта ----------------------------------------------------
@@ -1236,7 +1249,7 @@ def upper_corner_offset(module: ModuleSpec, row: Row, ws: Workshop) -> int:
     """Смещение верхнего ряда соседней стены от верхнего углового модуля (решение мастера 2026-11-15 после
     ревью тикета 50): глубина углового модуля (своя `depth`, иначе `верхний.глубина`) плюс толщина стенки ЛДСП —
     `construction.толщина_корпуса`, та же, что у боковин (решение координатора по словам мастера), без зазора.
-    Её зовёт `common.corner_offsets`: из него берут смещение сумма ряда, раскладка рядов и расстановка."""
+    Её зовёт `common.corner_offsets`: из него берут смещение сумма ряда, порядок модулей в рядах и расстановка."""
     return module_dims(module, row.kind, ws).depth + ws.construction.case_thickness
 
 
@@ -1299,7 +1312,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
         for row in wall.rows:
             for entry in row.modules:
                 if is_gap(entry):
-                    kinds = [gap_name(a.type, 0) for a in project.appliances if a.module == entry.label]
+                    kinds = [gap_name(a.type, 0) for a in project.appliances_at(entry.label)]
                     gaps.append(
                         PartsGap(
                             label=entry.label,
@@ -1366,7 +1379,7 @@ def build_module(
     if template.row_kind != "tall" and template.row_kind != row.kind:
         raise OrderError(
             f"Модуль {module.label}: шаблон {module.template} применяется в "
-            f"{_ROW_RU[template.row_kind]}, а он в ряде «{row.kind}»."
+            f"{ROW_LOC[template.row_kind]}, а он в ряде «{row.kind}»."
         )
     if module.template in ("base_sink", "base_bottle", "base_drawers"):
         if "shelves" in module.model_fields_set:

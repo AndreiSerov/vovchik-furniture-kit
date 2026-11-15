@@ -266,3 +266,15 @@ def test_wrong_kind_in_gap_is_not_counted_in_width_sum(home):
         found["gap_too_small"].message
         == "Место ПМ1: 600 мм, а холодильнику по проекту нужно 620 мм (600 + зазор 20)"
     )
+
+
+def test_appliance_of_a_module_is_not_checked_as_gap_technique_when_a_gap_shares_its_label(home):
+    from tests.test_placement import mod, write
+
+    walls = [{"label": "A", "length": 1200, "rows": [{"kind": "lower", "modules": [
+        mod("ПМ1", "base_door", 600), {"label": "ПМ1", "gap": True, "width": 600},
+    ]}]}]  # fmt: skip
+    path = write(home, walls, appliances=[{"type": "oven", "width": 595, "module": "ПМ1"}])
+    codes = {f.code for f in api.check_project(path, home).findings}
+    assert "duplicate_label" in codes
+    assert "gap_appliance" not in codes

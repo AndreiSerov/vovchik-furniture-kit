@@ -6,7 +6,7 @@
 смещение на соседней стене его не удлиняет (стык в углу «встык»).
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, Decimal
 from typing import Literal
@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from kitchen.errors import OrderError
 from kitchen.models import Workshop
 from kitchen.parts import TEMPLATES, corner_on_left, gap_width, upper_corner_offset
-from kitchen.project import Project, is_gap
+from kitchen.project import ModuleSpec, Project, Row, Wall, is_gap
 
 __all__ = [
     "CommonItem",
@@ -24,7 +24,9 @@ __all__ = [
     "CountertopSize",
     "RowOffsets",
     "compute_common",
+    "corner_modules",
     "corner_offsets",
+    "corner_wall_message",
     "is_tall",
     "row_layouts",
     "row_positions",
@@ -79,9 +81,24 @@ class CornerOffsets:
         return self.rows.get((wall, kind), RowOffsets())
 
 
+def corner_modules(project: Project) -> Iterator[tuple[Wall, Row, ModuleSpec, str]]:
+    """Угловые модули проекта: (стена, ряд, модуль, соседняя стена). Один обход для суммы ряда (`checks`),
+    смещений (`corner_offsets`) и связей стен (`placement`)."""
+    for wall in project.walls:
+        for row in wall.rows:
+            for m in row.cabinets:
+                if m.corner is not None:
+                    yield wall, row, m, m.corner.adjacent_wall
+
+
+def corner_wall_message(module: str, adjacent: str, wall: str) -> str:
+    """Угол с несуществующей или своей же стеной (проверка `corner_wall` и ошибка расстановки)."""
+    return f"Модуль {module}: соседняя стена «{adjacent}» должна существовать и отличаться от стены «{wall}»."
+
+
 def corner_offsets(project: Project, ws: Workshop) -> CornerOffsets:
     """Угловые смещения соседних стен — единственное место, где решаются величина и сторона смещения: сумма
-    ряда (`checks`), раскладка рядов (`row_layouts`) и расстановка в комнате берут его отсюда. Нижнее —
+    ряда (`checks`), порядок модулей в рядах (`row_layouts`) и расстановка в комнате берут его отсюда. Нижнее —
     `угловые_модули.смещение_нижнего`, верхнее — `parts.upper_corner_offset`. Сторона — `parts.corner_on_left`:
     угловой у правого края ряда (последний, единственный) — стена идёт слева направо, соседняя начинается от
     угла: смещение в начале соседней стены; у левого (первый при других) — в её конце. Угол с несуществующей
@@ -89,29 +106,26 @@ def corner_offsets(project: Project, ws: Workshop) -> CornerOffsets:
     rules = ws.construction.corner_rules
     labels = {w.label for w in project.walls}
     found = CornerOffsets()
-    for wall in project.walls:
-        for row in wall.rows:
-            for m in row.cabinets:
-                adjacent = m.corner.adjacent_wall if m.corner else None
-                if adjacent is None or adjacent == wall.label or adjacent not in labels:
-                    continue
-                key = (adjacent, row.kind)
-                try:
-                    size = rules.lower_offset if row.kind == "lower" else upper_corner_offset(m, row, ws)
-                except OrderError:
-                    found.unknown.add(key)
-                    continue
-                offsets = found.rows.setdefault(key, RowOffsets())
-                if corner_on_left(row, m):
-                    offsets.end += size
-                    offsets.at_end.append(m.label)
-                else:
-                    offsets.start += size
-                    offsets.at_start.append(m.label)
+    for wall, row, m, adjacent in corner_modules(project):
+        if adjacent == wall.label or adjacent not in labels:
+            continue
+        key = (adjacent, row.kind)
+        try:
+            size = rules.lower_offset if row.kind == "lower" else upper_corner_offset(m, row, ws)
+        except OrderError:
+            found.unknown.add(key)
+            continue
+        offsets = found.rows.setdefault(key, RowOffsets())
+        if corner_on_left(row, m):
+            offsets.end += size
+            offsets.at_end.append(m.label)
+        else:
+            offsets.start += size
+            offsets.at_start.append(m.label)
     return found
 
 
-def row_layouts(wall, offsets: CornerOffsets | None = None) -> list[list]:
+def row_layouts(wall, offsets: CornerOffsets) -> list[list]:
     """Модули каждого ряда стены по порядку вдоль стены, с пеналами из других рядов: пенал входит в оба ряда
     (и в ряд со своим пеналом тоже). Единственное место, где решается, что стоит в ряду: сумма ряда
     (`checks`), цоколь, шина, столешница и расстановка берут модули отсюда. Место пенала — отступ от начала
@@ -144,7 +158,7 @@ def row_layouts(wall, offsets: CornerOffsets | None = None) -> list[list]:
                 if is_tall(m) and id(m) not in at
             ]
             merged: list = []
-            x = float(offsets.of(wall.label, row.kind).start) if offsets else 0.0
+            x = float(offsets.of(wall.label, row.kind).start)
             for m in row.modules:
                 while talls and talls[0][0] <= x:
                     tall = talls.pop(0)[1]
@@ -160,7 +174,7 @@ def row_layouts(wall, offsets: CornerOffsets | None = None) -> list[list]:
         if at == before:
             return layouts
     raise OrderError(
-        "Раскладка рядов стены не сходится: отступы пеналов не перестают меняться — проверьте ширины модулей."
+        "Порядок модулей в рядах стены не сходится: отступы пеналов не перестают меняться — проверьте ширины модулей."
     )
 
 
@@ -185,7 +199,7 @@ def _row_modules(wall, row, offsets: CornerOffsets) -> list:
     return row_layouts(wall, offsets)[next(i for i, r in enumerate(wall.rows) if r is row)]
 
 
-def _entries(project: Project, ws: Workshop, kinds: Iterable[str], with_tall: bool) -> list:
+def _entries_of_kinds(project: Project, ws: Workshop, kinds: Iterable[str], with_tall: bool) -> list:
     """Записи рядов нужного вида по всем стенам (модули и пустые места); пенал входит только при `with_tall`.
     Нижний ряд берёт пеналы стены из других рядов; на стене без нижнего ряда пенал тоже стоит на цоколе."""
     found: list = []
@@ -204,7 +218,7 @@ def _length(project: Project, ws: Workshop, kinds: Iterable[str], with_tall: boo
     """Сумма ширин модулей рядов нужного вида по всем стенам, без пустых мест."""
     return sum(
         int(m.width)  # целую ширину обеспечивает `module_dims`
-        for m in _entries(project, ws, kinds, with_tall)
+        for m in _entries_of_kinds(project, ws, kinds, with_tall)
         if not is_gap(m)
     )
 
@@ -213,7 +227,7 @@ def _gaps_mm(project: Project, ws: Workshop, kinds: Iterable[str], *, under_top:
     """Сумма ширин пустых мест рядов нужного вида; `under_top` отбирает места по `under_countertop`."""
     return sum(
         gap_width(m)
-        for m in _entries(project, ws, kinds, False)
+        for m in _entries_of_kinds(project, ws, kinds, False)
         if is_gap(m) and (under_top is None or m.under_countertop == under_top)
     )
 

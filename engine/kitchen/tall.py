@@ -12,16 +12,16 @@ from kitchen.parts import (
     _calc,
     _edge_id,
     _hinge_side,
-    _material,
-    _required_thickness,
     build_base_door,
     built_niche,
     drawer_parts,
+    find_material,
     hinged,
     joined_to_sides,
     make_part,
     niche_item,
     pinned,
+    required_thickness,
 )
 from kitchen.project import Appliance, ModuleSpec, ProjectMaterials
 
@@ -72,7 +72,7 @@ def build_tall_oven(
         raise OrderError(f"Модуль {module.label}: верхняя полка не помещается в корпусе.")
     local = module.model_copy(update={"shelves": 1})
     out = build_base_door(local, dims, materials, ws, no_doors=True, no_shelf=True, upper_carcass=True)
-    body = _material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
+    body = find_material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
     edge = _edge_id(ws, body.id)
     for pid, name, z in (
         ("дно-ниши", "дно ниши", bottom_z),
@@ -110,8 +110,8 @@ def build_tall_oven(
             edges={c.edging.shelves.face: edge},
         )
     )
-    facade = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
-    facade_t = _required_thickness(facade, "фасадов")
+    facade = find_material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
+    facade_t = required_thickness(facade, "фасадов")
     facade_w = _calc(module, dims, "ширина фасада", c.facades.single_door_width, H=H, W=W)
     for suffix, z, height in (("-1", gap, rules.drawer_facade_height), ("", upper_z, door_h)):
         out.parts.append(

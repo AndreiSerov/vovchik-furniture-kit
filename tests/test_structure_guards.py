@@ -178,3 +178,45 @@ def test_appliance_names_match_the_brief_wording():
     block = re.search(r"^APPLIANCE_NAMES = \{(.*?)^\}", source, re.DOTALL | re.MULTILINE).group(1)
     brief = dict(re.findall(r'"(\w+)": "([^"]+)"', block))
     assert brief and {k: APPLIANCE_NAMES[k] for k in brief} == brief
+
+
+# Тикет 47: склонение, целое число и поворот в оси комнаты живут в одном месте.
+SINGLE_HOME = {"plural": "format.py", "num": "format.py", "turn": "geometry.py"}
+# Свой, не дубль: `scene3d._num` — обёртка `format.num` с четырьмя знаками.
+OWN_NUM = {"scene3d.py"}
+
+
+def test_shared_helpers_are_defined_once():
+    problems = []
+    for path in sorted(ENGINE.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            name = node.name.lstrip("_")
+            if name not in SINGLE_HOME or path.name == SINGLE_HOME[name]:
+                continue
+            if node.name == "_num" and path.name in OWN_NUM:
+                continue
+            problems.append(f"{path.name}: def {node.name}")
+    assert not problems, "Склонение, число и поворот берутся из format.py и geometry.py:\n" + "\n".join(
+        problems
+    )
+
+
+# Тикет 47: «кто стоит в модуле или пустом месте» отвечает `Project.appliances_at`. Фильтр по `.module ==` над
+# списком техники проекта разрешён только в `project.py`; `ctx.appliances` и `project_appliances` в `parts.py` и `tall.py`
+# (техника, переданная сборщику шаблона) под шаблон `project.appliances` не попадают.
+FILTER_OK = {"project.py"}
+
+
+def test_appliance_filter_by_module_lives_only_in_project():
+    problems = []
+    for path in sorted(ENGINE.glob("*.py")):
+        if path.name in FILTER_OK:
+            continue
+        text = path.read_text(encoding="utf-8")
+        for match in re.finditer(
+            r"for (\w+) in project\.appliances\b[^\]\n]*(?:\n[^\]]*?)?\b\1\.module ==", text
+        ):
+            problems.append(f"{path.name}: {match.group(0)[:60]!r}")
+    assert not problems, "Техника места — Project.appliances_at:\n" + "\n".join(problems)

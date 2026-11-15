@@ -101,7 +101,7 @@ class Row(Section):
     @property
     def cabinets(self) -> list[ModuleSpec]:
         """Только модули ряда, без пустых мест: то, что превращается в детали."""
-        return [m for m in self.modules if not isinstance(m, Gap)]
+        return [m for m in self.modules if not is_gap(m)]
 
 
 class Wall(Section):
@@ -140,6 +140,10 @@ class Project(Section):
     materials: ProjectMaterials
     led: bool = False
     appliances: list[Appliance] = Field(default_factory=list)
+
+    def appliances_at(self, label: str) -> list[Appliance]:
+        """Техника модуля или пустого места с этой меткой: единственный ответ на «кто здесь стоит»."""
+        return [a for a in self.appliances if a.module == label]
 
 
 def parse_project(data: object) -> Project:

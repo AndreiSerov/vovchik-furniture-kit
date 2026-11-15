@@ -223,26 +223,19 @@ def _render_source(src: api.PartsSource) -> str:
     return f"{head}; {brief}"
 
 
-def _plural(n: int, forms: tuple[str, str, str]) -> str:
-    """«1 ошибка», «2 ошибки», «5 ошибок»."""
-    if n % 100 in range(11, 15):
-        return f"{n} {forms[2]}"
-    return f"{n} {forms[0] if n % 10 == 1 else forms[1] if n % 10 in (2, 3, 4) else forms[2]}"
-
-
 def _checks_line(errors: int, warnings: int) -> str:
     """«Проверки: 2 ошибки, 1 предупреждение» — у `check` и `3d`."""
     return (
-        f"Проверки: {_plural(errors, ('ошибка', 'ошибки', 'ошибок'))}, "
-        f"{_plural(warnings, ('предупреждение', 'предупреждения', 'предупреждений'))}"
+        f"Проверки: {api.plural(errors, 'ошибка', 'ошибки', 'ошибок')}, "
+        f"{api.plural(warnings, 'предупреждение', 'предупреждения', 'предупреждений')}"
     )
 
 
 def _render_parts(r: api.PartsResult) -> str:
     errors = sum(f.level == "error" for f in r.findings)
     summary = (
-        f"Проверки: {_plural(errors, ('ошибка', 'ошибки', 'ошибок'))}, "
-        f"{_plural(len(r.findings) - errors, ('предупреждение', 'предупреждения', 'предупреждений'))}"
+        f"Проверки: {api.plural(errors, 'ошибка', 'ошибки', 'ошибок')}, "
+        f"{api.plural(len(r.findings) - errors, 'предупреждение', 'предупреждения', 'предупреждений')}"
     )
     lines = [f"Детали проекта {r.order}:", _render_source(r.source), summary]
     for m in r.modules:
