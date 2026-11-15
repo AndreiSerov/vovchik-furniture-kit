@@ -1224,14 +1224,12 @@ def resolve_materials(module: ModuleSpec, row: Row, materials: ProjectMaterials)
     return ProjectMaterials.model_validate(values)
 
 
-def upper_corner_offset(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws: Workshop) -> int:
+def upper_corner_offset(module: ModuleSpec, row: Row, ws: Workshop) -> int:
     """Смещение верхнего ряда соседней стены от верхнего углового модуля (решение мастера 2026-11-15 после
-    ревью тикета 50): глубина углового модуля (своя `depth`, иначе `верхний.глубина`) плюс толщина материала
-    корпуса углового, без зазора. Её зовёт сумма ряда (`checks`); раскладка рядов смещения не считает."""
-    body = _material(
-        ws.materials.sheets, resolve_materials(module, row, materials).body, "Материал корпуса", "листовые"
-    )
-    return module_dims(module, row.kind, ws).depth + _required_thickness(body, "смещения верхнего ряда")
+    ревью тикета 50): глубина углового модуля (своя `depth`, иначе `верхний.глубина`) плюс толщина стенки ЛДСП —
+    `construction.толщина_корпуса`, та же, что у боковин (решение координатора по словам мастера), без зазора.
+    Её зовёт сумма ряда (`checks`); раскладка рядов смещения не считает."""
+    return module_dims(module, row.kind, ws).depth + ws.construction.case_thickness
 
 
 def facade_color(module: ModuleSpec, row: Row, materials: ProjectMaterials) -> str:

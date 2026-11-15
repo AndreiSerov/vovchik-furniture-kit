@@ -1,5 +1,5 @@
 """Тикет 50: верхний угловой модуль берёт глубину верхних; смещение верхнего ряда соседней стены —
-глубина верхних плюс толщина фасада углового."""
+глубина углового плюс `толщина_корпуса` (та же, что у боковин)."""
 
 import copy
 import json
@@ -68,14 +68,40 @@ def test_upper_offset_follows_own_depth_of_the_corner(home):
     assert (f.subject, f.value) == ("Б", 1030)
 
 
-def test_upper_offset_follows_body_thickness_of_the_corner(home):
+def test_upper_offset_follows_case_thickness_of_construction(home):
+    edit(home, "construction.yaml", "толщина_корпуса: 16", "толщина_корпуса: 18")
+    assert row_sums(home, corner_walls(662)) == []  # 320 + 18 = 338; 662 + 338 = 1000
+
+
+def test_upper_offset_ignores_sheet_thickness_of_materials_yaml(home):
+    # ЛДСП корпуса с толщиной 18 в materials.yaml, толщина_корпуса 16: боковины 16, смещение 336
     lines = (home / "workshop/materials.yaml").read_text(encoding="utf-8").splitlines()
     line = next(ln for ln in lines if "id: ldsp_16_white" in ln)
     thick = line.replace("ldsp_16_white", "ldsp_18_white").replace("толщина: 16", "толщина: 18")
     edit(home, "materials.yaml", line, line + "\n" + thick)
-    walls = corner_walls(662, {"materials": {"body": "ldsp_18_white"}})
-    assert row_sums(home, walls) == []  # материал корпуса 18 → 336 + 2 = 338; 662 + 338 = 1000
-    assert row_sums(home, corner_walls(664)) == []  # обычный корпус — 336
+    edit(
+        home,
+        "materials.yaml",
+        "  ldsp_16_white: edge_08_white",
+        "  ldsp_16_white: edge_08_white\n  ldsp_18_white: edge_08_white",
+    )
+    walls = corner_walls(664, {"materials": {"body": "ldsp_18_white"}})
+    assert row_sums(home, walls) == []
+    result = api.parts_from_project(write(home, walls), home)
+    corner = next(m for m in result.modules if m.module == "В1")
+    assert {p.width for p in corner.parts if p.name == "боковина"} == {320}
+    assert {p.thickness for p in corner.parts if p.name == "боковина"} == {16}
+
+
+def test_two_upper_corners_into_one_wall_add_up(home):
+    a = mod("В1", "wall_corner", 600, corner={"adjacent_wall": "Б"})
+    c = mod("В3", "wall_corner", 600, corner={"adjacent_wall": "Б"})
+    walls = [
+        {"label": "A", "length": 600, "rows": [{"kind": "upper", "modules": [a]}]},
+        {"label": "Б", "length": 1000, "rows": [{"kind": "upper", "modules": [mod("В2", "wall_door", 328)]}]},
+        {"label": "В", "length": 600, "rows": [{"kind": "upper", "modules": [c]}]},
+    ]
+    assert row_sums(home, walls) == []  # 328 + 336 + 336 = 1000
 
 
 def test_corner_facade_does_not_change_the_offset(home):
@@ -84,8 +110,8 @@ def test_corner_facade_does_not_change_the_offset(home):
     assert [f for f in result.findings if f.code == "row_sum"] == []
 
 
-def test_corner_body_unknown_is_module_build_and_row_is_not_summed(home):
-    walls = corner_walls(661, {"materials": {"body": "nope"}})
+def test_corner_body_unknown_is_module_build_and_row_is_still_summed(home):
+    walls = corner_walls(664, {"materials": {"body": "nope"}})
     result = api.check_project(write(home, walls), home)
     assert ("module_build", "В1") in {(f.code, f.subject) for f in result.errors}
     assert [f for f in result.findings if f.code == "row_sum" and f.subject == "Б"] == []
@@ -149,7 +175,7 @@ def test_docs_describe_the_new_rule():
     assert "реально 350–400" in mocks and "глубина_верхнего" not in mocks
     topic = next(ln for ln in decisions.splitlines() if ln.startswith("- **Угловые модули:**"))
     assert "Смещение обоих рядов 600" not in topic and "глубиной 600 мм" not in topic
-    assert "глубина углового" in topic and "толщина материала" in topic and "корпуса" in topic
+    assert "глубина углового" in topic and "толщина_корпуса" in topic
 
 
 def test_petrov_gap_is_right_after_the_corner_in_wall_b_upper_row(home):

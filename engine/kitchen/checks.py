@@ -14,7 +14,7 @@ from kitchen import formulas
 from kitchen.brief import BriefAppliance
 from kitchen.brief import appliances as brief_appliances
 from kitchen.common import row_layouts
-from kitchen.errors import KitchenError, OrderError, WorkshopError
+from kitchen.errors import KitchenError, WorkshopError
 from kitchen.models import SheetMaterial, Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
@@ -37,7 +37,7 @@ from kitchen.parts import (
     unknown_template_error,
     upper_corner_offset,
 )
-from kitchen.project import Gap, ModuleSpec, Project, Row, is_gap
+from kitchen.project import Gap, ModuleSpec, Project, is_gap
 
 __all__ = ["Finding", "along_texture", "check_project", "part_fit_findings"]
 
@@ -59,23 +59,10 @@ def _num(x: float) -> int | float:
     return int(x) if float(x).is_integer() else x
 
 
-def _corner_offset(module: ModuleSpec, row: Row, project: Project, ws: Workshop) -> int | None:
-    """Смещение ряда соседней стены: нижнее — ключ мастерской, верхнее — глубина углового плюс толщина его
-    материала корпуса. Нет материала, толщины или размеров — `None`: сумму этого ряда не проверяем,
-    причину называет `module_build`."""
-    if row.kind == "lower":
-        return ws.construction.corner_rules.lower_offset
-    try:
-        return upper_corner_offset(module, row, project.materials, ws)
-    except (OrderError, WorkshopError):
-        return None
-
-
 def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
     """Ширины модулей ряда + угловые смещения с соседней стены + пеналы стены из других рядов = длина стены."""
     rules = ws.construction.corner_rules
     extra: dict[tuple[str, str], float] = {}  # (стена, вид ряда) -> смещения и пеналы
-    unknown: set[tuple[str, str]] = set()  # ряды, у которых смещение угла не посчитать
     found: list[Finding] = []
     walls = {w.label for w in project.walls}
     for wall in project.walls:
@@ -94,15 +81,10 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
                         )
                     )
                     continue
-                offset = _corner_offset(m, row, project, ws)
-                if offset is None:
-                    unknown.add((adjacent, row.kind))
-                else:
-                    extra[(adjacent, row.kind)] = extra.get((adjacent, row.kind), 0) + offset
+                offset = rules.lower_offset if row.kind == "lower" else upper_corner_offset(m, row, ws)
+                extra[(adjacent, row.kind)] = extra.get((adjacent, row.kind), 0) + offset
     for wall in project.walls:
         for row, modules in zip(wall.rows, row_layouts(wall), strict=True):
-            if (wall.label, row.kind) in unknown:
-                continue
             total = sum(m.width for m in modules) + extra.get((wall.label, row.kind), 0)
             if abs(total - wall.length) > rules.wall_tolerance:
                 found.append(
