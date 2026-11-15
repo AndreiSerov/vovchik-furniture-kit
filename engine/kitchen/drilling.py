@@ -3,31 +3,37 @@
 Шаблон только называет, какая деталь крепится к какой (`Joint`) и какой фасад висит на петлях с какой
 стороны (`HingedDoor`). Отсюда одним местом считаются и число конфирматов, петель, планок, и отверстия
 под них: второго правила подсчёта нет. Числа — из `construction.yaml` (`присадка`, таблицы ступеней).
-Схема отверстия — в `kitchen.parts` рядом с деталью; `parts.build_module` зовёт этот модуль после шаблона.
+Схема отверстия — в `kitchen.geometry`; `parts.build_module` зовёт этот модуль после шаблона. Деталь
+(`kitchen.parts.Part`) модуль получает готовой и импортирует её только для типов: `parts` импортирует его.
 """
+
+from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from pydantic import BaseModel
 
 from kitchen.errors import KitchenError, OrderError
-from kitchen.models import Workshop
-from kitchen.parts import (
+from kitchen.geometry import (
     PURPOSE_RU,
+    Face,
     HingedDoor,
     Hole,
     Joint,
-    Part,
     Position,
     Purpose,
-    _side_of_face,
+    side_of_face,
     steps_pick,
 )
+from kitchen.models import Workshop
 
-__all__ = ["DrillingCheck", "apply_drilling", "part_extent", "reconcile"]
+if TYPE_CHECKING:
+    from kitchen.parts import Part
+
+__all__ = ["DrillingCheck", "apply_drilling", "part_extent", "plate_warnings", "reconcile"]
 
 Extent = dict[str, tuple[int, int]]
 
@@ -68,7 +74,7 @@ class _Draft:
 
     purpose: Purpose
     surface: Literal["face", "end"]
-    from_face: str
+    from_face: Face
     diameter: int
     depth: int
     center: dict[str, int]
@@ -83,9 +89,11 @@ def _confirmats(module: str, plate: Part, end: Part, ws: Workshop) -> tuple[list
     axis = plate.orientation.thickness
     pe, ee = part_extent(plate), part_extent(end)
     if ee[axis][0] == pe[axis][1]:
-        end_face = plate_face = f"-{axis}"  # `end` справа от `plate`: торец «-», наружная пласть `plate` «-»
+        end_face = plate_face = cast(
+            Face, f"-{axis}"
+        )  # `end` справа от `plate`: торец «-», наружная пласть «-»
     elif ee[axis][1] == pe[axis][0]:
-        end_face = plate_face = f"+{axis}"
+        end_face = plate_face = cast(Face, f"+{axis}")
     else:
         raise KitchenError(
             f"Модуль {module}: детали {plate.id} и {end.id} не соприкасаются, конфирмат не поставить."
@@ -153,7 +161,7 @@ def _hinges(
         )
         for z in zs
     ]
-    inner = "+x" if door.side == "left" else "-x"
+    inner: Face = "+x" if door.side == "left" else "-x"
     y = se["y"][1] - plate.front_offset
     plates = [
         _Draft(
@@ -181,8 +189,7 @@ def _base_edges(part: Part, ws: Workshop) -> tuple[str, str]:
 
 
 def _hole(part: Part, draft: _Draft, base: tuple[str, str], ext: Extent) -> Hole:
-    """Отверстие с расстояниями от базовых кромок. Числа уже проверены (`_check_inside`), поэтому модель
-    собирается без повторной валидации: расчёт деталей зовут много раз за команду."""
+    """Отверстие детали с расстояниями от её базовых кромок (модель проверяется pydantic как обычно)."""
 
     def distance(face: str) -> int:
         lo, hi = ext[face[1]]
@@ -196,7 +203,7 @@ def _hole(part: Part, draft: _Draft, base: tuple[str, str], ext: Extent) -> Hole
         purpose=draft.purpose,
         surface=draft.surface,
         from_face=draft.from_face,
-        edge_side=_side_of_face(draft.from_face, o.length, o.width, part.id) if end else None,
+        edge_side=side_of_face(draft.from_face, o.length, o.width, part.id) if end else None,
         diameter=draft.diameter,
         depth=draft.depth,
         through=draft.through,
@@ -239,7 +246,9 @@ def _check_apart(module: str, part: Part, drafts: list[_Draft], ext: Extent) -> 
             cb = b.center
             if a.surface == "face":
                 d2 = sum((ca[k] - cb[k]) ** 2 for k in plane)
-                clash = 4 * d2 < (a.diameter + b.diameter) ** 2
+                # глухие отверстия с противоположных пластей не встречаются, если глубины не сходятся
+                apart = a.from_face != b.from_face and a.depth + b.depth <= part.thickness
+                clash = 4 * d2 < (a.diameter + b.diameter) ** 2 and not apart
             else:
                 same_line = b.from_face[1] == axis and all(ca[k] == cb[k] for k in "xyz" if k != axis)
                 clash = same_line and (
@@ -253,11 +262,11 @@ def _check_apart(module: str, part: Part, drafts: list[_Draft], ext: Extent) -> 
 
 def apply_drilling(
     module: str, parts: list[Part], joints: list[Joint], doors: list[HingedDoor], ws: Workshop
-) -> tuple[list[Part], Counter, list[str]]:
-    """Детали с отверстиями, фурнитура соединений и петель модуля (конфирматы и заглушки, петли, планки,
-    саморезы на петли) и предупреждения. Позиции фурнитуры появляются, только если в модуле есть соединения
-    или двери на петлях. Планок больше одной на петлю присадка не размечает: их отверстий нет, есть
-    предупреждение, а сверка карты присадки (`reconcile`) отказывает."""
+) -> tuple[list[Part], Counter]:
+    """Детали с отверстиями и фурнитура соединений и петель модуля (конфирматы и заглушки, петли, планки,
+    саморезы на петли). Позиции фурнитуры появляются, только если в модуле есть соединения или двери на
+    петлях. Планок больше одной на петлю присадка не размечает: их отверстий нет, расчёт предупреждает один
+    раз (`plate_warnings`), а сверка карты присадки (`reconcile`) отказывает с этой причиной."""
     c = ws.construction
     hw = c.furniture
     by_id = {p.id: p for p in parts}
@@ -278,17 +287,11 @@ def apply_drilling(
             confirmats += len(face)
         hardware[hw.confirmats] += confirmats
         hardware[hw.caps] += confirmats * c.caps.per_unit
-    warnings = []
     if doors:
-        plated = c.plates.per_unit == 1
-        if not plated:
-            warnings.append(
-                "отверстия ответных планок не размечены: присадка ставит одну планку на петлю, "
-                f"а «ответные_планки» в construction.yaml — по {c.plates.per_unit} на петлю"
-            )
+        plated = c.plates.per_unit == 1  # иначе планки не размечаются: см. `plate_warnings`
         hinges = 0
         for door in doors:
-            side = f"{module}-бок-{'Л' if door.side == 'left' else 'П'}"
+            side = door.side_part
             cups, plates = _hinges(module, door, get(door.facade), get(side), ws)
             drafts.setdefault(door.facade, []).extend(cups)
             if plated:
@@ -309,7 +312,24 @@ def apply_drilling(
         _check_apart(module, part, drafts[part.id], ext)
         made = [_hole(part, d, base, ext) for d in drafts[part.id]]
         out.append(part.model_copy(update={"holes": made, "base_edges": list(base)}))
-    return out, hardware, warnings
+    return out, hardware
+
+
+def _plates_not_marked(ws: Workshop) -> str | None:
+    """Почему отверстия планок не размечены: присадка ставит одну планку на петлю."""
+    per_unit = ws.construction.plates.per_unit
+    if per_unit == 1:
+        return None
+    return (
+        f"отверстия ответных планок не размечены: планки по {per_unit} на петлю (ключ «ответные_планки» "
+        "construction.yaml) присадка не размечает, она ставит одну планку на петлю"
+    )
+
+
+def plate_warnings(ws: Workshop, hardware: dict[str, int]) -> list[str]:
+    """Одно предупреждение на расчёт, если в нём есть планки, а размечать их присадка не умеет."""
+    reason = _plates_not_marked(ws)
+    return [reason] if reason and hardware.get(ws.construction.furniture.plates) else []
 
 
 class DrillingCheck(BaseModel):
@@ -368,5 +388,7 @@ def reconcile(parts: list[Part], hardware: dict[str, int], ws: Workshop) -> list
         if ch.holes != ch.expected
     ]
     if wrong:
-        raise OrderError("Присадка не сходится с фурнитурой: " + "; ".join(wrong) + ".")
+        reason = _plates_not_marked(ws)
+        cause = f" Причина: {reason}." if reason and checks[3].holes != checks[3].expected else ""
+        raise OrderError("Присадка не сходится с фурнитурой: " + "; ".join(wrong) + "." + cause)
     return checks

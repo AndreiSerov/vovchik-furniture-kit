@@ -352,3 +352,51 @@ def test_drilling_refuses_when_holes_do_not_match_hardware(home):
     assert any("ответных планок не размечены" in w for w in parts.warnings)
     with pytest.raises(OrderError, match="ответные планки: отверстий — 0, а нужно 80"):
         api.drilling_from_project(PETROV, home)
+
+
+def test_plate_holes_are_symmetric_around_cup_height(home, base_door_project):
+    """base_door 600: чашки на высоте 2 + 100 = 102 и 2 + 616 = 618 от низа корпуса; отверстия планки — ±16."""
+    p = parts_of(api.parts_from_project(base_door_project, home))
+    zs = sorted(h.center.z for h in p["Н1-бок-Л"].holes if h.purpose == "hinge_plate")
+    assert zs == [86, 118, 602, 634]
+    assert sorted(h.center.z for h in p["Н1-фасад-Л"].holes) == [102, 618]
+
+
+def test_end_hole_is_in_the_middle_of_thickness_and_face_hole_goes_through(home, base_door_project):
+    p = parts_of(api.parts_from_project(base_door_project, home))
+    ends = [h for h in p["Н1-дно"].holes if h.surface == "end"]
+    assert ends and {h.in_thickness for h in ends} == {8}
+    assert {h.center.z for h in ends} == {8}  # дно на z=0, толщина 16
+    faces = [h for h in p["Н1-бок-Л"].holes if h.purpose == "confirmat"]
+    assert faces and all(h.through and h.depth == 16 and h.surface == "face" for h in faces)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        ("отступ_от_торца: 100", "отступ_от_торца: 400", "Н1-фасад-Л высотой 716 мм ниже двух отступов"),
+        ("отступ_от_лицевой_кромки: 50", "отступ_от_лицевой_кромки: 520", "Н1.*короче отступов конфирматов"),
+        ("глубина_в_торец: 40", "глубина_в_торец: 600", "Н1.*выходит за деталь"),
+        ("глубина_в_торец: 40", "глубина_в_торец: 300", "Н1.*пересекается"),  # встречные в дне 568 мм
+        ("шаг: 32, отступ_от_передней_кромки", "шаг: 2, отступ_от_передней_кромки", "Н1.*пересекается"),
+    ],
+)
+def test_impossible_drilling_is_a_module_error(home, base_door_project, old, new, message):
+    edit_construction(home, old, new)
+    with pytest.raises(OrderError, match=message):
+        api.parts_from_project(base_door_project, home)
+
+
+def test_tiny_module_holes_clash_is_a_module_error(home, base_door_project):
+    """W 100: дно 68 мм, встречные отверстия 40 + 40 мм в торцах сходятся — ошибка модуля (DECISIONS)."""
+    path = project_with(base_door_project, {"label": "Н1", "template": "base_door", "width": 100})
+    with pytest.raises(OrderError, match="Н1.*Н1-дно.*пересекается"):
+        api.parts_from_project(path, home)
+
+
+def test_two_plates_per_hinge_warn_once_and_map_names_the_cause(home):
+    edit_construction(home, "ответные_планки: по одной на петлю", "ответные_планки: по 2 на петлю")
+    parts = api.parts_from_project(PETROV, home)
+    assert len([w for w in parts.warnings if "ответных планок не размечены" in w]) == 1
+    with pytest.raises(OrderError, match="Причина: .*планки по 2 на петлю.*не размечает"):
+        api.drilling_from_project(PETROV, home)

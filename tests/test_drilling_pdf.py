@@ -4,8 +4,10 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 from kitchen import api
 from kitchen.cli import app
+from kitchen.errors import KitchenError
 from pypdf import PdfReader
 from typer.testing import CliRunner
 
@@ -129,3 +131,111 @@ def test_order_without_drilled_parts_gets_one_page_saying_so(home):
     assert r.parts == [] and {(c.holes, c.expected) for c in r.checks} == {(0, 0)}
     pages = pages_of(r)
     assert len(pages) == 1 and "Деталей с отверстиями нет." in pages[0]
+
+
+def petrov_layout(home):
+    result = api.drilling_from_project(FIXTURES / "petrov_project.json", home)
+    return result, api.drilling_map_layout(result)
+
+
+def schemes(pages):
+    return {s.part: s for page in pages for s in page.schemes}
+
+
+def test_drilling_headers_fit(home):
+    """Заголовок детали, подзаголовок, вид, строки таблицы — в своей ячейке; шапка — в поле страницы.
+    Длинный заголовок (`В1-дно-выт-1` — «передняя планка дна вытяжки») ужимается, а не вылезает."""
+    _, pages = petrov_layout(home)
+    mm = 72 / 25.4
+    for page in pages:
+        for line in page.header:
+            assert 10 * mm - 1e-6 <= line.x and line.x + line.width <= 200 * mm + 1e-6, (
+                line.text
+            )  # A4 без полей 10 мм
+        for s in page.schemes:
+            x0, y0, x1, y1 = s.slot
+            for t in s.texts:
+                assert x0 <= t.x and t.x + t.width <= x1 + 1e-6, (s.part, t.text, t.width, x1 - x0)
+                assert y0 <= t.y <= y1, (s.part, t.text)
+                assert t.size >= 5.0
+    title = next(t for t in schemes(pages)["В1-дно-выт-1"].texts if t.bold)
+    assert title.text.startswith("Деталь В1-дно-выт-1 — ")
+
+
+def test_view_and_drilling_side_are_named_from_hole_faces(home):
+    """Фасад виден с лица, чашки сверлят с тыльной стороны; у правой боковины планки и конфирматы — с разных граней."""
+    result, pages = petrov_layout(home)
+    by_id = {p.id: p for p in result.parts}
+    s = schemes(pages)
+    facade = [t.text for t in s["Н2-фасад"].texts]
+    assert s["Н2-фасад"].view == "+y"
+    assert "вид с лица (+y), схема: +x→, +z↑" in facade
+    assert "сверлить: с тыльной стороны (-y, обратная) — чашка петли" in facade
+    for pid in ("Н2-бок-П", "Н2-бок-Л", "Н2-дно", "Н2-фасад"):
+        sc = s[pid]
+        text = " ".join(t.text for t in sc.texts[:4])
+        for h in by_id[pid].holes:
+            if h.surface == "face":
+                visible = "видимая" if h.from_face == sc.view else "обратная"
+                assert f"{h.from_face}, {visible}" in text, (pid, h.from_face, text)
+            else:
+                assert f"торец {h.edge_side}" in text, (pid, text)
+    assert s["Н2-дно"].view == "+z"  # лежачая деталь — вид сверху, перед внизу
+
+
+def test_base_edges_are_drawn_on_their_outline_side(home):
+    _, pages = petrov_layout(home)
+    s = schemes(pages)
+    side = s["П1-бок-Л"]  # вправо +y (перед), вверх +z; базы нижняя и передняя
+    x0, y0, x1, y1 = side.outline
+    lines = {b.face: b for b in side.base_lines}
+    assert lines["-z"].y1 == lines["-z"].y2 == y0 and (lines["-z"].x1, lines["-z"].x2) == (x0, x1)
+    assert lines["+y"].x1 == lines["+y"].x2 == x1 and (lines["+y"].y1, lines["+y"].y2) == (y0, y1)
+    bottom = s["П1-дно"]  # вправо +x, вверх −y: перед внизу; базы передняя и левая
+    x0, y0, _, _ = bottom.outline
+    lines = {b.face: b for b in bottom.base_lines}
+    assert lines["+y"].y1 == lines["+y"].y2 == y0
+    assert lines["-x"].x1 == lines["-x"].x2 == x0
+
+
+def test_dimension_chains_run_from_the_base_edge(home):
+    """Отметка цепочки — на расстоянии `значение × масштаб` от базовой кромки, внутрь детали."""
+    result, pages = petrov_layout(home)
+    by_id = {p.id: p for p in result.parts}
+    for s in (sc for page in pages for sc in page.schemes):
+        part = by_id[s.part]
+        x0, y0, x1, y1 = s.outline
+        for ch in s.chains:
+            i = part.base_edges.index(ch.face)
+            assert sorted(lb.value for lb in ch.labels) == sorted({h.from_base[i] for h in part.holes})
+            lo, hi = (x0, x1) if ch.direction == "horizontal" else (y0, y1)
+            assert ch.base in (pytest.approx(lo), pytest.approx(hi))
+            inward = 1 if ch.base == pytest.approx(lo) else -1
+            for lb in ch.labels:
+                assert lb.tick == pytest.approx(ch.base + inward * lb.value * s.scale), (s.part, ch.face, lb)
+    side = next(c for c in schemes(pages)["П1-бок-Л"].chains if c.face == "+y")
+    ticks = {lb.value: lb.tick for lb in side.labels}
+    assert ticks[37] > ticks[510]  # от передней кромки (справа) — влево
+
+
+def test_chain_labels_do_not_overlap(home):
+    _, pages = petrov_layout(home)
+    for s in (sc for page in pages for sc in page.schemes):
+        boxes = [lb.box for ch in s.chains for lb in ch.labels]
+        texts = [(t.x, t.y - 0.25 * t.size, t.x + t.width, t.y + 0.75 * t.size) for t in s.texts]
+        for a in boxes:
+            for t in texts:
+                assert a[2] <= t[0] or t[2] <= a[0] or a[3] <= t[1] or t[3] <= a[1], (s.part, a, t)
+        for i, a in enumerate(boxes):
+            for b in boxes[i + 1 :]:
+                assert a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1], (s.part, a, b)
+            sx0, sy0, sx1, sy1 = s.slot
+            assert sx0 <= a[0] and a[2] <= sx1 and sy0 <= a[1] and a[3] <= sy1, (s.part, a)
+
+
+def test_part_with_too_many_holes_is_an_error_not_a_cut_table(home):
+    result = api.drilling_from_project(FIXTURES / "petrov_project.json", home)
+    side = next(p for p in result.parts if p.id == "П1-бок-Л")
+    crowded = side.model_copy(update={"holes": side.holes * 6})  # 84 строки таблицы
+    with pytest.raises(KitchenError, match="П1-бок-Л.*не помещается"):
+        api.drilling_map_layout(result.model_copy(update={"parts": [crowded]}))

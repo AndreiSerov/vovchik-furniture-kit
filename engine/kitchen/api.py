@@ -23,7 +23,7 @@ from kitchen.common import CommonItem, CountertopCut, compute_common, plan_count
 from kitchen.cutting import MaterialCut, cut_parts, kerf_warnings
 from kitchen.cutting_pdf import write_cutting_map
 from kitchen.drilling import DrillingCheck, reconcile
-from kitchen.drilling_pdf import write_drilling_map
+from kitchen.drilling_pdf import PageLayout, map_layout, write_drilling_map
 from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
@@ -59,6 +59,7 @@ __all__ = [
     "OrderInfo",
     "OrderResult",
     "OutputInfo",
+    "PageLayout",
     "PartsResult",
     "PartsSource",
     "ProductionResult",
@@ -80,6 +81,7 @@ __all__ = [
     "drilling_and_save",
     "drilling_from_order",
     "drilling_from_project",
+    "drilling_map_layout",
     "edges_and_save",
     "edges_from_order",
     "edges_from_project",
@@ -1305,6 +1307,11 @@ def drilling_from_project(path: Path, home: Path | None = None) -> DrillingResul
 
 
 DRILLING_PDF = "drilling-map.pdf"
+
+
+def drilling_map_layout(result: DrillingResult) -> list[PageLayout]:
+    """Раскладка страниц карты присадки (строки, контуры, базовые кромки, цепочки) — ровно то, что рисует PDF."""
+    return map_layout(result.parts, result.checks)
 
 
 def drilling_and_save(order: str, home: Path | None = None, on: date | None = None) -> DrillingResult:

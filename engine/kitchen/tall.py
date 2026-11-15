@@ -5,8 +5,6 @@ from kitchen.errors import OrderError
 from kitchen.formulas import FormulaError
 from kitchen.models import Workshop
 from kitchen.parts import (
-    HingedDoor,
-    Joint,
     ModuleDims,
     Position,
     Span,
@@ -19,6 +17,8 @@ from kitchen.parts import (
     build_base_door,
     built_niche,
     drawer_parts,
+    hinged,
+    joined_to_sides,
     make_part,
     niche_item,
 )
@@ -78,7 +78,7 @@ def build_tall_oven(
         ("перег-1", "перегородка ниши", oven_top),
         ("перег-2", "перегородка ниши", microwave_top),
     ):
-        out.joints.extend(Joint(f"{module.label}-бок-{s}", f"{module.label}-{pid}") for s in ("Л", "П"))
+        out.joints.extend(joined_to_sides(module.label, f"{module.label}-{pid}"))
         out.parts.append(
             make_part(
                 pid=f"{module.label}-{pid}",
@@ -128,7 +128,9 @@ def build_tall_oven(
         )
     out.parts += drawer_parts(module, dims, ws, number=1, z=gap, top=bottom_z)
     hw = c.furniture
-    out.doors.append(HingedDoor(f"{module.label}-фасад", _hinge_side(module)))  # петли и планки — `drilling`
+    out.doors.append(
+        hinged(module.label, f"{module.label}-фасад", _hinge_side(module))
+    )  # петли и планки — `drilling`
     out.hardware[hw.shelf_pins] += shelf.pins
     out.hardware[hw.legs] += c.legs.up_to_800 if W <= c.legs.threshold else c.legs.over_800
     out.hardware[hw.screws] += c.screws_3_5x16.per_drawer
