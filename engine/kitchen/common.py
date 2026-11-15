@@ -96,28 +96,16 @@ def _row_modules(wall, row) -> list:
     return row_layouts(wall)[next(i for i, r in enumerate(wall.rows) if r is row)]
 
 
-def _runs(project: Project, kinds: Iterable[str], with_tall: bool) -> list[tuple[str, list[int]]]:
-    """Непрерывные участки модулей нужного ряда по стенам: пенал либо входит в участок, либо разрывает его."""
-    runs: list[tuple[str, list[int]]] = []
-    for wall in project.walls:
-        for row in wall.rows:
-            if row.kind not in kinds:
-                continue
-            current: list[int] = []
-            for m in _row_modules(wall, row):
-                if is_tall(m) and not with_tall:
-                    if current:
-                        runs.append((wall.label, current))
-                    current = []
-                else:
-                    current.append(int(m.width))  # целую ширину обеспечивает `module_dims`
-            if current:
-                runs.append((wall.label, current))
-    return runs
-
-
-def _total(runs: list[tuple[str, list[int]]]) -> int:
-    return sum(sum(widths) for _, widths in runs)
+def _length(project: Project, kinds: Iterable[str], with_tall: bool) -> int:
+    """Сумма ширин модулей рядов нужного вида по всем стенам; пенал входит в сумму только при `with_tall`."""
+    return sum(
+        int(m.width)  # целую ширину обеспечивает `module_dims`
+        for wall in project.walls
+        for row in wall.rows
+        if row.kind in kinds
+        for m in _row_modules(wall, row)
+        if with_tall or not is_tall(m)
+    )
 
 
 def _named(items: list, item_id: str) -> str:
@@ -149,7 +137,7 @@ def size_countertop(project: Project, ws: Workshop) -> CountertopSize | None:
     if top is None:
         known = ", ".join(sorted(t.id for t in ws.materials.countertops))
         raise OrderError(f"Столешница «{top_id}» не найдена в materials.yaml (столешницы: {known}).")
-    total = _total(_runs(project, ("lower",), with_tall=False))
+    total = _length(project, ("lower",), with_tall=False)
     return CountertopSize(
         item=top_id,
         name=top.name,
@@ -177,7 +165,7 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
         for m in row.modules
         if m.corner
     )
-    lower = _total(_runs(project, ("lower",), with_tall=True)) - dead
+    lower = _length(project, ("lower",), with_tall=True) - dead
     n = _pieces(lower, rules.plinth.piece_length, reserve)
     items.append(
         CommonItem(
@@ -190,8 +178,7 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
             basis=f"фронт нижних рядов {lower} мм (без глухой части углов {dead} мм) + запас {percent}, штуки по {rules.plinth.piece_length} мм",
         )
     )
-    upper_runs = _runs(project, ("upper",), with_tall=False)
-    upper = _total(upper_runs)
+    upper = _length(project, ("upper",), with_tall=False)
     n = _pieces(upper, rules.rail.piece_length, reserve)
     items.append(
         CommonItem(
