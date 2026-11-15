@@ -6,6 +6,7 @@
 """
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel
@@ -24,12 +25,15 @@ __all__ = [
     "HingedDoor",
     "Hole",
     "Joint",
+    "Mm",
     "Orientation",
     "PinnedShelf",
+    "Point",
     "Position",
     "Purpose",
     "side_of_face",
     "steps_pick",
+    "to_mm",
 ]
 
 Axis = Literal["x", "y", "z"]
@@ -53,6 +57,22 @@ class Position(BaseModel):
     x: int
     y: int
     z: int
+
+
+Mm = int | float  # координата отверстия, мм: целая, у полкодержателя — до десятых (центр ниже полки на 2.5)
+
+
+def to_mm(value: Decimal) -> Mm:
+    """Миллиметры без хвостов float: целое — `int`, иначе `float` до десятых."""
+    return int(value) if value == value.to_integral_value() else float(value.quantize(Decimal("0.1")))
+
+
+class Point(BaseModel):
+    """Центр отверстия в системе модуля, мм (как `Position`, но может быть дробным)."""
+
+    x: Mm
+    y: Mm
+    z: Mm
 
 
 class Orientation(BaseModel):
@@ -97,9 +117,10 @@ class Hole(BaseModel):
     diameter: int
     depth: int
     through: bool = False
-    center: Position
-    from_base: tuple[int, int]
+    center: Point
+    from_base: tuple[Mm, Mm]
     in_thickness: int | None = None  # у торца — от пласти с меньшей координатой до центра, мм
+    holds_shelf: bool = False  # отверстие ряда полкодержателей, на котором лежит полка (тикет 20)
 
 
 @dataclass(frozen=True)

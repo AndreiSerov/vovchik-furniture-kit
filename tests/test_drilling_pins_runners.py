@@ -37,12 +37,18 @@ def rows(part):
     return {k: sorted(v) for k, v in sorted(out.items())}
 
 
+# Полка на 300: центр отверстия под неё на радиус штыря ниже (МОК 2.5), по два шага выше и ниже.
+R300 = [233.5, 265.5, 297.5, 329.5, 361.5]
+R600 = [533.5, 565.5, 597.5, 629.5, 661.5]
+
+
 def test_one_shelf_rows_of_five_32_apart_centred_on_shelf_height(home, base_door_project):
-    """base_door 600×720×560, полка на 300: на каждой боковине спереди (МОК 57 от передней кромки) и сзади
-    (37 от задней, 560 − 37 = 523 от передней) по 5 отверстий Ø5 с шагом 32, среднее — на 300."""
+    """base_door 600×720×560, полка 0…540 на 300: на каждой боковине спереди (МОК 37 от передней кромки полки,
+    560 − 540 + 37 = 57 от передней кромки боковины) и сзади (37 от задней, 560 − 37 = 523 от передней)
+    по 5 отверстий Ø5 с шагом 32; среднее — на 300 − 2.5 (верх штыря Ø5 — низ полки)."""
     p = parts_of(api.parts_from_project(base_door_project, home))
     for side in ("Н1-бок-Л", "Н1-бок-П"):
-        assert rows(p[side]) == {57: [236, 268, 300, 332, 364], 523: [236, 268, 300, 332, 364]}, side
+        assert rows(p[side]) == {57: R300, 523: R300}, side
         assert {(h.diameter, h.surface) for h in of(p[side], "shelf_pin")} == {(5, "face")}
     assert {h.from_face for h in of(p["Н1-бок-Л"], "shelf_pin")} == {"+x"}  # внутренние пласти
     assert {h.from_face for h in of(p["Н1-бок-П"], "shelf_pin")} == {"-x"}
@@ -51,7 +57,7 @@ def test_one_shelf_rows_of_five_32_apart_centred_on_shelf_height(home, base_door
 def test_two_shelves_each_get_rows_and_no_shelves_get_none(home, base_door_project):
     module = {"label": "Н1", "template": "base_door", "width": 600, "contents": {"shelves": 2}}
     p = parts_of(api.parts_from_project(project_with(base_door_project, module), home))
-    expected = [236, 268, 300, 332, 364, 536, 568, 600, 632, 664]  # полки на 300 и 600
+    expected = R300 + R600  # полки на 300 и 600
     assert rows(p["Н1-бок-Л"]) == rows(p["Н1-бок-П"]) == {57: expected, 523: expected}
     module["contents"] = {"shelves": 0}
     p = parts_of(api.parts_from_project(project_with(base_door_project, module), home))
@@ -68,30 +74,41 @@ def test_rows_on_both_sides_are_mirrored(home, base_door_project):
 def test_row_keys_move_holes(home, base_door_project):
     edit_construction(
         home,
-        "отверстий_в_ряду: 5, шаг: 32, отступ_от_передней_кромки: 57, отступ_от_задней_кромки: 37",
-        "отверстий_в_ряду: 3, шаг: 25, отступ_от_передней_кромки: 50, отступ_от_задней_кромки: 40",
+        "отверстий_в_ряду: 5, шаг: 32, отступ_от_передней_кромки_полки: 37, отступ_от_задней_кромки_полки: 37, "
+        "центр_ниже_полки: 2.5",
+        "отверстий_в_ряду: 3, шаг: 25, отступ_от_передней_кромки_полки: 50, отступ_от_задней_кромки_полки: 40, "
+        "центр_ниже_полки: 3",
     )
     p = parts_of(api.parts_from_project(base_door_project, home))
-    assert rows(p["Н1-бок-Л"]) == {50: [275, 300, 325], 520: [275, 300, 325]}  # 560 − 40 = 520
+    # спереди 20 + 50 = 70 от передней кромки боковины, сзади 560 − 40 = 520; центр 300 − 3
+    assert rows(p["Н1-бок-Л"]) == {70: [272, 297, 322], 520: [272, 297, 322]}
+
+
+def test_front_row_follows_the_shelf_front_gap(home, base_door_project):
+    """Полка утоплена на 60 (0…500): передний ряд — в 37 от её кромки, 60 + 37 = 97 от кромки боковины."""
+    edit_construction(home, "отступ_спереди: 20", "отступ_спереди: 60")
+    p = parts_of(api.parts_from_project(base_door_project, home))
+    assert rows(p["Н1-бок-Л"]) == {97: R300, 523: R300}
 
 
 def test_row_at_the_roof_shifts_down_by_whole_steps(home, base_door_project):
-    """wall_door 960, 3 полки (300, 600, 900): ряд верхней полки 836–964 заходит за боковину высотой 960 и под
-    крышу (944–960); он сдвигается вниз на один шаг — 804–932, отверстие на высоте полки остаётся в ряду,
-    отверстий по-прежнему 5. ПРОВЕРИТЬ МАСТЕРУ (DECISIONS)."""
+    """wall_door 960, 3 полки (300, 600, 900): ряд верхней полки 833.5…961.5 заходит за боковину высотой 960 и
+    под крышу (944–960); он сдвигается вниз на один шаг — 801.5…929.5, отверстие под полку (897.5) остаётся
+    в ряду, отверстий по-прежнему 5 (решение мастера)."""
     module = {"label": "В1", "template": "wall_door", "width": 600, "height": 960, "contents": {"shelves": 3}}
     p = parts_of(api.parts_from_project(project_with(base_door_project, module, kind="upper"), home))
-    top = [804, 836, 868, 900, 932]
-    full = [236, 268, 300, 332, 364, 536, 568, 600, 632, 664]
+    top = [801.5, 833.5, 865.5, 897.5, 929.5]
+    full = R300 + R600
     assert rows(p["В1-бок-Л"]) == rows(p["В1-бок-П"]) == {57: full + top, 283: full + top}
 
 
 def test_row_at_the_bottom_shifts_up_by_whole_steps(home, base_door_project):
-    """Полка на 50: ряд −14…114; −14 за боковиной, 18 (окружность 15.5–20.5) заходит под дно 0–16 — ряд
-    сдвигается вверх на два шага: 50…178."""
+    """Полка на 50: ряд −16.5…111.5; −16.5 за боковиной, 15.5 (окружность 13–18) заходит под дно 0–16 —
+    ряд сдвигается вверх на два шага: 47.5…175.5."""
     edit_construction(home, "высота: 300, шаг: 300", "высота: 50, шаг: 300")
     p = parts_of(api.parts_from_project(base_door_project, home))
-    assert rows(p["Н1-бок-Л"]) == {57: [50, 82, 114, 146, 178], 523: [50, 82, 114, 146, 178]}
+    up = [47.5, 79.5, 111.5, 143.5, 175.5]
+    assert rows(p["Н1-бок-Л"]) == {57: up, 523: up}
 
 
 def test_shelf_hole_under_the_bottom_is_a_module_error(home, base_door_project):
@@ -142,11 +159,9 @@ def test_pin_and_runner_holes_do_not_meet_confirmat_or_plate_holes(home, base_do
 
 
 def test_pin_row_on_the_plate_line_is_a_module_error(home, base_door_project):
-    """Ряд на одной линии с планками (оба в 37 от передней кромки): полка на 600, планки на 602 и 634 —
-    отверстия сходятся, это ошибка модуля, а не молча пропущенное отверстие."""
-    edit_construction(
-        home, "шаг: 32, отступ_от_передней_кромки: 57", "шаг: 32, отступ_от_передней_кромки: 37"
-    )
+    """Ряд на одной линии с планками (оба в 37 от передней кромки боковины: 20 + 17): полка на 600, отверстия
+    597.5 и 629.5 против планок 602 и 634 — сходятся, это ошибка модуля, а не молча пропущенное отверстие."""
+    edit_construction(home, "отступ_от_передней_кромки_полки: 37", "отступ_от_передней_кромки_полки: 17")
     module = {"label": "Н1", "template": "base_door", "width": 600, "contents": {"shelves": 2}}
     with pytest.raises(OrderError, match="Н1-бок-Л.*пересекается"):
         api.parts_from_project(project_with(base_door_project, module), home)
@@ -199,10 +214,12 @@ def test_runner_keys_move_holes(home, base_door_project):
     [
         ("отверстий_в_ряду: 5", "отверстий_в_ряду: 4", "отверстий_в_ряду"),
         (
-            "отступ_от_задней_кромки: 37, диаметр: 5",
-            "отступ_от_задней_кромки: 0, диаметр: 5",
-            "отступ_от_задней_кромки",
+            "отступ_от_задней_кромки_полки: 37",
+            "отступ_от_задней_кромки_полки: 0",
+            "отступ_от_задней_кромки_полки",
         ),
+        ("центр_ниже_полки: 2.5", "центр_ниже_полки: -1", "центр_ниже_полки"),
+        ("центр_ниже_полки: 2.5", "центр_ниже_полки: 2.55", "центр_ниже_полки"),
         ("[37, 261, 453]", "[261, 37]", "отверстия_от_передней_кромки"),
         ("[37, 261, 453]", "[]", "отверстия_от_передней_кромки"),
         ("над_дном_ящика: 6", "над_дном_ящика: -1", "над_дном_ящика"),
@@ -276,8 +293,9 @@ def test_map_table_shows_a_row_of_holes_as_one_line(home):
     by_id = {p.id: p for p in result.parts}
     schemes = {s.part: s for page in api.drilling_map_layout(result) for s in page.schemes}
     rows_ = table(schemes["Н2-бок-Л"])
-    assert any(r.endswith("полкодержатель · пласть +x · Ø5×10 · 236…364 шаг 32 · 57") for r in rows_), rows_
-    assert any(r.endswith("полкодержатель · пласть +x · Ø5×10 · 236…364 шаг 32 · 523") for r in rows_), rows_
+    pin_row = "полкодержатель · пласть +x · Ø5×10 · 233.5…361.5 шаг 32"
+    assert any(r.endswith(f"{pin_row} · 57") for r in rows_), rows_  # ряд не сдвинут — без пометки
+    assert any(r.endswith(f"{pin_row} · 523") for r in rows_), rows_
     assert len(schemes["Н2-бок-Л"].holes) == len(by_id["Н2-бок-Л"].holes)
     pins = [i for i, h in enumerate(by_id["Н2-бок-Л"].holes, 1) if h.purpose == "shelf_pin"]
     assert any(r.startswith(f"{pins[0]}–{pins[4]}. полкодержатель") for r in rows_), rows_
@@ -285,12 +303,70 @@ def test_map_table_shows_a_row_of_holes_as_one_line(home):
     assert any(r.endswith("направляющая · пласть -x · Ø5×13 · 24 · 37, 261, 453") for r in runner), runner
 
 
-def test_row_outside_the_shelf_depth_is_a_module_error(home, base_door_project):
-    """Передний ряд в 10 от передней кромки (y = 550) — перед полкой, утопленной на 20 (до y = 540)."""
-    edit_construction(
-        home, "шаг: 32, отступ_от_передней_кромки: 57", "шаг: 32, отступ_от_передней_кромки: 10"
-    )
+def test_row_outside_the_shelf_depth_is_a_module_error_naming_the_keys(home, base_door_project):
+    """Передний ряд в 600 от передней кромки полки глубиной 540 — за полкой; ошибка называет ключи."""
+    edit_construction(home, "отступ_от_передней_кромки_полки: 37", "отступ_от_передней_кромки_полки: 600")
     with pytest.raises(
-        OrderError, match="Н1: ряд полкодержателей на боковине Н1-бок-Л .*не под полкой Н1-полка"
+        OrderError,
+        match="Н1: ряд полкодержателей на боковине Н1-бок-Л .*не под полкой Н1-полка.*"
+        "отступ_от_передней_кромки_полки.*полка.отступ_спереди",
     ):
         api.parts_from_project(base_door_project, home)
+
+
+def test_shifted_row_marks_the_hole_that_holds_the_shelf(home, base_door_project):
+    """Карта wall_door 960: у сдвинутого ряда верхней полки таблица называет отверстие под полку."""
+    module = {"label": "В1", "template": "wall_door", "width": 600, "height": 960, "contents": {"shelves": 3}}
+    result = api.drilling_from_project(project_with(base_door_project, module, kind="upper"), home)
+    schemes = {s.part: s for page in api.drilling_map_layout(result) for s in page.schemes}
+    rows_ = table(schemes["В1-бок-Л"])
+    shifted = [r for r in rows_ if "801.5…929.5 шаг 32" in r]
+    assert len(shifted) == 2 and all(r.endswith(" · под полку 897.5") for r in shifted), rows_
+    assert not [r for r in rows_ if "под полку" in r and "801.5" not in r], rows_
+    side = next(p for p in result.parts if p.id == "В1-бок-Л")
+    held = [h.from_base[0] for h in side.holes if h.purpose == "shelf_pin" and h.holds_shelf]
+    assert sorted(held) == [297.5, 297.5, 597.5, 597.5, 897.5, 897.5]  # по одному на ряд
+
+
+def test_runner_hole_does_not_go_under_the_cabinet_bottom(home, base_door_project):
+    """Ревью: над_дном_ящика 0 — отверстие нижнего ящика на 18 (окружность 15.5–20.5) заходит под дно 0–16."""
+    edit_construction(home, "над_дном_ящика: 6", "над_дном_ящика: 0")
+    module = {"label": "Н1", "template": "base_drawers", "width": 600}
+    with pytest.raises(OrderError, match="Н1.*направляющая.*Н1-бок-Л.*под деталь Н1-дно"):
+        api.parts_from_project(project_with(base_door_project, module), home)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"diameter": 8}, {"depth": 12}, {"purpose": "runner"}, {"from_face": "-x"}, {"from_base": (200, 57)}],
+    ids=["diameter", "depth", "purpose", "face", "not_increasing"],
+)
+def test_table_does_not_merge_holes_that_differ(home, change):
+    """Ревью: строка-ряд только у одинаковых отверстий с растущим расстоянием; одно отличное — ряд рвётся."""
+    result = api.drilling_from_project(PETROV, home)
+    side = next(p for p in result.parts if p.id == "Н2-бок-Л")
+    pins = [i for i, h in enumerate(side.holes) if h.purpose == "shelf_pin"][:5]
+    holes = list(side.holes)
+    holes[pins[2]] = holes[pins[2]].model_copy(update=change)
+    crowded = result.model_copy(update={"parts": [side.model_copy(update={"holes": holes})]})
+    rows_ = table(api.drilling_map_layout(crowded)[0].schemes[0])
+    assert not any(r.startswith(f"{pins[0] + 1}–{pins[4] + 1}.") for r in rows_), rows_
+    assert not any(r.startswith(f"{pins[0] + 1}–") for r in rows_), rows_  # и двух отверстий ряд не бывает
+
+
+def test_runner_holes_per_set_follow_the_distance_list(home):
+    """Две позиции направляющей вместо трёх: Петров — 4 комплекта × 2 × 2 = 16, сверка сходится."""
+    edit_construction(
+        home, "отверстия_от_передней_кромки: [37, 261, 453]", "отверстия_от_передней_кромки: [37, 261]"
+    )
+    checks = {c.name: (c.holes, c.expected) for c in api.drilling_from_project(PETROV, home).checks}
+    assert checks["направляющие: отверстий"] == (16, 16)
+
+
+def test_row_hole_touching_the_bottom_stays(home, base_door_project):
+    """Полка на 85: нижнее отверстие ряда 18.5 касается верха дна (16) окружностью — касание не мешает,
+    ряд не сдвигается."""
+    edit_construction(home, "высота: 300, шаг: 300", "высота: 85, шаг: 300")
+    p = parts_of(api.parts_from_project(base_door_project, home))
+    row = [18.5, 50.5, 82.5, 114.5, 146.5]
+    assert rows(p["Н1-бок-Л"]) == {57: row, 523: row}

@@ -6,6 +6,7 @@
 """
 
 from datetime import date
+from decimal import Decimal
 from itertools import pairwise
 from pathlib import Path
 from typing import Literal
@@ -16,7 +17,7 @@ from reportlab.pdfgen.canvas import Canvas
 
 from kitchen.drilling import DrillingCheck, part_extent
 from kitchen.errors import KitchenError
-from kitchen.geometry import PURPOSE_RU, Face, Hole
+from kitchen.geometry import PURPOSE_RU, Face, Hole, Mm, to_mm
 from kitchen.parts import Part
 from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, mm, page_area, register_fonts
 
@@ -68,7 +69,7 @@ class TextLine(BaseModel):
 class ChainLabel(BaseModel):
     """Подпись цепочки: расстояние от базовой кромки, место отметки на оси и рамка подписи."""
 
-    value: int
+    value: Mm
     tick: float
     box: Box
 
@@ -224,8 +225,8 @@ def _series(holes: list[Hole]) -> int | None:
     return None
 
 
-def _span(values: list[int]) -> str:
-    steps = {b - a for a, b in pairwise(values)}
+def _span(values: list[Mm]) -> str:
+    steps = {to_mm(Decimal(str(b)) - Decimal(str(a))) for a, b in pairwise(values)}
     if len(steps) == 1:
         return f"{values[0]}…{values[-1]} шаг {steps.pop()}"
     return ", ".join(str(v) for v in values)
@@ -233,7 +234,8 @@ def _span(values: list[int]) -> str:
 
 def _rows(part: Part) -> list[str]:
     """Строки таблицы отверстий: по отверстию на строку; ряд из трёх и больше одинаковых отверстий подряд
-    на одной линии (полкодержатели, направляющая) — одной строкой с номерами «11–15» и расстояниями."""
+    на одной линии (полкодержатели, направляющая) — одной строкой с номерами «11–15» и расстояниями. Ряд
+    полкодержателей, сдвинутый у дна или крыши (отверстие под полку не посередине), называет его: «под полку …»."""
     assert part.holes and part.base_edges
     first, second = part.base_edges
     rows = [f"№  назначение · где · Ø×глубина · от {_FROM_RU[first]} · от {_FROM_RU[second]}"]
@@ -249,9 +251,13 @@ def _rows(part: Part) -> list[str]:
             end = n + 1
         else:
             number = f"{n + 1}–{end}"
-            base[axis] = _span([x.from_base[axis] for x in holes[n:end]])
+            group = holes[n:end]
+            base[axis] = _span([x.from_base[axis] for x in group])
+            held = [i for i, x in enumerate(group) if x.holds_shelf]
+            if held and 2 * held[0] != len(group) - 1:
+                base.append(f"под полку {group[held[0]].from_base[axis]}")
         rows.append(
-            f"{number}. {PURPOSE_RU[h.purpose]} · {_where(h)} · Ø{h.diameter}×{h.depth} · {base[0]} · {base[1]}"
+            f"{number}. {PURPOSE_RU[h.purpose]} · {_where(h)} · Ø{h.diameter}×{h.depth} · " + " · ".join(base)
         )
         n = end
     return rows

@@ -299,9 +299,14 @@ def joined_to_sides(label: str, end: str) -> list[Joint]:
     return [Joint(side_part_id(label, side), end) for side in SIDE_SUFFIX]
 
 
+def both_sides(label: str) -> tuple[str, str]:
+    """Маркировки левой и правой боковин модуля — пара для полки и для ящика."""
+    return side_part_id(label, "left"), side_part_id(label, "right")
+
+
 def pinned(label: str, shelf: str) -> PinnedShelf:
     """Полка между боковинами на полкодержателях: ряды отверстий — на обеих боковинах."""
-    return PinnedShelf(shelf, (side_part_id(label, "left"), side_part_id(label, "right")))
+    return PinnedShelf(shelf, both_sides(label))
 
 
 def hinged(label: str, facade: str, side: HingeSide) -> HingedDoor:
@@ -704,9 +709,7 @@ def drawer_parts(
             f"Модуль {module.label}: ящик не помещается: ящик занимает высоту от {drawer_z} до {drawer_top} мм, "
             f"а место под него от {t} до {top} мм (фасад ящика {top - z} мм)."
         )
-    out.drawers.append(
-        DrawerRunners(drawer_z, (side_part_id(module.label, "left"), side_part_id(module.label, "right")))
-    )
+    out.drawers.append(DrawerRunners(drawer_z, both_sides(module.label)))
     out.parts += [
         make_part(
             pid=f"{module.label}-{suffix}-{number}",

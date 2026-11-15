@@ -451,13 +451,15 @@ class PlateDrilling(Section):
 
 
 class ShelfPinDrilling(Section):
-    """Ряд отверстий под полкодержатели (тикет 20): на каждой боковине спереди и сзади, среднее — на высоте
-    полки. Нечётное число отверстий: по столько же шагов выше и ниже полки."""
+    """Ряд отверстий под полкодержатели (тикет 20): на каждой боковине спереди и сзади, отступы — от передней и
+    задней кромок полки. Нечётное число отверстий: по столько же шагов выше и ниже отверстия под полку, центр
+    которого на `центр_ниже_полки` ниже нижней пласти полки (верх штыря — низ полки), в десятых долях мм."""
 
     holes: PosInt = _f("отверстий_в_ряду")
     pitch: PosInt = _f("шаг")
-    front_offset: PosInt = _f("отступ_от_передней_кромки")
-    back_offset: PosInt = _f("отступ_от_задней_кромки")
+    front_offset: PosInt = _f("отступ_от_передней_кромки_полки")
+    back_offset: PosInt = _f("отступ_от_задней_кромки_полки")
+    below_shelf: NonNegNum = _f("центр_ниже_полки")
     diameter: PosInt = _f("диаметр")
     depth: PosInt = _f("глубина")
 
@@ -466,6 +468,13 @@ class ShelfPinDrilling(Section):
     def _odd(cls, v: int) -> int:
         if v % 2 == 0:
             raise ValueError("ожидалось нечётное число: среднее отверстие ряда — на высоте полки")
+        return v
+
+    @field_validator("below_shelf")
+    @classmethod
+    def _tenths(cls, v: float) -> float:
+        if Decimal(str(v)) != Decimal(str(v)).quantize(Decimal("0.1")):
+            raise ValueError("ожидалось число мм с точностью до десятых (например 2.5)")
         return v
 
 

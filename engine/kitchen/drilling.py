@@ -24,11 +24,13 @@ from kitchen.geometry import (
     HingedDoor,
     Hole,
     Joint,
+    Mm,
     PinnedShelf,
-    Position,
+    Point,
     Purpose,
     side_of_face,
     steps_pick,
+    to_mm,
 )
 from kitchen.models import Workshop
 
@@ -79,8 +81,9 @@ class _Draft:
     from_face: Face
     diameter: int
     depth: int
-    center: dict[str, int]
+    center: dict[str, Mm]
     through: bool = False
+    holds_shelf: bool = False
 
 
 def _confirmats(module: str, plate: Part, end: Part, ws: Workshop) -> tuple[list[_Draft], list[_Draft]]:
@@ -194,37 +197,53 @@ def _inner_face(module: str, side: Part, inside: Part) -> Face:
     raise KitchenError(f"Модуль {module}: деталь {inside.id} не между боковинами, боковина {side.id}.")
 
 
-def _covered(draft: _Draft, side: Part, covers: list[Part]) -> bool:
-    """Отверстию в пласти боковины не место: окружность выходит за боковину или заходит под торец детали,
-    прикреплённой к боковине (дно, крыша, царга, перегородка). Касание допустимо."""
-    d, c, se = draft.diameter, draft.center, part_extent(side)
-    if any(2 * min(c[a] - se[a][0], se[a][1] - c[a]) < d for a in "yz"):
-        return True
+def _fits(draft: _Draft, ext: Extent) -> bool:
+    """Окружность устья целиком в своей грани детали: по каждой оси плоскости — не ближе радиуса к краю."""
+    c, d = draft.center, draft.diameter
+    return all(2 * min(c[a] - ext[a][0], ext[a][1] - c[a]) >= d for a in "xyz" if a != draft.from_face[1])
+
+
+def _under(draft: _Draft, covers: list[Part]) -> Part | None:
+    """Деталь из `covers` (прикреплена торцом к пласти: дно, крыша, царга, перегородка), под торец которой
+    заходит окружность отверстия в этой пласти. Касание допустимо."""
+    c, plane = draft.center, [a for a in "xyz" if a != draft.from_face[1]]
     for part in covers:
         pe = part_extent(part)
-        dy = max(pe["y"][0] - c["y"], 0, c["y"] - pe["y"][1])
-        dz = max(pe["z"][0] - c["z"], 0, c["z"] - pe["z"][1])
-        if 4 * (dy * dy + dz * dz) < d * d:
-            return True
-    return False
+        gap = [max(pe[a][0] - c[a], 0, c[a] - pe[a][1]) for a in plane]
+        if 4 * sum(g * g for g in gap) < draft.diameter**2:
+            return part
+    return None
+
+
+_SHELF_KEYS = (
+    "ключи «присадка.полкодержатель.отступ_от_{}_кромки_полки» и «полка.отступ_спереди» construction.yaml"
+)
 
 
 def _shelf_pins(module: str, shelf: Part, side: Part, covers: list[Part], ws: Workshop) -> list[_Draft]:
-    """Ряды под полкодержатели на боковине: спереди и сзади по `отверстий_в_ряду` с шагом `шаг`, среднее — на
-    высоте полки (нижняя пласть полки). Ряд, который у дна или крыши выходит за боковину или заходит под деталь
-    корпуса, сдвигается на целые шаги (сначала на меньший), пока не встанет целиком; отверстие на высоте полки
-    остаётся в ряду. Не встаёт и так — ошибка модуля."""
+    """Ряды под полкодержатели на боковине: в `отступ_от_передней_кромки_полки` от передней кромки полки и в
+    `отступ_от_задней_кромки_полки` от задней, по `отверстий_в_ряду` с шагом `шаг`. Центр отверстия под полку —
+    на `центр_ниже_полки` ниже её нижней пласти (верх штыря — низ полки), в ряду по столько же шагов выше и ниже.
+    Ряд, который у дна или крыши выходит за боковину или заходит под деталь корпуса, сдвигается целиком на целые
+    шаги (сначала на меньший), пока не встанет; отверстие под полку остаётся в ряду
+    (решение мастера). Не встаёт и так — ошибка модуля."""
     rules = ws.construction.drilling.shelf_pin
     face = _inner_face(module, side, shelf)
     se, he = part_extent(side), part_extent(shelf)
-    z = he["z"][0]
+    z = Decimal(he["z"][0]) - Decimal(str(rules.below_shelf))
     half = rules.holes // 2
-    shifts = sorted(range(-half, half + 1), key=lambda s: (abs(s), s))
+    shifts = sorted(
+        range(-half, half + 1), key=abs
+    )  # встать могут не оба равных сдвига: мешает край с одной стороны
     out = []
-    for y in (se["y"][1] - rules.front_offset, se["y"][0] + rules.back_offset):
+    for edge, y in (
+        ("передней", he["y"][1] - rules.front_offset),
+        ("задней", he["y"][0] + rules.back_offset),
+    ):
         if not he["y"][0] <= y <= he["y"][1]:
             raise OrderError(
-                f"Модуль {module}: ряд полкодержателей на боковине {side.id} (y={y}) не под полкой {shelf.id}."
+                f"Модуль {module}: ряд полкодержателей на боковине {side.id} (y={y}) не под полкой {shelf.id} "
+                f"глубиной {he['y'][1] - he['y'][0]} мм; {_SHELF_KEYS.format(edge)}."
             )
 
         def row(shift: int, y: int = y) -> list[_Draft]:
@@ -235,16 +254,19 @@ def _shelf_pins(module: str, shelf: Part, side: Part, covers: list[Part], ws: Wo
                     face,
                     rules.diameter,
                     rules.depth,
-                    {"x": _sign_end(face, se), "y": y, "z": z + k * rules.pitch},
+                    {"x": _sign_end(face, se), "y": y, "z": to_mm(z + k * rules.pitch)},
+                    holds_shelf=k == 0,
                 )
                 for k in range(shift - half, shift + half + 1)
             ]
 
-        fitted = next((r for r in map(row, shifts) if not any(_covered(d, side, covers) for d in r)), None)
+        fitted = next(
+            (r for r in map(row, shifts) if all(_fits(d, se) and _under(d, covers) is None for d in r)), None
+        )
         if fitted is None:
             raise OrderError(
-                f"Модуль {module}: ряд полкодержателей на боковине {side.id} под полку {shelf.id} (высота {z} мм) "
-                "не помещается между деталями корпуса даже со сдвигом."
+                f"Модуль {module}: ряд полкодержателей на боковине {side.id} под полку {shelf.id} "
+                f"(отверстие под полку на {to_mm(z)} мм) не помещается между деталями корпуса даже со сдвигом."
             )
         out += fitted
     return out
@@ -279,10 +301,10 @@ def _base_edges(part: Part, ws: Workshop) -> tuple[str, str]:
 def _hole(part: Part, draft: _Draft, base: tuple[str, str], ext: Extent) -> Hole:
     """Отверстие детали с расстояниями от её базовых кромок (модель проверяется pydantic как обычно)."""
 
-    def distance(face: str) -> int:
+    def distance(face: str) -> Mm:
         lo, hi = ext[face[1]]
-        value = draft.center[face[1]]
-        return value - lo if face[0] == "-" else hi - value
+        value = Decimal(str(draft.center[face[1]]))
+        return to_mm(value - lo if face[0] == "-" else hi - value)
 
     end = draft.surface == "end"
     th = part.orientation.thickness
@@ -295,9 +317,10 @@ def _hole(part: Part, draft: _Draft, base: tuple[str, str], ext: Extent) -> Hole
         diameter=draft.diameter,
         depth=draft.depth,
         through=draft.through,
-        center=Position(**draft.center),
+        center=Point(**draft.center),
         from_base=(distance(base[0]), distance(base[1])),
         in_thickness=draft.center[th] - ext[th][0] if end else None,
+        holds_shelf=draft.holds_shelf,
     )
 
 
@@ -312,15 +335,21 @@ def _where(module: str, part: Part, draft: _Draft) -> str:
 def _check_inside(module: str, part: Part, draft: _Draft, ext: Extent) -> None:
     """Отверстие целиком в детали: устье на грани `from_face`, окружность внутри грани, глубина не больше
     размера детали по оси сверления. Иначе — ошибка модуля, а не отверстие мимо детали."""
-    axis, center = draft.from_face[1], draft.center
-    on_face = center[axis] == _sign_end(draft.from_face, ext)
+    axis = draft.from_face[1]
+    on_face = draft.center[axis] == _sign_end(draft.from_face, ext)
     expected = (part.orientation.thickness == axis) == (draft.surface == "face")
-    fits = all(
-        2 * min(center[a] - ext[a][0], ext[a][1] - center[a]) >= draft.diameter for a in "xyz" if a != axis
-    )
     deep = draft.depth <= ext[axis][1] - ext[axis][0]
-    if not (on_face and expected and fits and deep):
+    if not (on_face and expected and _fits(draft, ext) and deep):
         raise OrderError(f"{_where(module, part, draft)} выходит за деталь.")
+
+
+_FREE = ("shelf_pin", "runner")  # отверстия, которым не место под торцом прикреплённой детали
+
+
+def _check_free(module: str, part: Part, draft: _Draft, covers: list[Part]) -> None:
+    """Полкодержатель и направляющая не заходят под дно, крышу, царгу или перегородку на этой пласти."""
+    if draft.purpose in _FREE and (cover := _under(draft, covers)) is not None:
+        raise OrderError(f"{_where(module, part, draft)} заходит под деталь {cover.id}.")
 
 
 def _check_apart(module: str, part: Part, drafts: list[_Draft], ext: Extent) -> None:
@@ -396,10 +425,15 @@ def apply_drilling(
         hardware[hw.hinges] += hinges
         hardware[hw.plates] += hinges * c.plates.per_unit
         hardware[hw.screws] += hinges * c.screws_3_5x16.per_hinge
+
+    def covers(pid: str) -> list[Part]:
+        return [get(j.end) for j in joints if j.plate == pid]
+
     for shelf in shelves or []:
         for pid in shelf.sides:
-            covers = [get(j.end) for j in joints if j.plate == pid]
-            drafts.setdefault(pid, []).extend(_shelf_pins(module, get(shelf.shelf), get(pid), covers, ws))
+            drafts.setdefault(pid, []).extend(
+                _shelf_pins(module, get(shelf.shelf), get(pid), covers(pid), ws)
+            )
     for drawer in drawers or []:
         left, right = (get(pid) for pid in drawer.sides)
         for side, other in ((left, right), (right, left)):
@@ -411,8 +445,10 @@ def apply_drilling(
             continue
         ext = part_extent(part)
         base = _base_edges(part, ws)
+        on_it = covers(part.id)
         for d in drafts[part.id]:
             _check_inside(module, part, d, ext)
+            _check_free(module, part, d, on_it)
         _check_apart(module, part, drafts[part.id], ext)
         made = [_hole(part, d, base, ext) for d in drafts[part.id]]
         out.append(part.model_copy(update={"holes": made, "base_edges": list(base)}))
