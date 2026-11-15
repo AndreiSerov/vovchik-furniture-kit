@@ -204,9 +204,9 @@ def test_shared_helpers_are_defined_once():
 
 
 # Тикет 47: «кто стоит в модуле или пустом месте» отвечает `Project.appliances_at`. Фильтр по `.module ==` над
-# списком техники проекта разрешён только в `project.py`; `parts.py` и `tall.py` фильтруют не проект, а свои
-# списки (`ctx.appliances`, `project_appliances` — техника, переданная сборщику шаблона).
-FILTER_OK = {"project.py", "parts.py", "tall.py"}
+# списком техники проекта разрешён только в `project.py`; `ctx.appliances` и `project_appliances` в `parts.py` и `tall.py`
+# (техника, переданная сборщику шаблона) под шаблон `project.appliances` не попадают.
+FILTER_OK = {"project.py"}
 
 
 def test_appliance_filter_by_module_lives_only_in_project():
