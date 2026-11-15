@@ -80,4 +80,25 @@ for (const aspect of [1.6, 0.5]) {
   );
   out["camera" + aspect] = { y: cam.position.y, worst, distance: framed.distance, target: framed.target.toArray() };
 }
+// 5. Метки на лицевой грани и габариты коробки (ревью 42).
+const lab = viewer.buildScene(THREE, data, { makeLabel: () => ({ texture: null, aspect: 0.375 }) });
+out.labels = {};
+for (const m of data.modules) {
+  const plane = lab.modules[m.label].label;
+  plane.updateMatrixWorld(true);
+  const normal = new THREE.Vector3(0, 0, 1).transformDirection(plane.matrixWorld);
+  const b = m.boxes[0];
+  const face = viewer.toThree(
+    m.front[0] > 0 ? b.max[0] : m.front[0] < 0 ? b.min[0] : (b.min[0] + b.max[0]) / 2,
+    m.front[1] > 0 ? b.max[1] : m.front[1] < 0 ? b.min[1] : (b.min[1] + b.max[1]) / 2,
+    (b.min[2] + b.max[2]) / 2
+  );
+  const dir = new THREE.Vector3(...viewer.toThree(m.front[0], m.front[1], 0)).normalize();
+  out.labels[m.label] = {
+    facing: normal.dot(dir),
+    offset: plane.position.clone().sub(new THREE.Vector3(...face)).dot(dir),
+  };
+}
+const g = lab.modules["Н1"].meshes[0].geometry.parameters;
+out.n1box = [g.width, g.height, g.depth];
 console.log(JSON.stringify(out));

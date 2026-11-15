@@ -74,3 +74,12 @@ def test_camera_is_at_1600_and_the_whole_kitchen_is_in_frame(viewed, aspect):
     assert cam["y"] == pytest.approx(1.6)
     assert cam["worst"] <= 0.93
     assert cam["target"][0] == pytest.approx(2.8) and cam["target"][2] == pytest.approx(0)  # угол: конец A
+
+
+def test_labels_sit_just_in_front_of_the_face_and_face_the_room(viewed):
+    for label, v in viewed["labels"].items():
+        assert v["facing"] > 0.99 and 0 < v["offset"] < 0.01, label
+
+
+def test_box_is_width_by_height_by_depth(viewed):
+    assert [round(x, 3) for x in viewed["n1box"]] == [0.6, 0.72, 0.579]

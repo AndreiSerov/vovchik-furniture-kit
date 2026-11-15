@@ -290,7 +290,8 @@ def test_html_is_deterministic_for_one_date(home):
     assert Path(a.output_html.file).read_bytes() == first
 
 
-def test_camera_stands_in_the_room_at_1600_and_looks_at_the_corner(home):
+def test_camera_looks_at_the_corner_from_the_room_side_at_1600(home):
+    """Камера может отойти за стены напротив, чтобы кухня влезла в кадр (решение мастера 2026-11-16)."""
     petrov_order(home)
     scene = embedded(html_of(home)[2])
     cam = scene["camera"]
@@ -313,3 +314,34 @@ def test_walls_face_into_the_room(home):
         nx, ny = wall["normal"]
         assert (cx - mx) * nx + (cy - my) * ny > 0, wall["label"]
         assert wall["height"] == 2400 or wall["height"] > 0
+
+
+def test_boxes_are_in_the_facade_colour_and_unknown_colour_is_grey(home):
+    data = json.loads(PETROV.read_text(encoding="utf-8"))
+    data["materials"]["facades_upper_color"] = "сиреневый"
+    path = home / "p.json"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    rgb = {m.label: m.boxes[0].rgb for m in api.views_from_project(path, home).scene3d.modules}
+    assert rgb["Н1"] == "#CAC4B0"  # RAL 7044
+    assert rgb["В2"] == "#B0B0B0"  # нераспознанный — серый
+
+
+def test_broken_module_caption_is_the_template_title_not_its_id(home):
+    petrov_order(home)
+    break_module_n3(home)
+    n3 = next(m for m in embedded(html_of(home)[2])["modules"] if m["label"] == "Н3")
+    assert "base_bottle" not in n3["caption"]
+    assert re.fullmatch(r"Н3 — [а-яё -]+, 150 мм", n3["caption"]), n3["caption"]
+
+
+def test_own_code_has_no_protocol_relative_addresses_or_loaders(home):
+    petrov_order(home)
+    _, _, page = html_of(home)
+    for tag, attrs in page.tags:
+        assert not (tag == "meta" and "refresh" in (attrs.get("http-equiv") or "").lower())
+    own = [b for a, b in page.scripts if a.get("id") in {"viewer", "scene-data", "boot"}]
+    for body in own:
+        assert not re.search(r"(?<![:\w])//[\w-]+(\.[\w-]+)+", body)
+        assert not re.search(
+            r"createElement\(\s*['\"](script|link|iframe|img)|importScripts|EventSource|\bWorker\(", body
+        )
