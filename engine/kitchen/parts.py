@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from kitchen import formulas
 from kitchen.drilling import apply_drilling, plate_warnings
-from kitchen.errors import OrderError, WorkshopError
+from kitchen.errors import KitchenError, OrderError, WorkshopError
 from kitchen.formulas import FormulaError, InexactDivisionError
 from kitchen.geometry import (
     PURPOSE_RU,
@@ -1251,6 +1251,42 @@ def _area_4(area: Decimal) -> float:
     return float(area.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
 
 
+def _module_parts(module: ModuleSpec, out: TemplateOut) -> ModuleParts:
+    return ModuleParts(
+        module=module.label,
+        template=module.template,
+        parts=out.parts,
+        hardware=dict(out.hardware),
+        plan=AssemblyPlan(
+            joints=tuple(out.joints),
+            doors=tuple(out.doors),
+            shelves=tuple(out.shelves),
+            drawers=tuple(out.drawers),
+            back_screws=out.back_screws,
+        ),
+    )
+
+
+def buildable_module_parts(project: Project, ws: Workshop) -> list[ModuleParts]:
+    """Детали тех модулей, что строятся; не построившийся модуль пропущен (его причину называют проверки
+    проекта). Для видов: такой модуль рисуется голой коробкой."""
+    result: list[ModuleParts] = []
+    for wall in project.walls:
+        for row in wall.rows:
+            for entry in row.modules:
+                if is_gap(entry) or entry.template not in TEMPLATES:
+                    continue
+                try:
+                    result.append(
+                        _module_parts(
+                            entry, build_module(entry, row, project.materials, ws, project.appliances)
+                        )
+                    )
+                except KitchenError:
+                    continue
+    return result
+
+
 def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     """Детали по модулям, фурнитура итогом, метраж кромки, площадь фасадов."""
     modules: list[ModuleParts] = []
@@ -1289,21 +1325,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
                             f"Маркировка «{part.id}» не уникальна: уже есть у детали модуля {seen[part.id]}."
                         )
                     seen[part.id] = module.label
-                modules.append(
-                    ModuleParts(
-                        module=module.label,
-                        template=module.template,
-                        parts=out.parts,
-                        hardware=dict(out.hardware),
-                        plan=AssemblyPlan(
-                            joints=tuple(out.joints),
-                            doors=tuple(out.doors),
-                            shelves=tuple(out.shelves),
-                            drawers=tuple(out.drawers),
-                            back_screws=out.back_screws,
-                        ),
-                    )
-                )
+                modules.append(_module_parts(module, out))
                 color = facade_color(module, row, project.materials)
                 for part in out.parts:
                     if is_facade(part):

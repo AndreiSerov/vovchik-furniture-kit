@@ -31,7 +31,16 @@ from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError, ProjectFileError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
-from kitchen.parts import APPLIANCE_NAMES, PURPOSE_RU, EdgeTotals, ModuleParts, Part, PartsGap, compute_parts
+from kitchen.parts import (
+    APPLIANCE_NAMES,
+    PURPOSE_RU,
+    EdgeTotals,
+    ModuleParts,
+    Part,
+    PartsGap,
+    buildable_module_parts,
+    compute_parts,
+)
 from kitchen.placement import GapPlace, ModulePlace, SceneObject, WallPlace, place_project
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
@@ -2341,10 +2350,14 @@ def _views(
     refused = [f.message for f in placed.findings if f.level == "error"]
     if refused:
         raise OrderError(refused)
-    computed = compute_parts(project, workshop)
-    scene = build_scene(project, placed, computed.modules, workshop)
     findings = run_checks(project, workshop, json.loads(brief["data"]) if brief else None)
     errors = sum(f.level == "error" for f in findings)
+    if errors:  # проект с ошибками проверок рисуется: не построившийся модуль — голая коробка без фасадов
+        module_parts, part_warnings = buildable_module_parts(project, workshop), []
+    else:
+        computed = compute_parts(project, workshop)
+        module_parts, part_warnings = computed.modules, computed.warnings
+    scene = build_scene(project, placed, module_parts, workshop)
     pages = views_page_layout(scene, errors)  # подписи, которым нет места, — ошибка уже здесь
     return ViewsResult(
         order=project.order,
@@ -2359,7 +2372,7 @@ def _views(
         scene=scene,
         walls=len(scene.walls),
         pages=len(pages),
-        warnings=[*computed.warnings, *warnings],
+        warnings=[*part_warnings, *warnings],
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,
     )

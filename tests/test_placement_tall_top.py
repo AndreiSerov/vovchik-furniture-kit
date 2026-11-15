@@ -74,3 +74,11 @@ def test_petrov_has_no_placement_finding(home):
 def test_without_tall_top_follows_tall_height_of_workshop(home):
     result = place(home, [wall("A", 600, [mod("Н1", "base_door", 600)], [mod("В1", "wall_door", 600)])])
     assert result.top_of_uppers == 2200
+
+
+def test_tallest_tall_listed_first_still_sets_top_and_is_named(home):
+    result = two_talls(home, 2300, 2100)
+    assert result.top_of_uppers == 2400
+    assert [f.message for f in result.findings] == [
+        "Пеналы разной высоты: П1 2300 мм, П2 2100 мм — верх верхних по П1 (2400 мм)."
+    ]

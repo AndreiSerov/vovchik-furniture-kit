@@ -347,3 +347,95 @@ def test_cli_prints_tall_heights_warning_after_the_checks_line(home):
     lines = result.output.splitlines()
     checks = next(i for i, line in enumerate(lines) if line.startswith("Проверки:"))
     assert lines[checks + 1] == "Пеналы разной высоты: П1 2100 мм, П2 2300 мм — верх верхних по П2 (2400 мм)."
+
+
+def banner_on_every_page(result, errors):
+    pages = api.views_layout(result)
+    assert pages
+    assert all(any(f"Проверки: {errors} " in lb.text for lb in p.labels) for p in pages)
+
+
+def test_views_draw_a_project_whose_module_does_not_build(home):
+    from tests.test_placement import petrov
+
+    path = home / "p.json"
+    path.write_text(
+        json.dumps(petrov(Н3={"width": 100}, Н4={"width": 1100}), ensure_ascii=False), encoding="utf-8"
+    )
+    assert api.placement_from_project(path, home).findings == []
+    assert [f.code for f in api.check_project(path, home).errors] == ["module_build"]
+    result = api.views_from_project(path, home)
+    assert [f.code for f in result.errors] == ["module_build"]
+    assert all(any("Проверки: 1 ошибка" in lb.text for lb in p.labels) for p in api.views_layout(result))
+    n3 = next(m for m in result.scene.modules if m.label == "Н3")
+    assert n3.facades == []  # модуль не построился — голая коробка
+
+
+def test_views_draw_unknown_template_and_too_small_part_as_bare_boxes(home):
+    from tests.test_placement import petrov
+
+    for edit, code in (({"template": "base_foo"}, "module_build"), ({"width": 50}, "part_too_small")):
+        data = petrov(Н2=edit) if "template" in edit else petrov(Н3=edit)
+        path = home / "p.json"
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        checked = api.check_project(path, home)
+        assert code in [f.code for f in checked.errors], code
+        assert api.placement_from_project(path, home).findings == []  # расстановка проходит, отказа нет
+        result = api.views_from_project(path, home)
+        assert code in [f.code for f in result.errors]
+        bare = [m.label for m in result.scene.modules if not m.facades and not m.tall and m.row == "lower"]
+        assert bare, code
+        assert ("Н2" if "template" in edit else "Н3") in bare
+        banner_on_every_page(result, len(result.errors))
+
+
+def test_cli_3d_project_with_a_module_that_does_not_build_succeeds_and_names_the_error(home):
+    # заказ с таким проектом не импортируется (импорт отклоняет), поэтому у CLI достижим только --project
+    from tests.test_placement import petrov
+
+    path = home / "p.json"
+    path.write_text(
+        json.dumps(petrov(Н3={"width": 100}, Н4={"width": 1100}), ensure_ascii=False), encoding="utf-8"
+    )
+    result = runner.invoke(app, ["3d", "--project", str(path)])
+    assert result.exit_code == 0, result.output
+    assert "Проверки: 1 ошибка" in result.output
+
+
+def test_gap_fronts_follow_their_row(home):
+    pm1 = next(g for g in petrov_views(home).scene.gaps if g.label == "ПМ1")
+    assert (pm1.front.x, pm1.front.z, pm1.front.width, pm1.front.height) == (336, 1480, 264, 720)
+
+
+def test_low_of_uppers_is_the_lowest_upper_on_the_wall(home):
+    from tests.test_placement import petrov
+
+    path = home / "p.json"
+    path.write_text(json.dumps(petrov(В1={"height": 900}), ensure_ascii=False), encoding="utf-8")
+    page = next(p for p in api.views_layout(api.views_from_project(path, home)) if p.wall == "A")
+    assert ("низ верхних", 1300) in [(lv.name, lv.z) for lv in page.levels]
+
+
+def test_blind_part_of_a_corner_first_in_its_row_is_on_the_left(home):
+    from tests.test_placement import corner, mod, wall, write
+
+    walls = [
+        wall(
+            "A", 2250, [mod("Н1", "base_door", 600), mod("Н2", "base_door", 450), mod("Н3", "base_door", 600)]
+        ),
+        wall("Б", 2250, [corner("Н4", "base_corner", 1050, "A"), mod("Н5", "base_door", 1200)]),
+    ]
+    n4 = next(m for m in api.views_from_project(write(home, walls), home).scene.modules if m.label == "Н4")
+    assert n4.blind_width == 600 and n4.blind.x == 0
+    assert all(f.x >= 598 for f in n4.facades)
+
+
+def test_plan_row_depth_is_the_deepest_module_of_the_row_with_facade(home):
+    from tests.test_placement import petrov
+
+    path = home / "p.json"
+    path.write_text(json.dumps(petrov(Н1={"depth": 600}), ensure_ascii=False), encoding="utf-8")
+    plan = api.views_layout(api.views_from_project(path, home))[0]
+    texts = [lb.text for lb in plan.labels]
+    assert "глубина: нижние 619, верхние 339" in texts  # стена A: 600 + 19 фасад, остальные 579
+    assert "глубина: нижние 579, верхние 339" in texts  # стена Б без правок
