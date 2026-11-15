@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from kitchen import brief as brief_check
 from kitchen import store
 from kitchen.assembly import AssemblyModule, build_assembly
+from kitchen.assembly_pdf import AssemblyPageLayout, layout, write_assembly
 from kitchen.checks import Finding, duplicate_labels
 from kitchen.checks import check_project as run_checks
 from kitchen.common import CommonItem, CountertopSize, compute_common, size_countertop
@@ -42,7 +43,9 @@ __all__ = [
     "DAYS_ERROR",
     "HOLE_PURPOSES",
     "OUTPUT_RECOMPUTE",
+    "PRODUCTION_KINDS",
     "AssemblyModule",
+    "AssemblyPageLayout",
     "AssemblyResult",
     "BriefSaveResult",
     "BriefShowResult",
@@ -80,8 +83,10 @@ __all__ = [
     "ValidationContext",
     "ValidationResult",
     "WorkshopCheck",
+    "assembly_and_save",
     "assembly_from_order",
     "assembly_from_project",
+    "assembly_layout",
     "brief_save",
     "brief_show",
     "check_project",
@@ -1334,25 +1339,23 @@ def drilling_map_layout(result: DrillingResult) -> list[PageLayout]:
     return map_layout(result.parts, result.checks)
 
 
+def _drilling_writer(result: DrillingResult, on: date | None) -> Callable[[Path], None]:
+    return lambda path: write_drilling_map(
+        path,
+        result.parts,
+        result.checks,
+        order=result.source.order,
+        version=result.source.version,
+        mock=result.mock,
+        on=on or store.today(),
+    )
+
+
 def drilling_and_save(order: str, home: Path | None = None, on: date | None = None) -> DrillingResult:
     """`kitchen drilling <заказ>`: присадка текущей версии, PDF карты и регистрация вывода (как у раскроя)."""
     home = home or resolve_home()
     result = drilling_from_order(order, home)
-    output = _save_output(
-        home,
-        result.source,
-        store.DRILLING,
-        DRILLING_PDF,
-        lambda path: write_drilling_map(
-            path,
-            result.parts,
-            result.checks,
-            order=result.source.order,
-            version=result.source.version,
-            mock=result.mock,
-            on=on or store.today(),
-        ),
-    )
+    output = _save_output(home, result.source, store.DRILLING, DRILLING_PDF, _drilling_writer(result, on))
     return result.model_copy(update={"output": output})
 
 
@@ -1393,6 +1396,33 @@ def assembly_from_project(path: Path, home: Path | None = None) -> AssemblyResul
     workshop = load_workshop(home)
     parts = _build_parts(project, home, source, _brief_of_project(home, project.order), [], workshop)
     return _assembly(project, parts, workshop)
+
+
+ASSEMBLY_PDF = "assembly.pdf"
+
+
+def assembly_layout(result: AssemblyResult) -> list[AssemblyPageLayout]:
+    """Раскладка страниц сборочного листа (строки, кегли, положение) — ровно то, что рисует PDF."""
+    return layout(result.modules)
+
+
+def assembly_and_save(order: str, home: Path | None = None, on: date | None = None) -> AssemblyResult:
+    """`kitchen assembly <заказ>`: сборочный лист текущей версии, PDF и регистрация вывода."""
+    home = home or resolve_home()
+    result = assembly_from_order(order, home)
+    output = _save_output(home, result.source, store.ASSEMBLY, ASSEMBLY_PDF, _assembly_writer(result, on))
+    return result.model_copy(update={"output": output})
+
+
+def _assembly_writer(result: AssemblyResult, on: date | None) -> Callable[[Path], None]:
+    return lambda path: write_assembly(
+        path,
+        result.modules,
+        order=result.source.order,
+        version=result.source.version,
+        mock=result.mock,
+        on=on or store.today(),
+    )
 
 
 class PurchaseResult(Result):
@@ -1833,12 +1863,25 @@ def quote_and_save(
     return result
 
 
+# Документы цеха: виды выводов, которые пишет `kitchen production` (тикет 49 читает этот список).
+PRODUCTION_KINDS: tuple[OutputKind, ...] = (
+    store.CUTTING,
+    store.EDGING,
+    store.PURCHASE_MD,
+    store.PURCHASE_JSON,
+    store.DRILLING,
+    store.ASSEMBLY,
+)
+
+
 class ProductionResult(Result):
     """Все производственные выводы одной версии проекта."""
 
     cutting: CutResult
     edging: EdgingResult
     purchase: PurchaseResult
+    drilling: DrillingResult
+    assembly: AssemblyResult
     mock_notice: str | None = None
 
 
@@ -1850,6 +1893,10 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
     cut = _build_cut(project, home, source, brief, warnings, workshop)
     edging = _edging(parts)
     purchase, purchase_files = _purchase_files(home, _purchase(project, parts, cut, workshop))
+    drilling = _drilling(parts, workshop)
+    assembly = _assembly(project, parts, workshop)
+    drilling_output = _output_info(home, source, store.DRILLING, DRILLING_PDF)
+    assembly_output = _output_info(home, source, store.ASSEMBLY, ASSEMBLY_PDF)
     cut_output = _output_info(home, source, store.CUTTING, CUTTING_PDF)
     edging_output = _output_info(home, source, store.EDGING, "edging-map.pdf")
     day = on or store.today()
@@ -1881,12 +1928,16 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
             ),
         ),
         *purchase_files,
+        (drilling_output, _drilling_writer(drilling, day)),
+        (assembly_output, _assembly_writer(assembly, day)),
     ]
     _save_outputs(home, source, files)
     return ProductionResult(
         cutting=cut.model_copy(update={"output": cut_output}),
         edging=edging.model_copy(update={"output": edging_output}),
         purchase=purchase,
+        drilling=drilling.model_copy(update={"output": drilling_output}),
+        assembly=assembly.model_copy(update={"output": assembly_output}),
         mock=parts.mock,
         mock_files=parts.mock_files,
         mock_notice=MOCK_BANNER if parts.mock else None,

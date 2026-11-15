@@ -42,7 +42,7 @@ def _stale_kinds(home) -> set[str]:
     return {s.kind for s in api.status(ORDER, home).stale}
 
 
-ALL_KINDS = {"cutting", "edging", "purchase_md", "purchase_json"}
+ALL_KINDS = {"cutting", "edging", "purchase_md", "purchase_json", "drilling", "assembly"}
 
 
 def test_v2_marks_every_v1_output_with_version_and_command(home):
@@ -77,7 +77,7 @@ def test_production_and_estimate_leave_section_empty(home):
     api.production_and_save(ORDER, home)
     api.estimate_and_save(ORDER, home)
     _import_v2(home)
-    assert len(api.status(ORDER, home).stale) == 6
+    assert len(api.status(ORDER, home).stale) == len(ALL_KINDS) + 2  # документы цеха и смета (md, json)
     api.production_and_save(ORDER, home)
     api.estimate_and_save(ORDER, home)
     r = api.status(ORDER, home)
@@ -175,7 +175,7 @@ def test_three_versions_show_own_source_version(home):
     assert api.import_project(ORDER, path, home=home).version == 3
     r = api.status(ORDER, home)
     versions = {s.kind: s.source_version for s in r.stale}
-    assert versions == {"cutting": 2, "edging": 1, "purchase_md": 1, "purchase_json": 1}
+    assert versions == {k: 2 if k == "cutting" else 1 for k in ALL_KINDS}
     line = next(ln for ln in _stale_section(r.text).splitlines() if "cutting-map.pdf" in ln)
     assert "версия 2" in line
 
@@ -192,7 +192,7 @@ def test_other_orders_outputs_are_not_listed(home):
         api.import_project(order, path, home=home)
         api.production_and_save(order, home)
     _import_v2(home)
-    assert len(api.status(ORDER, home).stale) == 4
+    assert len(api.status(ORDER, home).stale) == len(ALL_KINDS)
     assert all(ORDER in s.path for s in api.status(ORDER, home).stale)
     assert api.status(other, home).stale == []
 
