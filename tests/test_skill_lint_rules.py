@@ -251,3 +251,9 @@ def test_one_bad_phrase_gives_one_message_not_a_missing_phrase_too(tmp_path):
     lint_text(tmp_path, HEAD + "Текст\n")
     write_triggers(tmp_path, '{"phrases": [{"text": "", "skill": "kitchen-x"}]}')
     assert len(skill_lint.lint(tmp_path)) == 1
+
+
+def test_arithmetic_next_to_a_length_unit_is_caught(tmp_path):
+    """Второе правило с меткой «арифметика над числами»: число с единицей длины рядом с оператором."""
+    (problem,) = lint_body(tmp_path, "Текст: 45 см + 5\n")
+    assert "арифметика над числами «45 см + 5»" in problem

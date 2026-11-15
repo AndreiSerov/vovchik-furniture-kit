@@ -69,7 +69,8 @@ def test_empty_trigger_set_passes(case):
 
 
 def test_real_skills_pass_without_exceptions():
-    assert skill_lint.lint() == []
+    problems = skill_lint.lint()
+    assert not problems, "\n".join(problems)
     assert (skill_lint.DEFAULT_ROOT / "kitchen-brief" / "SKILL.md").is_file()
 
 
