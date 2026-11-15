@@ -687,7 +687,7 @@ def _render_production(r: api.ProductionResult) -> str:
 
 @app.command("production")
 def production(order: OrderArg, json: JsonOpt = False) -> None:
-    """Пересчитать раскрой, кромление и закупку текущей версии заказа."""
+    """Пересчитать раскрой, кромление, закупку и сборочный лист текущей версии заказа."""
     try:
         result = api.production_and_save(order)
     except KitchenError as e:

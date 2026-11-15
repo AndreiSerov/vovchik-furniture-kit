@@ -289,3 +289,15 @@ def test_legs_and_handles_marked_workshop_get_steps_only_where_the_module_has_th
         assert has_legs == any(s.startswith("Опоры") for s in m.steps), m.label
         has_handles = any(h.id == "handle_profile" for h in m.hardware)
         assert has_handles == any(s.startswith("Ручки") for s in m.steps), m.label
+
+
+def test_workshop_hardware_is_listed_in_hardware_yaml_order(base_door_project, home):
+    path = home / "workshop" / "hardware.yaml"
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    screw = next(i for i, ln in enumerate(lines) if "{id: screw_3_5x16," in ln)
+    first = next(i for i, ln in enumerate(lines) if ln.startswith("  - {id:"))
+    lines.insert(first, lines.pop(screw))  # саморез — первой позицией каталога
+    path.write_text("".join(lines), encoding="utf-8")
+    order = [i["id"] for i in yaml.safe_load(path.read_text(encoding="utf-8"))["позиции"]]
+    ids = [h.id for h in api.assembly_from_project(base_door_project, home).modules[0].hardware]
+    assert ids[0] == "screw_3_5x16" and ids == sorted(ids, key=order.index)
