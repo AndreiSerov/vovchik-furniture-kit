@@ -30,14 +30,16 @@ def test_brief_save_text_has_banner_and_counts(home, brief_file):
     lines = r.output.strip().splitlines()
     assert lines[0] == MOCK_BANNER and lines[-1] == MOCK_BANNER
     assert "Заказ 2026-001-sergeev заведён, бриф сохранён." in r.output
-    assert "обязательных полей: 4" in r.output and "рисков: 10" in r.output
+    assert (
+        "обязательных полей: 4" in r.output and "рисков: 12" in r.output
+    )  # было 10: тикет 30 добавил вопросы о холодильнике
 
 
 def test_brief_save_json_is_the_api_result(home, brief_file):
     r = runner.invoke(app, ["brief", "save", "2026-047-sergeev", str(brief_file), "--json"])
     assert r.exit_code == 0, r.output
     data = api.BriefSaveResult.model_validate_json(r.output)
-    assert (data.order, data.created, data.conflicts, data.mock) == ("2026-047-sergeev", True, 10, True)
+    assert (data.order, data.created, data.conflicts, data.mock) == ("2026-047-sergeev", True, 12, True)
     assert data.warning == MOCK_BANNER and json.loads(r.output)["warning"] == MOCK_BANNER
 
 

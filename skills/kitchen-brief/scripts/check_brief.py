@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -412,6 +413,48 @@ def fridge_door(brief: dict, s: dict) -> list[Finding]:
     ]
 
 
+@rule("fridge_place")
+def fridge_place(brief: dict, s: dict) -> list[Finding]:
+    fridge = get(brief, "appliances.fridge")
+    if is_empty(fridge) or not isinstance(fridge, dict) or sub(fridge, "wall") == "none":
+        return []
+    names = {w.get("name") for w in get(brief, "room.walls") or [] if isinstance(w, dict)}
+    wall = sub(fridge, "wall")
+    known_wall = not is_empty(wall) and (not names or wall in names)
+    if known_wall and not is_empty(sub(fridge, "side")):
+        return []
+    return [
+        Finding(
+            "fridge_place",
+            "question",
+            "Без места холодильника не собрать проект: он занимает длину стены.",
+            "У какой стены и с какого края будет стоять холодильник, если стоять лицом к стене? "
+            "Какой он ширины и высоты?",
+            "now",
+            ["appliances.fridge"],
+        )
+    ]
+
+
+@rule("over_fridge")
+def over_fridge(brief: dict, s: dict) -> list[Finding]:
+    fridge = get(brief, "appliances.fridge")
+    if get(brief, "storage.upper_height") != "to_ceiling" or not is_empty(get(brief, "storage.over_fridge")):
+        return []
+    if sub(fridge, "built_in") is True or sub(fridge, "wall") == "none":
+        return []
+    return [
+        Finding(
+            "over_fridge",
+            "question",
+            "Верх до потолка и отдельностоящий холодильник: решите про антресоль.",
+            "Над холодильником можно сделать шкаф до потолка — нужен?",
+            "now",
+            ["storage.over_fridge"],
+        )
+    ]
+
+
 @rule("hood_exhaust")
 def hood_exhaust(brief: dict, s: dict) -> list[Finding]:
     hood = get(brief, "appliances.hood")
@@ -696,9 +739,31 @@ def unknown_fields(brief: dict, schema: dict) -> list[str]:
     return out
 
 
+def enum_errors(brief: dict, schema: dict) -> list[str]:
+    """Значение enum-поля не из перечня схемы; у полей-объектов — ключи вида «enum: a, b»."""
+    out = []
+    for sec_key, sec in schema["sections"].items():
+        for name, spec in sec["fields"].items():
+            value = get(brief, f"{sec_key}.{name}")
+            if is_empty(value):
+                continue
+            path = f"{sec_key}.{name}"
+            if spec.get("type") == "enum" and str(value) not in spec["values"]:
+                out.append(f"{path}: {value!r} не из перечня {', '.join(spec['values'])}")
+            elif spec.get("type") == "object" and isinstance(value, dict):
+                for key, desc in spec.get("item", {}).items():
+                    if not str(desc).startswith("enum: ") or is_empty(value.get(key)):
+                        continue
+                    listed = re.sub(r"\([^)]*\)", "", str(desc)[6:]).split("—")[0]
+                    allowed = [v.strip() for v in listed.split(",")]
+                    if str(value[key]) not in allowed:
+                        out.append(f"{path}.{key}: {value[key]!r} не из перечня {', '.join(allowed)}")
+    return out
+
+
 def check(brief: dict, settings: dict, schema: dict) -> dict:
     conflicts: list[Finding] = []
-    errors: list[str] = []
+    errors: list[str] = enum_errors(brief, schema)
     for rule_id, fn in RULES.items():
         if rule_id in settings.get("disabled_rules", []):
             continue

@@ -236,7 +236,7 @@
             "niche_depth_mm": "integer: см. niche_width_mm",
             "dimensions": "string: Ш×В×Г — только в старых брифах, новые пишут width_mm, height_mm, depth_mm",
             "location": "string: где стоит, словами клиента (напр. «у окна», «в высоком шкафу», «на острове»)",
-            "who_buys": "enum: client, salon",
+            "who_buys": "enum: client, master, salon (salon — только в старых брифах)",
             "keep_existing": "boolean: остаётся своя, уже стоит"
           },
           "required": true,
@@ -252,10 +252,18 @@
             "width_mm": "integer",
             "height_mm": "integer",
             "location": "string",
-            "existing": "boolean: свой, уже есть"
+            "existing": "boolean: свой, уже есть",
+            "wall": "string: метка стены из room.walls или none — холодильник не на кухне",
+            "side": "enum: left, right — слева или справа, если стоять лицом к стене"
           },
           "required": true,
-          "ask": "now"
+          "ask": "now",
+          "item_value_labels": {
+            "side": {
+              "left": "слева",
+              "right": "справа"
+            }
+          }
         },
         "hood": {
           "label": "Вытяжка",
@@ -404,6 +412,166 @@
           "type": "string",
           "required": false,
           "ask": "measure"
+        },
+        "over_fridge": {
+          "label": "Антресоль над холодильником",
+          "type": "enum",
+          "values": [
+            "yes",
+            "no",
+            "undecided"
+          ],
+          "value_labels": {
+            "yes": "да",
+            "no": "нет",
+            "undecided": "не решено"
+          },
+          "required": false,
+          "ask": "now"
+        }
+      }
+    },
+    "workzone": {
+      "label": "Рабочая зона",
+      "fields": {
+        "sink_mount": {
+          "label": "Монтаж мойки",
+          "type": "enum",
+          "values": [
+            "overlay",
+            "inset",
+            "undermount",
+            "unknown"
+          ],
+          "value_labels": {
+            "overlay": "накладная",
+            "inset": "врезная",
+            "undermount": "подстольная",
+            "unknown": "не знаю"
+          },
+          "required": false,
+          "ask": "now"
+        },
+        "sink_bowls": {
+          "label": "Чаш в мойке",
+          "type": "enum",
+          "values": [
+            "1",
+            "1.5",
+            "2",
+            "unknown"
+          ],
+          "value_labels": {
+            "1": "одна чаша",
+            "1.5": "полторы",
+            "2": "две",
+            "unknown": "не знаю"
+          },
+          "required": false,
+          "ask": "now"
+        },
+        "sink_material": {
+          "label": "Материал мойки",
+          "type": "enum",
+          "values": [
+            "steel",
+            "stone",
+            "ceramic",
+            "unknown"
+          ],
+          "value_labels": {
+            "steel": "нержавейка",
+            "stone": "камень",
+            "ceramic": "керамика",
+            "unknown": "не знаю"
+          },
+          "required": false,
+          "ask": "now"
+        },
+        "note": {
+          "label": "Рабочая зона: заметки",
+          "type": "string",
+          "required": false,
+          "ask": "now"
+        }
+      }
+    },
+    "installation": {
+      "label": "Монтаж",
+      "fields": {
+        "parking": {
+          "label": "Парковка у дома",
+          "type": "enum",
+          "values": [
+            "free",
+            "paid",
+            "none",
+            "unknown"
+          ],
+          "value_labels": {
+            "free": "бесплатная у дома",
+            "paid": "платная",
+            "none": "нет",
+            "unknown": "не знаю"
+          },
+          "required": false,
+          "ask": "now"
+        },
+        "dismantling": {
+          "label": "Демонтаж старой кухни",
+          "type": "enum",
+          "values": [
+            "master",
+            "client",
+            "not_needed",
+            "unknown"
+          ],
+          "value_labels": {
+            "master": "делаю я",
+            "client": "делает клиент",
+            "not_needed": "не нужен",
+            "unknown": "не знаю"
+          },
+          "required": false,
+          "ask": "now"
+        },
+        "walls_evenness": {
+          "label": "Стены",
+          "type": "enum",
+          "values": [
+            "even",
+            "uneven",
+            "unknown"
+          ],
+          "value_labels": {
+            "even": "ровные",
+            "uneven": "неровные",
+            "unknown": "не знаю"
+          },
+          "required": false,
+          "ask": "measure"
+        },
+        "floor_evenness": {
+          "label": "Пол",
+          "type": "enum",
+          "values": [
+            "even",
+            "uneven",
+            "unknown"
+          ],
+          "value_labels": {
+            "even": "ровный",
+            "uneven": "неровный",
+            "unknown": "не знаю"
+          },
+          "required": false,
+          "ask": "measure"
+        },
+        "note": {
+          "label": "Монтаж: заметки",
+          "type": "string",
+          "required": false,
+          "ask": "now"
         }
       }
     },
