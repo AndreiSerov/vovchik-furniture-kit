@@ -48,28 +48,47 @@ def edit(home, name, old, new):
     path.write_text(text.replace(old, new), encoding="utf-8")
 
 
-def test_upper_offset_is_upper_depth_plus_facade_thickness(home):
-    # мок: верхний.глубина 320 + фасад МДФ 19 = 339; 661 + 339 = 1000
-    assert row_sums(home, corner_walls(661)) == []
-    [f] = row_sums(home, corner_walls(660))
+def test_upper_offset_is_corner_depth_plus_body_thickness(home):
+    # мок: верхний.глубина 320 + ЛДСП корпуса 16 = 336; 664 + 336 = 1000 (решение мастера после ревью)
+    assert row_sums(home, corner_walls(664)) == []
+    [f] = row_sums(home, corner_walls(663))
     assert (f.subject, f.value, f.limit) == ("Б", 999, 1000)
 
 
 def test_upper_offset_follows_upper_depth_of_workshop(home):
     edit(home, "construction.yaml", "глубина: 320", "глубина: 350")
-    assert row_sums(home, corner_walls(631)) == []  # 350 + 19 = 369
-    [f] = row_sums(home, corner_walls(661))
+    assert row_sums(home, corner_walls(634)) == []  # 350 + 16 = 366
+    [f] = row_sums(home, corner_walls(664))
     assert f.value == 1030
 
 
-def test_upper_offset_follows_facade_thickness_of_the_corner(home):
+def test_upper_offset_follows_own_depth_of_the_corner(home):
+    assert row_sums(home, corner_walls(634, {"depth": 350})) == []  # 350 + 16 = 366
+    [f] = row_sums(home, corner_walls(664, {"depth": 350}))  # от 336 — расхождение
+    assert (f.subject, f.value) == ("Б", 1030)
+
+
+def test_upper_offset_follows_body_thickness_of_the_corner(home):
     lines = (home / "workshop/materials.yaml").read_text(encoding="utf-8").splitlines()
-    line = next(ln for ln in lines if "id: mdf_enamel_matt" in ln)
-    thick = line.replace("mdf_enamel_matt", "mdf_22").replace("толщина: 19", "толщина: 22")
+    line = next(ln for ln in lines if "id: ldsp_16_white" in ln)
+    thick = line.replace("ldsp_16_white", "ldsp_18_white").replace("толщина: 16", "толщина: 18")
     edit(home, "materials.yaml", line, line + "\n" + thick)
-    walls = corner_walls(658, {"materials": {"facades": "mdf_22"}})
-    assert row_sums(home, walls) == []  # 320 + 22 = 342; 658 + 342 = 1000
-    assert row_sums(home, corner_walls(658)) != []  # фасад обычной толщины — 339, а не 342
+    walls = corner_walls(662, {"materials": {"body": "ldsp_18_white"}})
+    assert row_sums(home, walls) == []  # материал корпуса 18 → 336 + 2 = 338; 662 + 338 = 1000
+    assert row_sums(home, corner_walls(664)) == []  # обычный корпус — 336
+
+
+def test_corner_facade_does_not_change_the_offset(home):
+    walls = corner_walls(664, {"materials": {"facades": "nope"}})
+    result = api.check_project(write(home, walls), home)
+    assert [f for f in result.findings if f.code == "row_sum"] == []
+
+
+def test_corner_body_unknown_is_module_build_and_row_is_not_summed(home):
+    walls = corner_walls(661, {"materials": {"body": "nope"}})
+    result = api.check_project(write(home, walls), home)
+    assert ("module_build", "В1") in {(f.code, f.subject) for f in result.errors}
+    assert [f for f in result.findings if f.code == "row_sum" and f.subject == "Б"] == []
 
 
 def test_lower_offset_is_unchanged(home):
@@ -101,12 +120,13 @@ def test_shipped_workshop_has_no_removed_keys():
     assert "глубина_верхнего" not in text and "смещение_верхнего" not in text
 
 
-def test_petrov_wall_b_upper_row_ends_with_gap_and_sums(home):
+def test_petrov_wall_b_upper_row_starts_with_gap_after_corner_and_sums(home):
     project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
     wall_b = next(w for w in project["walls"] if w["label"] == "Б")
     upper = next(r for r in wall_b["rows"] if r["kind"] == "upper")
-    assert upper["modules"][-1].get("gap") is True
-    assert upper["modules"][-1]["width"] == 261  # 1800 − 450 − 750 − 339
+    assert [m["label"] for m in upper["modules"]] == ["ПМ1", "В5", "В6"]  # В5 над мойкой Н5, В6 над Н6
+    assert upper["modules"][0].get("gap") is True
+    assert upper["modules"][0]["width"] == 264  # 1800 − 450 − 750 − 336
     api.brief_save("2026-047-petrov", FIXTURES / "petrov_brief.json", home)
     result = api.check_project(FIXTURES / "petrov_project.json", home)
     assert [f.message for f in result.errors] == []
@@ -129,4 +149,13 @@ def test_docs_describe_the_new_rule():
     assert "реально 350–400" in mocks and "глубина_верхнего" not in mocks
     topic = next(ln for ln in decisions.splitlines() if ln.startswith("- **Угловые модули:**"))
     assert "Смещение обоих рядов 600" not in topic and "глубиной 600 мм" not in topic
-    assert "глубина верхних" in topic and "толщина фасада" in topic
+    assert "глубина углового" in topic and "толщина материала" in topic and "корпуса" in topic
+
+
+def test_petrov_gap_is_right_after_the_corner_in_wall_b_upper_row(home):
+    api.brief_save("2026-047-petrov", FIXTURES / "petrov_brief.json", home)
+    result = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    assert [(g.label, g.wall, g.row, g.width) for g in result.gaps] == [("ПМ1", "Б", "upper", 264)]
+    quote = api.quote_from_project(FIXTURES / "petrov_project.json", 14, home)
+    labels = [m.label for m in quote.modules]
+    assert labels[labels.index("Н6") :] == ["Н6", "ПМ1", "В5", "В6"]

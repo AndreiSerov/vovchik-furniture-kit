@@ -104,6 +104,11 @@
           "kind": "upper",
           "modules": [
             {
+              "label": "ПМ1",
+              "gap": true,
+              "width": 264
+            },
+            {
               "label": "В5",
               "template": "wall_dryer",
               "width": 750,
@@ -116,11 +121,6 @@
               "template": "wall_door",
               "width": 450,
               "shelves": 1
-            },
-            {
-              "label": "ПМ1",
-              "gap": true,
-              "width": 261
             }
           ]
         }

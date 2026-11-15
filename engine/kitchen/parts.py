@@ -1225,15 +1225,13 @@ def resolve_materials(module: ModuleSpec, row: Row, materials: ProjectMaterials)
 
 
 def upper_corner_offset(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws: Workshop) -> int:
-    """Смещение верхнего ряда соседней стены от верхнего углового модуля (решение мастера, тикет 50):
-    глубина верхних плюс толщина фасада углового, без зазора. Одно правило для суммы ряда и раскладки."""
-    facade = _material(
-        ws.materials.facades,
-        resolve_materials(module, row, materials).facades_upper,
-        "Материал фасадов",
-        "фасады",
+    """Смещение верхнего ряда соседней стены от верхнего углового модуля (решение мастера 2026-11-15 после
+    ревью тикета 50): глубина углового модуля (своя `depth`, иначе `верхний.глубина`) плюс толщина материала
+    корпуса углового, без зазора. Её зовёт сумма ряда (`checks`); раскладка рядов смещения не считает."""
+    body = _material(
+        ws.materials.sheets, resolve_materials(module, row, materials).body, "Материал корпуса", "листовые"
     )
-    return ws.construction.upper.depth + _required_thickness(facade, "смещения верхнего ряда")
+    return module_dims(module, row.kind, ws).depth + _required_thickness(body, "смещения верхнего ряда")
 
 
 def facade_color(module: ModuleSpec, row: Row, materials: ProjectMaterials) -> str:
