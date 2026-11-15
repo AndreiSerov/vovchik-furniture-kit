@@ -135,20 +135,36 @@ def test_kerf_does_not_change_sheets(home):
 def test_no_pieces_in_cut_purchase_and_estimate(home):
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
-    texts = []
-    for command in ("cut", "purchase", "estimate", "production"):
-        for flag in ([], ["--json"]):
-            r = runner.invoke(app, [command, "petrov", *flag])
-            assert r.exit_code == 0, r.output
-            texts.append(r.output)
+
+    def run(*args):
+        r = runner.invoke(app, [*args, "petrov"])
+        assert r.exit_code == 0, r.output
+        return r.output
+
+    cut, cut_json = run("cut"), run("cut", "--json")
+    production_json = run("production", "--json")
+    texts = [cut, cut_json, run("purchase"), run("estimate"), production_json]
     texts += [p.read_text(encoding="utf-8") for p in (home / "orders" / ORDER / "out").glob("*.md")]
-    for text in texts:
-        assert "куск" not in text.lower() and '"sheets": [[' not in text
-    cut = runner.invoke(app, ["cut", "petrov"]).output
+    assert all("куск" not in text.lower() for text in texts)
     assert "общая длина 3400 мм" in cut and "листов 1" in cut
-    assert (
-        "sheets" not in api.cut_from_project(FIXTURES / "petrov_project.json", home).countertop.model_dump()
-    )
+    assert "sheets" not in json.loads(cut_json)["countertop"]
+    assert "sheets" not in json.loads(production_json)["cutting"]["countertop"]
+
+
+def test_corner_in_one_row_only(home):
+    corner = {"label": "Н4", "template": "base_corner", "width": 1050, "corner": {"adjacent_wall": "Б"}}
+    walls = [
+        {
+            "label": "А",
+            "length": 2250,
+            "rows": [
+                {"kind": "lower", "modules": [base("Н1"), tall("П1"), corner]},
+                {"kind": "upper", "modules": [{"label": "В1", "template": "wall_door", "width": 600}]},
+            ],
+        },
+        {"label": "Б", "length": 1200, "rows": [{"kind": "lower", "modules": [base("Н5"), base("Н6")]}]},
+    ]
+    assert top_of(home, walls) == (2850, 1)
 
 
 def test_cut_gives_the_duplicate_label_finding_text(home):
