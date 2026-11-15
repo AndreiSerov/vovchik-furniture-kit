@@ -491,3 +491,14 @@ def test_long_item_wraps_under_the_text_not_under_the_box(home):
     lines = api.trip_layout(result.model_copy(update={"sections": sections}))[0].lines
     start = next(i for i, l in enumerate(lines) if l.text.startswith("☐ очень"))
     assert lines[start + 1].x > lines[start].x and not lines[start + 1].text.startswith("☐")
+
+
+def test_long_item_stays_inside_the_right_margin(home):
+    petrov(home)
+    result = api.trip_from_order(ORDER, home)
+    first = result.sections[0]
+    long = first.items[0].model_copy(update={"text": "очень длинная строка " * 20})
+    sections = [first.model_copy(update={"items": [long]}), *result.sections[1:]]
+    for page in api.trip_layout(result.model_copy(update={"sections": sections})):
+        for line in page.lines:
+            assert line.x + line.width <= 200 * MM + 1e-6, line.text
