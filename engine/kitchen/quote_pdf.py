@@ -12,9 +12,9 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph
 
 from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area
-from kitchen.quote import QuoteBody
+from kitchen.quote import QuoteBody, money, percent, plural
 
-__all__ = ["money", "write_quote"]
+__all__ = ["write_quote"]
 
 _BODY = ParagraphStyle("quote", fontName=FONT, fontSize=10, leading=13, spaceAfter=2)
 _BOLD = ParagraphStyle("quote-bold", parent=_BODY, fontName=FONT_BOLD)
@@ -26,13 +26,9 @@ _HEADING = ParagraphStyle(
 )
 
 
-def money(value: int) -> str:
-    """222000 -> «222 000 ₽»."""
-    return f"{value:,}".replace(",", " ") + " ₽"
-
-
-def _percent(share: float) -> str:
-    return f"{share * 100:.4g}%"
+def _countertop(value: str) -> str:
+    """«Столешница: Столешница Egger…» — слово не повторяется, если название уже с него начинается."""
+    return value if value.lower().startswith("столешниц") else f"Столешница: {value}"
 
 
 def _blocks(quote: QuoteBody, order: str) -> list[tuple[ParagraphStyle, str]]:
@@ -45,16 +41,25 @@ def _blocks(quote: QuoteBody, order: str) -> list[tuple[ParagraphStyle, str]]:
         (_BODY, f"{master.phone}, {master.city}"),
         (_HEADING, "Состав кухни"),
         *((_BODY, f"{m.label} — {m.text}") for m in quote.modules),
-        (_BODY, f"Корпус: {quote.body}"),
-        (_BODY, f"Фасады нижние: {quote.facades_lower}"),
-        (_BODY, f"Фасады верхние: {quote.facades_upper}"),
-        *([(_BODY, f"Столешница: {quote.countertop}")] if quote.countertop else []),
+        *(
+            (_BODY, f"{title}: {value}")
+            for title, value in (
+                ("Корпус", quote.body),
+                ("Фасады нижние", quote.facades_lower),
+                ("Фасады верхние", quote.facades_upper),
+            )
+            if value
+        ),
+        *([(_BODY, _countertop(quote.countertop))] if quote.countertop else []),
         (_HEADING, "Стоимость и сроки"),
         (_BOLD, f"Итого: {money(quote.price)}"),
-        (_BODY, f"Предоплата ({_percent(quote.prepayment_share)}): {money(quote.prepayment)}"),
+        (_BODY, f"Предоплата ({percent(quote.prepayment_share)}): {money(quote.prepayment)}"),
         (_BODY, f"Остаток: {money(quote.balance)}"),
-        (_BODY, f"Срок изготовления и монтажа: {quote.days} рабочих дней"),
-        (_BODY, f"Предложение действует {master.offer_days} дней"),
+        (
+            _BODY,
+            f"Срок изготовления и монтажа: {plural(quote.days, 'рабочий день', 'рабочих дня', 'рабочих дней')}",
+        ),
+        (_BODY, f"Предложение действует {plural(master.offer_days, 'день', 'дня', 'дней')}"),
     ]
     if quote.economy:
         e = quote.economy
@@ -63,7 +68,17 @@ def _blocks(quote: QuoteBody, order: str) -> list[tuple[ParagraphStyle, str]]:
             (_BODY, f"Цена как в проекте: {money(e.price_as_is)}"),
             (_BOLD, f"Цена «экономии»: {money(e.price)}"),
             (_BODY, f"Разница: {money(e.saving)}"),
-            *((_BODY, f"{r.client_text} (модули {', '.join(r.modules)})") for r in e.replacements),
+            *(
+                (
+                    _BODY,
+                    (
+                        f"{r.client_text.rstrip('.')} "
+                        f"({'модуль' if len(r.modules) == 1 else 'модули'} {', '.join(r.modules)})."
+                    ),
+                )
+                for r in e.replacements
+            ),
+            *([] if e.replacements else [(_BODY, "Подходящих замен нет: цена не меняется.")]),
         ]
     return blocks
 

@@ -4,6 +4,7 @@ import copy
 import json
 import re
 import shutil
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ PETROV = FIXTURES / "petrov_project.json"
 BRIEF = FIXTURES / "petrov_brief.json"
 ORDER = "2026-047-petrov"
 SMALL_ORDER = "2026-051-sidorov"
+SMALL_PRICE = 96000  # цена малого проекта на мок-мастерской (тест сверяет её со сметой)
 runner = CliRunner()
 
 # Малый проект: ящики, мойка с ведром, верхний подъёмник. Метки и ширины заданы вручную.
@@ -135,17 +137,17 @@ def test_total_equals_estimate_price_and_prepayment_follows_formula(petrov):
 def test_prepayment_override_changes_both_figures(tmp_path):
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
     edit(tmp_path, "pricing.yaml", "предоплата: 0.5", "предоплата: 0.3")
-    quote = api.quote_from_project(PETROV, 35, tmp_path)
-    assert quote.price == 222000
-    assert quote.prepayment == 66600 and quote.balance == 155400
+    quote = api.quote_from_project(write_project(tmp_path, SMALL), 35, tmp_path)
+    assert quote.price == SMALL_PRICE
+    assert quote.prepayment == SMALL_PRICE * 3 // 10 and quote.balance == SMALL_PRICE - SMALL_PRICE * 3 // 10
 
 
 def test_prepayment_is_whole_rubles_and_balance_is_the_rest(tmp_path):
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
     edit(tmp_path, "pricing.yaml", "предоплата: 0.5", "предоплата: 0.3333")
-    quote = api.quote_from_project(PETROV, 35, tmp_path)
-    assert quote.prepayment == 73993  # 222000 × 0.3333 = 73992.6, до рубля вверх от половины
-    assert quote.balance == 222000 - 73993
+    quote = api.quote_from_project(write_project(tmp_path, SMALL), 35, tmp_path)
+    expected = int(Decimal(SMALL_PRICE) * Decimal("0.3333") + Decimal("0.5"))  # до рубля, от половины вверх
+    assert quote.prepayment == expected and quote.balance == SMALL_PRICE - expected
 
 
 def test_prepayment_above_one_is_a_load_error(home):
@@ -157,7 +159,7 @@ def test_prepayment_above_one_is_a_load_error(home):
 # --- срок --------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("days", [None, 0, -1, 2.5, True, "35"])
+@pytest.mark.parametrize("days", [None, 0, -1, 366, 2.5, True, "35"])
 def test_bad_days_is_a_russian_error(home, days):
     with pytest.raises(InputError) as e:
         api.quote_from_project(PETROV, days, home)
@@ -165,7 +167,18 @@ def test_bad_days_is_a_russian_error(home, days):
 
 
 @pytest.mark.parametrize(
-    "args", [[], ["--days", "0"], ["--days", "-1"], ["--days", "2.5"], ["--days", "abc"]]
+    "args",
+    [
+        [],
+        ["--days"],
+        ["--days="],
+        ["--days=", "35"],
+        ["--days", "0"],
+        ["--days", "-1"],
+        ["--days", "2.5"],
+        ["--days", "abc"],
+        ["--days", "366"],
+    ],
 )
 def test_cli_bad_days_is_a_russian_error_with_exit_1(home, args):
     result = runner.invoke(app, ["quote", "--project", str(PETROV), *args])
@@ -187,7 +200,7 @@ def test_pdf_has_total_prepayment_balance_days_and_master_details(petrov):
     quote, _, text = petrov
     for expected in (
         f"Итого: {money(quote.price)} ₽",
-        f"Предоплата (50%): {money(quote.prepayment)} ₽",
+        f"Предоплата (50 %): {money(quote.prepayment)} ₽",
         f"Остаток: {money(quote.balance)} ₽",
         "Мастеров Мастер Мастерович",
         "+7 (000) 000-00-00",
@@ -254,7 +267,7 @@ def test_composition_words_for_petrov(petrov):
     quote, _, text = petrov
     by_label = {m.label: m.text for m in quote.modules}
     assert by_label["Н1"].startswith("нижний модуль с тремя ящиками, 600 мм")
-    assert "духовка" in by_label["П1"] and "СВЧ" in by_label["П1"]
+    assert "духовой шкаф" in by_label["П1"] and "микроволновка" in by_label["П1"]
     assert "Н1 — нижний модуль с тремя ящиками, 600 мм" in text
     assert "ЛДСП Egger 16 мм, белый W1000 ST9" in text  # корпус
     assert "RAL 7044" in text and "RAL 9003" in text  # цвета фасадов
@@ -267,15 +280,16 @@ def test_no_hardware_brands_in_composition(petrov):
         assert brand.lower() not in text.lower(), brand
 
 
-def test_small_project_composition_is_exact(tmp_path):
+def test_small_project_composition_is_exact_and_lift_front_is_not_a_door(tmp_path):
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
     quote = api.quote_from_project(write_project(tmp_path, SMALL), 20, tmp_path)
     assert [(m.label, m.text) for m in quote.modules] == [
         ("Н1", "нижний модуль с тремя ящиками, 600 мм"),
-        ("Н2", "модуль под мойку с двумя дверями, 750 мм; техника: мойка"),
-        ("В1", "верхний модуль-подъёмник с одной дверью и одной полкой, 600 мм"),
+        ("Н2", "модуль под мойку с двумя дверями и выдвижным ведром, 750 мм; техника: мойка"),
+        ("В1", "верхний модуль с одной полкой и подъёмным фасадом, 600 мм"),
         ("В2", "верхний модуль с двумя дверями и одной полкой, 750 мм"),
     ]
+    assert "дверью" not in {m.label: m.text for m in quote.modules}["В1"]
 
 
 # --- мок ---------------------------------------------------------------------
@@ -323,6 +337,7 @@ def test_master_file_alone_keeps_the_banner(home):
 
 def test_economy_has_both_prices_and_the_same_saving_as_estimate(small_economy):
     _, quote, estimate, _, _ = small_economy
+    assert estimate.price == SMALL_PRICE
     assert estimate.economy and estimate.economy.replacements, "на малом проекте должны быть замены"
     assert quote.price == estimate.price
     assert quote.economy.price_as_is == estimate.economy.price_as_is == estimate.price
@@ -341,7 +356,7 @@ def test_economy_pdf_shows_prices_texts_and_no_line_sums(small_economy):
     assert f"Цена «экономии»: {money(quote.economy.price)} ₽" in text
     assert f"Разница: {money(quote.economy.saving)} ₽" in text
     for line in estimate.economy.replacements:
-        assert line.client_text in text
+        assert line.client_text.rstrip(".") in text
         assert line.price not in numbers_in(text) - {quote.economy.price, quote.price}
         if line.saving != quote.economy.saving:
             assert line.saving not in numbers_in(text) - {quote.economy.saving}
@@ -448,3 +463,177 @@ def test_master_yaml_bad_values_are_russian_load_errors(home, old, new, key):
     errors = api.check_workshop(home).errors
     assert any("master.yaml" in e and key in e for e in errors), errors
     assert not any("Input should" in e or "validation error" in e for e in errors), errors
+
+
+# --- ревью: склонение, проценты, состав словами, материалы по модулям ------------------------------
+
+
+def small_quote(tmp_path, project=SMALL, days=20, **edits):
+    shutil.copytree(REPO / "workshop", tmp_path / "workshop")
+    for name, (old, new) in edits.items():
+        edit(tmp_path, name, old, new)
+    return api.quote_from_project(write_project(tmp_path, project), days, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("count", "words"),
+    [
+        (1, "1 рабочий день"),
+        (2, "2 рабочих дня"),
+        (5, "5 рабочих дней"),
+        (11, "11 рабочих дней"),
+        (21, "21 рабочий день"),
+        (22, "22 рабочих дня"),
+        (112, "112 рабочих дней"),
+    ],
+)
+def test_days_are_declined(count, words):
+    assert api.plural(count, "рабочий день", "рабочих дня", "рабочих дней") == words
+
+
+def test_days_and_offer_days_are_declined_in_pdf(home):
+    edit(home, "master.yaml", "срок_действия_предложения_дней: 14", "срок_действия_предложения_дней: 21")
+    import_order(home)
+    quote = api.quote_and_save(SMALL_ORDER, 21, home)
+    text = pdf_text(quote.outputs[0].file)
+    assert "Срок изготовления и монтажа: 21 рабочий день" in text
+    assert "Предложение действует 21 день" in text
+
+
+@pytest.mark.parametrize(
+    ("share", "words"), [(0.5, "50 %"), (0.3333, "33,33 %"), (0.3, "30 %"), (1, "100 %"), (0, "0 %")]
+)
+def test_prepayment_percent_is_plain_with_comma(share, words):
+    assert api.percent(share) == words
+
+
+def test_master_details_come_from_master_yaml(home):
+    edit(home, "master.yaml", "Мастеров Мастер Мастерович", "Другой Мастер Иванович")
+    edit(home, "master.yaml", "+7 (000) 000-00-00", "+7 (111) 111-11-11")
+    edit(home, "master.yaml", "Город Н", "Город Эн")
+    edit(home, "master.yaml", "самозанятый", "ИП")
+    edit(home, "master.yaml", "000000000000", "123456789012")
+    edit(home, "master.yaml", "срок_действия_предложения_дней: 14", "срок_действия_предложения_дней: 30")
+    import_order(home)
+    text = pdf_text(api.quote_and_save(SMALL_ORDER, 20, home).outputs[0].file)
+    for expected in (
+        "Другой Мастер Иванович",
+        "+7 (111) 111-11-11",
+        "Город Эн",
+        "ИП, ИНН 123456789012",
+        "Предложение действует 30 дней",
+    ):
+        assert expected in text, expected
+    assert "Мастеров" not in text
+
+
+@pytest.mark.parametrize("key", ["имя", "телефон", "город"])
+def test_master_text_of_spaces_is_a_load_error(home, key):
+    path = home / "workshop" / "master.yaml"
+    lines = [
+        f'{key}: "   "' if line.startswith(f"{key}:") else line
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert any("master.yaml" in e and key in e for e in api.check_workshop(home).errors)
+
+
+def test_petrov_lines_name_carousel_bucket_dryer_and_lift_in_words(petrov):
+    quote, _, _ = petrov
+    by_label = {m.label: m.text for m in quote.modules}
+    assert by_label["Н4"] == "нижний угловой модуль с одной дверью и поворотной каруселью, 1050 мм"
+    assert by_label["Н5"] == "модуль под мойку с двумя дверями и выдвижным ведром, 750 мм; техника: мойка"
+    assert by_label["В1"] == "модуль над вытяжкой с подъёмным фасадом, 600 мм; техника: вытяжка"
+    assert by_label["В5"] == "верхний модуль с подъёмным фасадом и сушкой для посуды, 750 мм"
+    assert by_label["П1"].endswith("техника: духовой шкаф, микроволновка")
+    assert by_label["Н6"].endswith("техника: посудомойка")
+
+
+def test_client_names_live_in_hardware_yaml(tmp_path):
+    changed = small_quote(
+        tmp_path,
+        petrov_like := copy.deepcopy(SMALL),
+        **{"hardware.yaml": ('для_клиента: "выдвижным ведром"', 'для_клиента: "ведром-вертушкой"')},
+    )
+    assert petrov_like
+    assert "с двумя дверями и ведром-вертушкой" in {m.label: m.text for m in changed.modules}["Н2"]
+
+
+def with_materials(**overrides):
+    project = copy.deepcopy(SMALL)
+    project["materials"] = {
+        **project["materials"],
+        "facades_lower_color": "RAL 7044",
+        "facades_upper_color": "RAL 9003",
+        "countertop": "top_38_marble",
+    }
+    for path, value in overrides.items():
+        target = project["walls"][0]["rows"][{"row_lower": 0, "row_upper": 1}[path.split(":")[0]]]
+        if ":" in path and path.split(":")[1] != "row":
+            target = target["modules"][int(path.split(":")[1])]
+        target["materials"] = value
+    return project
+
+
+def test_row_facade_colour_override_reaches_quote(tmp_path):
+    quote = small_quote(tmp_path, with_materials(**{"row_lower:row": {"facade_color": "RAL 3020"}}))
+    assert quote.facades_lower == "МДФ 19 мм эмаль матовая, RAL 3020"
+    assert quote.facades_upper == "МДФ 19 мм эмаль матовая, RAL 9003"
+
+
+def test_module_override_lists_all_values_with_labels(tmp_path):
+    quote = small_quote(tmp_path, with_materials(**{"row_lower:1": {"facade_color": "RAL 3020"}}))
+    assert (
+        quote.facades_lower
+        == "МДФ 19 мм эмаль матовая, RAL 7044 (Н1), МДФ 19 мм эмаль матовая, RAL 3020 (Н2)"
+    )
+
+
+def test_body_override_lists_values_with_labels_and_pdf_prints_them(home):
+    import_order(home, with_materials(**{"row_lower:0": {"body": "ldsp_16_oak"}}))
+    quote = api.quote_and_save(SMALL_ORDER, 20, home)
+    assert quote.body.startswith("ЛДСП Egger 16 мм, дуб Галифакс H1180 (Н1), ЛДСП Egger 16 мм, белый")
+    assert "Корпус: " + quote.body in pdf_text(quote.outputs[0].file)
+
+
+def test_label_runs_are_joined_into_a_range(tmp_path):
+    project = with_materials()
+    project["walls"][0]["rows"] = project["walls"][0]["rows"][:1]
+    project["walls"][0]["length"] = 1800
+    project["appliances"] = []
+    project["walls"][0]["rows"][0]["modules"] = [
+        {"label": f"Н{n}", "template": "base_door", "width": 450, "shelves": 1} for n in range(1, 5)
+    ]
+    project["walls"][0]["rows"][0]["modules"][3]["materials"] = {"body": "ldsp_16_oak"}
+    white, oak = "ЛДСП Egger 16 мм, белый W1000 ST9", "ЛДСП Egger 16 мм, дуб Галифакс H1180"
+    assert small_quote(tmp_path, project).body == f"{white} (Н1–Н3), {oak} (Н4)"
+
+
+def test_group_without_modules_is_not_printed(home):
+    project = with_materials()
+    project["walls"][0]["rows"] = project["walls"][0]["rows"][:1]
+    import_order(home, project)
+    quote = api.quote_and_save(SMALL_ORDER, 20, home)
+    text = pdf_text(quote.outputs[0].file)
+    assert quote.facades_upper is None and "Фасады верхние" not in text and "Фасады нижние" in text
+
+
+def test_countertop_word_is_not_repeated(petrov):
+    _, _, text = petrov
+    assert "Столешница Egger 38 мм, мрамор Леванто" in text and "Столешница: Столешница" not in text
+
+
+def test_economy_without_replacements_says_so(tmp_path):
+    project = copy.deepcopy(BASE_DOOR_PROJECT)
+    project["order"] = SMALL_ORDER
+    shutil.copytree(REPO / "workshop", tmp_path / "workshop")
+    quote = api.quote_from_project(write_project(tmp_path, project), 20, tmp_path, economy=True)
+    assert quote.economy.replacements == [] and quote.economy.price == quote.price
+
+
+def test_replacement_line_ends_with_modules_in_brackets_and_a_full_stop(small_economy):
+    _, quote, _, _, _ = small_economy
+    text = pdf_text(quote.outputs[0].file)
+    for r in quote.economy.replacements:
+        word = "модуль" if len(r.modules) == 1 else "модули"
+        assert f"({word} {', '.join(r.modules)})." in text

@@ -30,12 +30,13 @@ from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Work
 from kitchen.parts import EdgeTotals, ModuleParts, Part, compute_parts
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
-from kitchen.quote import QuoteBody, build_quote, check_days
+from kitchen.quote import DAYS_ERROR, QuoteBody, build_quote, check_days, money, parse_days, percent, plural
 from kitchen.quote_pdf import write_quote
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
 __all__ = [
+    "DAYS_ERROR",
     "OUTPUT_RECOMPUTE",
     "BriefSaveResult",
     "BriefShowResult",
@@ -90,10 +91,14 @@ __all__ = [
     "list_outputs",
     "load_workshop",
     "log_add",
+    "money",
     "order_new",
     "order_show",
+    "parse_days",
     "parts_from_order",
     "parts_from_project",
+    "percent",
+    "plural",
     "production_and_save",
     "purchase_and_save",
     "purchase_from_order",
@@ -1639,7 +1644,7 @@ def _quote(
     days: int,
     economy: bool,
 ) -> QuoteResult:
-    days = check_days(days)  # срок проверяется до расчёта: без него КП не выдать
+    check_days(days)  # единственная проверка срока: до расчёта, без срока КП не выдать
     workshop = load_workshop(home)
     estimate, parts = _estimate_run(project, home, source, brief, warnings, workshop, economy)
     body = build_quote(
@@ -1656,7 +1661,6 @@ def _quote(
 def quote_from_order(order: str, days: int, home: Path | None = None, economy: bool = False) -> QuoteResult:
     """КП текущей версии проекта заказа. `days` — срок изготовления и монтажа в рабочих днях, вписывает мастер."""
     home = home or resolve_home()
-    check_days(days)
     project, source, brief, warnings = _order_project(order, home)
     return _quote(project, home, source, brief, warnings, days, economy)
 
@@ -1664,7 +1668,6 @@ def quote_from_order(order: str, days: int, home: Path | None = None, economy: b
 def quote_from_project(path: Path, days: int, home: Path | None = None, economy: bool = False) -> QuoteResult:
     """`kitchen quote --project <файл>`: КП проекта из файла, без файлов выводов и записи в БД."""
     home = home or resolve_home()
-    check_days(days)
     project, source = _project_file(path)
     return _quote(project, home, source, _brief_of_project(home, project.order), [], days, economy)
 

@@ -43,6 +43,7 @@ __all__ = [
     "drawer_depth_shortfall",
     "drawer_parts",
     "facade_color",
+    "lower_facades",
     "module_dims",
     "niche_item",
     "resolve_materials",
@@ -1014,9 +1015,9 @@ TEMPLATES = {
         title="верхний угловой модуль",
     ),
     "wall_door": Template(_plain(build_wall_door), "upper", title="верхний модуль"),
-    "wall_lift": Template(_plain(build_wall_lift), "upper", title="верхний модуль-подъёмник"),
+    "wall_lift": Template(_plain(build_wall_lift), "upper", title="верхний модуль"),
     "wall_hood": Template(build_hood_of_project, "upper", appliances=("hood",), title="модуль над вытяжкой"),
-    "wall_dryer": Template(_plain(build_wall_dryer), "upper", title="верхний модуль-сушка"),
+    "wall_dryer": Template(_plain(build_wall_dryer), "upper", title="верхний модуль"),
     "base_sink": Template(_plain(build_base_sink), "lower", appliances=("sink",), title="модуль под мойку"),
     "base_bottle": Template(_plain(build_base_bottle), "lower", title="нижний модуль-бутылочница"),
     "base_drawers": Template(_plain(build_base_drawers), "lower", drawers=True, title="нижний модуль"),
@@ -1033,10 +1034,10 @@ TEMPLATES = {
 APPLIANCE_NAMES = {
     "sink": "мойка",
     "hob": "варочная панель",
-    "cooker": "плита",
-    "oven": "духовка",
-    "microwave": "СВЧ",
-    "dishwasher": "посудомоечная машина",
+    "cooker": "отдельностоящая плита",
+    "oven": "духовой шкаф",
+    "microwave": "микроволновка",
+    "dishwasher": "посудомойка",
     "washing_machine": "стиральная машина",
     "coffee_machine": "кофемашина",
     "wine_cooler": "винный шкаф",
@@ -1096,7 +1097,7 @@ class PartsComputation:
 NO_COLOR = "без цвета"
 
 
-def _lower_facades(module: ModuleSpec, row: Row) -> bool:
+def lower_facades(module: ModuleSpec, row: Row) -> bool:
     """Фасады модуля нижние: нижний ряд или шаблон, входящий в оба ряда (пенал)."""
     template = TEMPLATES.get(module.template)
     return row.kind == "lower" or (template is not None and template.both_rows)
@@ -1107,7 +1108,7 @@ def resolve_materials(module: ModuleSpec, row: Row, materials: ProjectMaterials)
     фасада относятся к верхним или нижним фасадам по ряду (пенал — нижние). Одно место для
     расчёта деталей, площади по цветам и закупки."""
     values = materials.model_dump()
-    lower = _lower_facades(module, row)
+    lower = lower_facades(module, row)
     keys = {
         "facades": "facades_lower" if lower else "facades_upper",
         "facade_color": "facades_lower_color" if lower else "facades_upper_color",
@@ -1122,7 +1123,7 @@ def resolve_materials(module: ModuleSpec, row: Row, materials: ProjectMaterials)
 def facade_color(module: ModuleSpec, row: Row, materials: ProjectMaterials) -> str:
     """Цвет фасадов модуля с учётом переопределений; без цвета — «без цвета»."""
     resolved = resolve_materials(module, row, materials)
-    lower = _lower_facades(module, row)
+    lower = lower_facades(module, row)
     return (resolved.facades_lower_color if lower else resolved.facades_upper_color) or NO_COLOR
 
 
