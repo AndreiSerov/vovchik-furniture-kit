@@ -1467,15 +1467,19 @@ class EstimateResult(Result):
     economy: EconomyVariant | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
+NO_SINK_WARNING = "в проекте нет мойки — врезка мойки не посчитана"
+
+
 def _estimate(project: Project, parts: PartsResult, cut: CutResult, workshop: Workshop) -> EstimateResult:
     purchase = _purchase(project, parts, cut, workshop)
     labor = build_labor(project, workshop, parts.modules, parts.hardware, parts.edges, cut.materials)
     pricing = build_pricing(workshop, purchase.total, labor.total)
+    no_sink = [] if any(a.type == "sink" for a in project.appliances) else [NO_SINK_WARNING]
     return EstimateResult(
         source=parts.source,
         materials_cost=purchase.total,
         labor=labor,
-        warnings=[*parts.warnings, *kerf_warnings(workshop.equipment.saw)],
+        warnings=[*parts.warnings, *no_sink, *kerf_warnings(workshop.equipment.saw)],
         mock=parts.mock,
         mock_files=parts.mock_files,
         mock_notice=MOCK_BANNER if parts.mock else None,

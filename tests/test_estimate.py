@@ -216,10 +216,10 @@ def quiet_pricing(home, rounding="вверх до 1000"):
 def test_price_formula_with_default_pricing(small):
     result = api.estimate_from_order(ORDER, small)
     materials = Decimal(str(result.materials_cost))
-    raw = materials * Decimal("1.13") + Decimal(2500) + Decimal("15796.06")
+    raw = materials * Decimal("1.13") + Decimal(2500) + Decimal(str(result.labor.total))
     expected = int((raw / 1000).to_integral_value(rounding=ROUND_CEILING)) * 1000
     assert result.price == expected
-    assert result.price_before_rounding == pytest.approx(float(raw), abs=0.02)
+    assert result.price_before_rounding == pytest.approx(float(raw), abs=0.01)
     assert result.consumables == pytest.approx(float(materials * Decimal("0.03")), abs=0.01)
     assert result.markup == pytest.approx(float(materials * Decimal("0.10")), abs=0.01)
     assert result.delivery == 2500
@@ -354,3 +354,64 @@ def test_estimate_from_project_file_matches_order_and_writes_nothing(small):
     assert result.labor == from_order.labor and result.price == from_order.price
     assert result.outputs == []
     assert not (small / "orders" / ORDER / "out").exists()
+
+
+NO_SINK_WARNING = "в проекте нет мойки — врезка мойки не посчитана"
+
+
+def test_project_without_sink_warns_and_cutout_is_zero(small):
+    data = json.loads((small / "small.json").read_text(encoding="utf-8"))
+    data["appliances"] = [a for a in data["appliances"] if a["type"] != "sink"]
+    path = small / "no-sink.json"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    result = api.estimate_from_project(path, small)
+    assert lines(result)["sink_cutout"].quantity == 0
+    assert NO_SINK_WARNING in result.warnings
+
+
+def test_project_with_sink_has_no_sink_warning(small):
+    assert NO_SINK_WARNING not in api.estimate_from_order(ORDER, small).warnings
+
+
+LABOR_NORMS = {
+    "распил_на_деталь": "cut",
+    "кромка_на_метр": "edge",
+    "присадка_на_деталь": "drill",
+    "сборка_корпуса": "case_assembly",
+    "сборка_доп_на_ящик": "drawer_assembly_extra",
+    "монтаж_на_модуль": "install",
+    "врезка_мойки": "sink_cutout",
+    "врезка_варочной": "hob_cutout",
+    "выезд": "site_visit",
+    "замер": "measuring",
+    "проектирование": "design",
+}
+
+
+def test_labor_norms_table_covers_the_whole_file(home):
+    text = (home / "workshop" / "labor.yaml").read_text(encoding="utf-8")
+    keys = set(re.findall(r"^  (\w+): ", text, re.MULTILINE))
+    assert keys == set(LABOR_NORMS)
+
+
+@pytest.mark.parametrize("key,operation", sorted(LABOR_NORMS.items()))
+def test_every_labor_norm_is_linked_to_its_operation(small, key, operation):
+    before = lines(api.estimate_from_order(ORDER, small))
+    text = (small / "workshop" / "labor.yaml").read_text(encoding="utf-8")
+    old = re.search(rf"^  {key}: (\S+)$", text, re.MULTILINE).group(0)
+    edit_workshop(small, "labor.yaml", old, f"  {key}: 7")
+    after = lines(api.estimate_from_order(ORDER, small))
+    assert after[operation].norm_min == 7
+    assert after[operation].minutes == pytest.approx(7 * after[operation].quantity)
+    assert {k: v for k, v in after.items() if k != operation} == {
+        k: v for k, v in before.items() if k != operation
+    }
+
+
+def test_sink_and_hob_cutout_norms_are_independent(small):
+    edit_workshop(small, "labor.yaml", "врезка_мойки: 60", "врезка_мойки: 30")
+    got = lines(api.estimate_from_order(ORDER, small))
+    assert got["sink_cutout"].minutes == 30 and got["hob_cutout"].minutes == 60
+    edit_workshop(small, "labor.yaml", "врезка_варочной: 60", "врезка_варочной: 90")
+    got = lines(api.estimate_from_order(ORDER, small))
+    assert got["sink_cutout"].minutes == 30 and got["hob_cutout"].minutes == 90
