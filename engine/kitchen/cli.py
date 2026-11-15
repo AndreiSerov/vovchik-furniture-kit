@@ -461,6 +461,8 @@ def _render_views(r: api.ViewsResult) -> str:
     ]
     if r.output:
         lines.append(f"Виды PDF: {r.output.file} (стен {r.walls}, страниц {r.pages})")
+        if r.output_html:
+            lines.append(f"3D: {r.output_html.file}")
     else:
         lines.append("Файл не записан (--project)")
     if r.warnings:
@@ -478,7 +480,7 @@ def three_d(
     ] = None,
     json: JsonOpt = False,
 ) -> None:
-    """Виды кухни: план сверху и вид на каждую стену спереди; для заказа также PDF."""
+    """Виды кухни: план сверху и вид на каждую стену спереди, 3D в HTML; для заказа также файлы PDF и HTML."""
     try:
         if (order is None) == (project is None):
             raise InputError("Укажите либо заказ (kitchen 3d petrov), либо файл: --project project.json.")

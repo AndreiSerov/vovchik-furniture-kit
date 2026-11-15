@@ -290,6 +290,7 @@ OutputKind = Literal[
     "assembly",
     "trip",
     "views",
+    "views_html",
 ]  # виды выводов; этапы 2-4 добавляют свои
 CUTTING: OutputKind = "cutting"
 EDGING: OutputKind = "edging"
@@ -303,6 +304,7 @@ DRILLING: OutputKind = "drilling"
 ASSEMBLY: OutputKind = "assembly"
 TRIP: OutputKind = "trip"
 VIEWS: OutputKind = "views"
+VIEWS_HTML: OutputKind = "views_html"
 
 
 class Recompute(NamedTuple):
@@ -330,6 +332,7 @@ OUTPUT_RECOMPUTE: dict[OutputKind, Recompute] = {
     ASSEMBLY: Recompute("сборочный лист", "assembly"),
     TRIP: Recompute("чек-лист выезда", "trip"),
     VIEWS: Recompute("виды кухни", "3d"),
+    VIEWS_HTML: Recompute("3D кухни (html)", "3d"),
 }
 
 
