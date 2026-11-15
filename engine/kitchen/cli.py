@@ -367,6 +367,44 @@ def drilling(
     emit(result, _render_drilling, json)
 
 
+def _render_assembly(r: api.AssemblyResult) -> str:
+    lines = ["Сборочный лист:", _render_source(r.source)]
+    for m in r.modules:
+        name = m.title.split(",")[0]  # «П1 — пенал»: метка и название шаблона без размеров
+        lines.append(
+            f"  {name}: деталей {len(m.parts)}, позиций фурнитуры {len(m.hardware)}, шагов {len(m.steps)}"
+        )
+    if r.output:
+        lines.append(f"Сборочный лист PDF: {r.output.file} (версия проекта {r.output.source_version})")
+    else:
+        lines.append("Файл не записан (--project)")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("assembly")
+def assembly(
+    order: Annotated[
+        str | None, typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project.")
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Сборочный лист: по модулям детали, фурнитура цеха и порядок сборки; для заказа также PDF."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError(
+                "Укажите либо заказ (kitchen assembly petrov), либо файл: --project project.json."
+            )
+        result = api.assembly_and_save(order) if order is not None else api.assembly_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_assembly, json)
+
+
 def _render_cut(r: api.CutResult) -> str:
     lines = [
         f"Раскрой проекта {r.order}:",
@@ -638,6 +676,10 @@ def _render_production(r: api.ProductionResult) -> str:
     for output in (r.cutting.output, r.edging.output, *r.purchase.outputs):
         if output:
             lines.append(f"Файл: {output.file} (версия проекта {output.source_version})")
+    if r.assembly.output:
+        lines.append(
+            f"Сборочный лист PDF: {r.assembly.output.file} (версия проекта {r.assembly.output.source_version})"
+        )
     if r.purchase.warnings:
         lines.append("Предупреждения: " + "; ".join(r.purchase.warnings))
     return "\n".join(lines)
@@ -645,7 +687,7 @@ def _render_production(r: api.ProductionResult) -> str:
 
 @app.command("production")
 def production(order: OrderArg, json: JsonOpt = False) -> None:
-    """Пересчитать раскрой, кромление и закупку текущей версии заказа."""
+    """Пересчитать раскрой, кромление, закупку и сборочный лист текущей версии заказа."""
     try:
         result = api.production_and_save(order)
     except KitchenError as e:

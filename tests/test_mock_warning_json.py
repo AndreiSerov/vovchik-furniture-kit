@@ -35,6 +35,7 @@ def test_api_result_has_no_warning_without_mock(home, base_door_project):
         ["quick-estimate", "--meters", "2.8"],
         ["parts", "--project", "{project}"],
         ["edges", "--project", "{project}"],
+        ["assembly", "--project", "{project}"],
     ],
     ids=lambda a: a[0],
 )
