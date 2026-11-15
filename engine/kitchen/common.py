@@ -17,7 +17,7 @@ from kitchen.models import Workshop
 from kitchen.parts import TEMPLATES
 from kitchen.project import Project
 
-__all__ = ["CommonItem", "CountertopCut", "compute_common", "plan_countertop"]
+__all__ = ["CommonItem", "CountertopCut", "compute_common", "is_tall", "plan_countertop", "row_layouts"]
 
 
 class CommonItem(BaseModel):
@@ -37,37 +37,63 @@ def _ceil(value: Decimal) -> int:
     return int(value.to_integral_value(rounding=ROUND_CEILING))
 
 
-def _is_tall(m) -> bool:
+def is_tall(m) -> bool:
+    """Модуль записан в одном ряду стены и занимает оба — свойство шаблона в реестре."""
     return TEMPLATES[m.template].both_rows if m.template in TEMPLATES else False
 
 
+def row_layouts(wall) -> list[list]:
+    """Модули каждого ряда стены по порядку вдоль стены, с пеналами из других рядов: пенал входит в оба ряда
+    (и в ряд со своим пеналом тоже). Единственное место, где решается, что стоит в ряду: сумма ряда
+    (`checks`), цоколь, шина и столешница берут модули отсюда. Место пенала — отступ от начала стены:
+    его ряд считает отступ по своим модулям и пеналам, уже попавшим в этот ряд, поэтому отступы находятся
+    повторными проходами, пока не перестанут меняться."""
+    at: dict[int, float] = {}  # id пенала -> отступ от начала стены
+    layouts: list[list] = []
+    for _ in range(len(wall.rows) * 4 + 2):
+        layouts, found = [], {}
+        for number, row in enumerate(wall.rows):
+            talls = sorted(
+                (
+                    (at[id(m)], m)
+                    for o, other in enumerate(wall.rows)
+                    if o != number
+                    for m in other.modules
+                    if is_tall(m) and id(m) in at
+                ),
+                key=lambda t: t[0],
+            )
+            unplaced = [
+                m
+                for o, other in enumerate(wall.rows)
+                if o != number
+                for m in other.modules
+                if is_tall(m) and id(m) not in at
+            ]
+            merged: list = []
+            x = 0.0
+            for m in row.modules:
+                while talls and talls[0][0] <= x:
+                    tall = talls.pop(0)[1]
+                    merged.append(tall)
+                    x += tall.width
+                if is_tall(m):
+                    found[id(m)] = x
+                merged.append(m)
+                x += m.width
+            merged += [t for _, t in talls] + unplaced
+            layouts.append(merged)
+        if found == at:
+            break
+        at = found
+    return layouts
+
+
 def _row_modules(wall, row) -> list:
-    """Модули ряда по порядку вдоль стены. В нижний ряд добавлены пеналы стены, описанные в других рядах
-    (даже если в нём есть свой): пенал входит в оба ряда. Место пенала — по его отступу от начала стены
-    в своём ряду."""
+    """Модули ряда для длин: нижний ряд — с пеналами из других рядов; верхний — свои."""
     if row.kind != "lower":
         return list(row.modules)
-    talls: list[tuple[float, object]] = []
-    for other in wall.rows:
-        if other is row:
-            continue
-        x = 0.0
-        for m in other.modules:
-            if _is_tall(m):
-                talls.append((x, m))
-            x += m.width
-    talls.sort(key=lambda t: t[0])
-    merged: list = []
-    x = 0.0
-    for m in row.modules:
-        while talls and talls[0][0] <= x:
-            tall = talls.pop(0)[1]
-            merged.append(tall)
-            x += tall.width
-        merged.append(m)
-        x += m.width
-    merged += [t for _, t in talls]
-    return merged
+    return row_layouts(wall)[next(i for i, r in enumerate(wall.rows) if r is row)]
 
 
 def _runs(project: Project, kinds: Iterable[str], with_tall: bool) -> list[tuple[str, list[int]]]:
@@ -79,13 +105,12 @@ def _runs(project: Project, kinds: Iterable[str], with_tall: bool) -> list[tuple
                 continue
             current: list[int] = []
             for m in _row_modules(wall, row):
-                tall = TEMPLATES[m.template].both_rows if m.template in TEMPLATES else False
-                if tall and not with_tall:
+                if is_tall(m) and not with_tall:
                     if current:
                         runs.append((wall.label, current))
                     current = []
                 else:
-                    current.append(round(m.width))
+                    current.append(int(m.width))  # целую ширину обеспечивает `module_dims`
             if current:
                 runs.append((wall.label, current))
     return runs

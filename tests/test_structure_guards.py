@@ -27,7 +27,7 @@ LEGACY_INTERNAL_IMPORTS = {
     "test_cut_pdf.py": {"kitchen.cutting", "kitchen.cutting_pdf", "kitchen.pdf"},
     "test_cut_pdf_dense.py": {"kitchen.cutting", "kitchen.cutting_pdf", "kitchen.pdf"},
     "test_cutting.py": {"kitchen.cutting", "kitchen.parts", "kitchen.project", "kitchen.workshop"},
-    "test_input_guards_project.py": {"kitchen.parts", "kitchen.project"},
+    "test_input_guards_project.py": {"kitchen.parts"},
     "test_orders_api.py": {"kitchen.store"},
     "test_pdf.py": {"kitchen.pdf"},
     "test_project_import_diff.py": {"kitchen.project"},

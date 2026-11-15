@@ -54,7 +54,7 @@ def test_duplicate_module_labels_break_part_ids(home, base_door_project):
     p.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(OrderError) as e:
         api.parts_from_project(p, home)
-    assert "не уникальна" in e.value.problems[0] and "Н1-бок-Л" in e.value.problems[0]
+    assert "Метка модуля «Н1» не уникальна" in e.value.problems[0]  # текст находки duplicate_label
 
 
 def test_base_door_rejected_in_upper_row(home, base_door_project):

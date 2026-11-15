@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from kitchen import formulas
 from kitchen.brief import BriefAppliance
 from kitchen.brief import appliances as brief_appliances
+from kitchen.common import row_layouts
 from kitchen.errors import KitchenError, WorkshopError
 from kitchen.models import SheetMaterial, Workshop
 from kitchen.parts import (
@@ -24,8 +25,10 @@ from kitchen.parts import (
     accepts,
     build_module,
     built_niche,
+    drawer_depth_shortfall,
     module_dims,
     niche_item,
+    unknown_template_error,
 )
 from kitchen.project import ModuleSpec, Project
 
@@ -49,25 +52,16 @@ def _num(x: float) -> int | float:
     return int(x) if float(x).is_integer() else x
 
 
-def _both_rows(module: ModuleSpec) -> bool:
-    """Модуль записан в одном ряду стены и занимает оба — свойство шаблона в реестре."""
-    template = TEMPLATES.get(module.template)
-    return template is not None and template.both_rows
-
-
 def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
     """Ширины модулей ряда + угловые смещения с соседней стены + пеналы стены из других рядов = длина стены."""
     rules = ws.construction.corner_rules
     offsets = {"lower": rules.lower_offset, "upper": rules.upper_offset}
     extra: dict[tuple[str, str], float] = {}  # (стена, вид ряда) -> смещения и пеналы
-    talls: dict[str, list[tuple[int, float]]] = {}  # стена -> (номер ряда, ширина пенала)
     found: list[Finding] = []
     walls = {w.label for w in project.walls}
     for wall in project.walls:
-        for number, row in enumerate(wall.rows):
+        for row in wall.rows:
             for m in row.modules:
-                if _both_rows(m):
-                    talls.setdefault(wall.label, []).append((number, m.width))
                 if m.corner is None:
                     continue
                 adjacent = m.corner.adjacent_wall
@@ -83,9 +77,8 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
                     continue
                 extra[(adjacent, row.kind)] = extra.get((adjacent, row.kind), 0) + offsets[row.kind]
     for wall in project.walls:
-        for number, row in enumerate(wall.rows):
-            total = sum(m.width for m in row.modules) + extra.get((wall.label, row.kind), 0)
-            total += sum(width for at, width in talls.get(wall.label, []) if at != number)
+        for row, modules in zip(wall.rows, row_layouts(wall), strict=True):
+            total = sum(m.width for m in modules) + extra.get((wall.label, row.kind), 0)
             if abs(total - wall.length) > rules.wall_tolerance:
                 found.append(
                     Finding(
@@ -105,19 +98,24 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
 
 
 def _drawer_depth(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -> Finding | None:
-    """Внутренняя глубина — глубина корпуса: задняя стенка накладная, фасад снаружи."""
-    guide = ws.construction.tandembox.guide_length
-    if not TEMPLATES[module.template].drawers or dims.depth >= guide:
+    """Глубина корпуса под ящик: нужная глубина считается `parts.drawer_depth_shortfall`, той же функцией,
+    что и расчёт деталей. Сбой формул ящика здесь не назван: его назовёт расчёт модуля."""
+    if not TEMPLATES[module.template].drawers:
         return None
+    try:
+        shortfall = drawer_depth_shortfall(module, dims, ws)
+    except KitchenError:
+        return None
+    if shortfall is None:
+        return None
+    need, message = shortfall
     return Finding(
         code="drawer_depth",
         level="error",
         subject=module.label,
-        message=(
-            f"Модуль {module.label}: внутренняя глубина {dims.depth} мм меньше направляющей ящика {_num(guide)} мм."
-        ),
+        message=message,
         value=dims.depth,
-        limit=guide,
+        limit=need,
     )
 
 
@@ -356,11 +354,8 @@ def _build(project: Project, ws: Workshop, found: list[Finding]):
     dims: dict[str, tuple[ModuleSpec, ModuleDims]] = {}
     built: list[tuple[ModuleSpec, TemplateOut]] = []
     for row, module in _modules(project):
-        if module.template not in TEMPLATES:  # текст ошибки — один, как у `kitchen parts`
-            try:
-                build_module(module, row, project.materials, ws, project.appliances)
-            except KitchenError as e:
-                found.append(_build_failure(module, e))
+        if module.template not in TEMPLATES:
+            found.append(_build_failure(module, unknown_template_error(module)))
             continue
         try:
             d = module_dims(module, row.kind, ws)
@@ -379,22 +374,30 @@ def _build(project: Project, ws: Workshop, found: list[Finding]):
     return dims, built
 
 
+_LOOKALIKE = str.maketrans("ABCEHKMOPTXabcehkmoptx", "АВСЕНКМОРТХавсенкмортх")  # латиница → похожая кириллица
+
+
+def _label_key(label: str) -> str:
+    """Метка для сравнения: без пробелов по краям, без различия регистра и латинских двойников кириллицы."""
+    return label.strip().translate(_LOOKALIKE).casefold()
+
+
 def duplicate_labels(project: Project) -> list[Finding]:
-    """Метка модуля уникальна в проекте: пенал, записанный в двух рядах, тоже повтор. Одна находка на метку."""
-    seen: set[str] = set()
-    repeated: dict[str, None] = {}
+    """Метка модуля уникальна в проекте: пенал, записанный в двух рядах, тоже повтор. Метки, совпадающие после
+    нормализации (регистр, пробелы по краям, латинские «H1» и кириллические «Н1»), — повтор. Одна находка на
+    метку, в сообщении все записи."""
+    groups: dict[str, list[str]] = {}
     for _, module in _modules(project):
-        if module.label in seen:
-            repeated[module.label] = None
-        seen.add(module.label)
+        groups.setdefault(_label_key(module.label), []).append(module.label)
     return [
         Finding(
             code="duplicate_label",
             level="error",
-            subject=label,
-            message=f"Метка модуля «{label}» не уникальна.",
+            subject=labels[0],
+            message=f"Метка модуля «{labels[0]}» не уникальна: повторяется как {', '.join(f'«{x}»' for x in labels[1:])}.",
         )
-        for label in repeated
+        for labels in groups.values()
+        if len(labels) > 1
     ]
 
 

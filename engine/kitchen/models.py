@@ -12,6 +12,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    WithJsonSchema,
     field_validator,
     model_validator,
 )
@@ -34,7 +35,8 @@ Int = Annotated[int, BeforeValidator(_not_bool)]
 NonNegNum = Annotated[Num, Field(ge=0)]
 NonNegInt = Annotated[Int, Field(ge=0)]
 PosInt = Annotated[Int, Field(gt=0)]
-PosNum = Annotated[Num, Field(gt=0)]
+# В JSON Schema — `exclusiveMinimum`: из-за `BeforeValidator` в `Num` pydantic иначе пишет нестандартное `gt`.
+PosNum = Annotated[Num, Field(gt=0), WithJsonSchema({"type": "number", "exclusiveMinimum": 0})]
 
 
 # Виды техники, которые знает движок: перечень брифа (тест сверяет с его схемой) и вытяжка из `appliances.hood`.
