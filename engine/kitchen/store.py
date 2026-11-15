@@ -228,6 +228,23 @@ def parse_query(text: str) -> OrderQuery:
     return OrderQuery("surname", slug=slug)
 
 
+# Окончания косвенных падежей фамилии (тикет 49), самые длинные первыми.
+_CASE_ENDINGS = tuple(
+    sorted((slugify(e) for e in ("ой", "ым", "ом", "ою", "а", "у", "е", "ы")), key=len, reverse=True)
+)
+
+
+def _trimmed_hits(rows: list[sqlite3.Row], slug: str) -> list[sqlite3.Row]:
+    """Повтор поиска без окончания падежа: «Петрову» -> «petrov»."""
+    for ending in _CASE_ENDINGS:
+        if slug.endswith(ending) and len(slug) > len(ending):
+            needle = slug[: -len(ending)]
+            hits = [r for r in rows if needle in r["slug"] or needle in slugify(r["client"])]
+            if hits:
+                return hits
+    return []
+
+
 def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
     """Точный номер, `номер-фамилия` или подстрока фамилии или имени клиента (кириллица и латиница)."""
     parsed = parse_query(query)
@@ -244,6 +261,8 @@ def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
     else:
         needle = parsed.slug
         hits = [r for r in rows if needle in r["slug"] or needle in slugify(r["client"])]
+    if not hits and parsed.kind == "surname":
+        hits = _trimmed_hits(rows, parsed.slug)
     if not hits:
         raise OrderError(f"Заказ «{query}» не найден. Заведите его: kitchen order new ГГГГ-NNN-фамилия.")
     if len(hits) > 1:

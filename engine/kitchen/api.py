@@ -261,6 +261,13 @@ class StaleOutput(BaseModel):
     command: str  # команда пересчёта целиком, `kitchen cut <заказ>`
 
 
+class NextStep(BaseModel):
+    """Следующий шаг по заказу: фраза для status.md и команды из неё."""
+
+    text: str
+    commands: list[str] = Field(default_factory=list)
+
+
 class StatusResult(Result):
     order: str
     stage: str
@@ -268,6 +275,7 @@ class StatusResult(Result):
     path: str
     text: str
     stale: list[StaleOutput] = Field(default_factory=list)
+    next_step: NextStep
 
 
 OUTPUT_RECOMPUTE = store.OUTPUT_RECOMPUTE
@@ -824,6 +832,28 @@ def _stale_line(s: StaleOutput) -> str:
     return f"- {label} `{s.path}`: версия {s.source_version}, пересчитать: `{s.command}`"
 
 
+def _next_step(
+    order_ref: str, has_brief: bool, has_project: bool, stale: list[StaleOutput], kinds: set[str]
+) -> NextStep:
+    """Первое подходящее правило таблицы тикета 49."""
+    if not has_project:
+        if has_brief:
+            cmd = f"kitchen import {order_ref} <файл>"
+            return NextStep(text=f"Сделать проект: kitchen-project, затем {cmd}.", commands=[cmd])
+        cmd = f"kitchen brief save {order_ref} <файл>"
+        return NextStep(text=f"Собрать бриф: kitchen-brief, затем {cmd}.", commands=[cmd])
+    if stale:
+        commands = list(dict.fromkeys(s.command for s in stale))  # purchase_md и purchase_json — одна команда
+        return NextStep(text=f"Пересчитать устаревшее: {', '.join(commands)}.", commands=commands)
+    if store.QUOTE_PDF not in kinds:
+        estimate, quote = f"kitchen estimate {order_ref}", f"kitchen quote {order_ref} --days <рабочих дней>"
+        return NextStep(text=f"Смета и КП: {estimate}, затем {quote}.", commands=[estimate, quote])
+    if not set(PRODUCTION_KINDS) <= kinds:
+        cmd = f"kitchen production {order_ref}"
+        return NextStep(text=f"Документы цеха: {cmd}.", commands=[cmd])
+    return NextStep(text="Все документы готовы: выезд на монтаж по чек-листу.")
+
+
 def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> StatusResult:
     """Собирает status.md. Даты в нём — по местному времени (`tz` — для тестов)."""
 
@@ -856,9 +886,16 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
         lines.append("")
         stale = _stale_outputs(o.conn, o.pk, o.ref, cur["version"] if cur else None)
         lines += _section("Устарело", [_stale_line(s) for s in stale], "Пока ничего.")
+        kinds = {r["kind"] for r in o.conn.execute("SELECT kind FROM outputs WHERE order_id = ?", (o.pk,))}
+        next_step = _next_step(o.ref, exists("briefs"), cur is not None, stale, kinds)
+        lines += _section("Следующий шаг", [next_step.text], "")
         lines += _section("Решения клиента", dated(entries("decision")[::-1]), "Пока нет.")
         lines += _section("Сделано", dated(entries("done")[::-1]), "Пока ничего.")
-        lines += _section("Дальше", dated(entries("next", 5)), "Пока не записано.")
+        last_done = o.conn.execute(
+            "SELECT MAX(id) FROM log WHERE order_id = ? AND kind = 'done'", (o.pk,)
+        ).fetchone()[0]
+        fresh = [r for r in entries("next", 5) if last_done is None or r["id"] > last_done]
+        lines += _section("Дальше", dated(fresh), "Пока ничего.")
         notes = entries("note")
         if notes:
             lines += _section("Заметки", dated(notes[::-1]), "")
@@ -873,6 +910,7 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
             path=str(target),
             text=text,
             stale=stale,
+            next_step=next_step,
             **mock,
         )
 
