@@ -4,7 +4,7 @@ import json
 
 from kitchen import api
 
-from tests.conftest import FIELDS_NOT_IN_GOLDEN, load_golden
+from tests.conftest import golden_dump, load_golden
 
 
 def corner_project(path, template, width, kind):
@@ -77,7 +77,7 @@ def test_corner_manual_golden(home, base_door_project):
         corner_project(base_door_project, template, width, kind)
         result = api.parts_from_project(base_door_project, home)
         expected = load_golden(f"{template}_{width}")
-        assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
+        assert golden_dump(result) == expected
 
 
 def test_corner_uses_specified_filler_material(home, base_door_project):

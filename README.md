@@ -134,6 +134,6 @@ python3 skills/kitchen-brief/scripts/check_brief.py brief.json
 один раз в ряду своей стены. Для ряда и модуля можно указать `materials` с полями
 `body`, `facades`, `handles`, `countertop`: значения модуля перекрывают ряд, ряд — проект.
 Наполнение (`contents`), параметры угла и флаг `without_back` сохраняются при импорте;
-расчёт `base_door` пока явно отказывает при таких параметрах. Для `base_sink` можно указать `without_back` и `contents.inserts`, для `base_bottle` — `contents.inserts`, для `base_drawers` — `contents.drawers: 3`. Несовместимые параметры отклоняются.
+расчёт `base_door` пока явно отказывает при таких параметрах. Для `base_sink` можно указать `without_back` и `contents.inserts`, для `base_bottle` — `contents.inserts`, для `base_drawers` — `contents.drawers: 3`. Модулю с одной дверью на петлях можно указать сторону петель `contents.hinge_side: "left"` или `"right"` (по умолчанию слева; у угловых сторона следует из места в ряду). Несовместимые параметры отклоняются.
 
 Верхний модуль вытяжки использует нишу из `workshop/appliances.yaml`; вырез представляет открытый сзади проём с передней планкой. Условные размеры техники и правила требуют сверки мастером. Размер сушки задан в `construction.yaml`.

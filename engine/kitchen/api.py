@@ -22,6 +22,7 @@ from kitchen.checks import check_project as run_checks
 from kitchen.common import CommonItem, CountertopCut, compute_common, plan_countertop
 from kitchen.cutting import MaterialCut, cut_parts, kerf_warnings
 from kitchen.cutting_pdf import write_cutting_map
+from kitchen.drilling import DrillingCheck, reconcile
 from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
@@ -39,6 +40,8 @@ __all__ = [
     "CheckResult",
     "CommonItem",
     "DiffResult",
+    "DrillingCheck",
+    "DrillingResult",
     "EdgeTotals",
     "EdgingResult",
     "EstimateLabor",
@@ -72,6 +75,8 @@ __all__ = [
     "cut_from_order",
     "cut_from_project",
     "diff_project",
+    "drilling_from_order",
+    "drilling_from_project",
     "edges_and_save",
     "edges_from_order",
     "edges_from_project",
@@ -1252,6 +1257,45 @@ def edges_and_save(order: str, home: Path | None = None, on: date | None = None)
         ),
     )
     return result.model_copy(update={"output": output})
+
+
+# --- присадка -----------------------------------------------------------------
+
+
+class DrillingResult(Result):
+    """Карта присадки: детали с отверстиями (по модулям проекта) и сверка с фурнитурой этапа 1."""
+
+    source: PartsSource
+    parts: list[Part]
+    checks: list[DrillingCheck]
+    warnings: list[str]
+    output: OutputInfo | None = None
+
+
+def _drilling(parts: PartsResult, workshop: Workshop) -> DrillingResult:
+    drilled = [p for m in parts.modules for p in m.parts if p.holes]
+    return DrillingResult(
+        source=parts.source,
+        parts=drilled,
+        checks=reconcile(drilled, parts.hardware, workshop),
+        warnings=parts.warnings,
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+    )
+
+
+def drilling_from_order(order: str, home: Path | None = None) -> DrillingResult:
+    """Присадка текущей версии проекта заказа, без записи файлов."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
+    workshop = load_workshop(home)
+    return _drilling(_build_parts(project, home, source, latest, warnings, workshop), workshop)
+
+
+def drilling_from_project(path: Path, home: Path | None = None) -> DrillingResult:
+    """`kitchen drilling --project <файл>`: присадка проекта из файла, файлов не пишет."""
+    home = home or resolve_home()
+    return _drilling(parts_from_project(path, home), load_workshop(home))
 
 
 class PurchaseResult(Result):

@@ -73,8 +73,50 @@ class Orientation(BaseModel):
     thickness: Axis
 
 
+Purpose = Literal["confirmat", "hinge_cup", "hinge_plate"]
+PURPOSE_RU: dict[str, str] = {
+    "confirmat": "конфирмат",
+    "hinge_cup": "чашка петли",
+    "hinge_plate": "ответная планка",
+}
+HingeSide = Literal["left", "right"]
+
+
+class Hole(BaseModel):
+    """Отверстие детали (тикет 19). `surface` — пласть (`face`) или торец (`end`); `from_face` — грань детали
+    в осях модуля, с которой сверлят; `center` — центр устья в координатах модуля; `from_base` — расстояния
+    от центра до базовых кромок детали (`Part.base_edges`, в том же порядке)."""
+
+    purpose: Purpose
+    surface: Literal["face", "end"]
+    from_face: str  # «+x», «-y» …
+    edge_side: str | None = None  # у торца — сторона детали L1/L2/W1/W2
+    diameter: int
+    depth: int
+    through: bool = False
+    center: Position
+    from_base: tuple[int, int]
+    in_thickness: int | None = None  # у торца — от пласти с меньшей координатой до центра, мм
+
+
+@dataclass(frozen=True)
+class Joint:
+    """Деталь `end` торцом крепится конфирматами к пласти детали `plate` (маркировки)."""
+
+    plate: str
+    end: str
+
+
+@dataclass(frozen=True)
+class HingedDoor:
+    """Фасад `facade` висит на петлях со стороны `side`; ответные планки — на боковине той же стороны."""
+
+    facade: str
+    side: HingeSide
+
+
 class Part(BaseModel):
-    """Деталь: маркировка, размеры, материал, кромка по 4 сторонам, положение в модуле."""
+    """Деталь: маркировка, размеры, материал, кромка по 4 сторонам, положение в модуле, отверстия."""
 
     id: str  # маркировка вида «Н1-бок-Л»
     module: str
@@ -88,6 +130,9 @@ class Part(BaseModel):
     position: Position
     orientation: Orientation
     area_m2: float | None = None  # только у фасадов (1.2): длина × ширина, м² без округления
+    # присадка (тикет 19): только у деталей с отверстиями; базовые кромки — грани в осях модуля («-z», «+y»)
+    holes: list[Hole] | None = None
+    base_edges: list[str] | None = None
 
 
 class EdgeTotals(BaseModel):
@@ -292,11 +337,20 @@ def _calc(module: ModuleSpec, dims: ModuleDims, what: str, formula: str, **varia
 
 @dataclass
 class TemplateOut:
-    """Результат шаблона: детали, фурнитура, предупреждения."""
+    """Результат шаблона: детали, фурнитура, предупреждения; соединения на конфирматах и двери на петлях —
+    из них `kitchen.drilling` считает конфирматы, петли, планки и отверстия под них."""
 
     parts: list[Part] = field(default_factory=list)
     hardware: Counter = field(default_factory=Counter)
     warnings: list[str] = field(default_factory=list)
+    joints: list[Joint] = field(default_factory=list)
+    doors: list[HingedDoor] = field(default_factory=list)
+
+
+def _hinge_side(module: ModuleSpec) -> HingeSide:
+    """Сторона петель одной двери: поле наполнения `hinge_side`, по умолчанию слева (решение мастера)."""
+    side = module.contents.hinge_side if module.contents is not None else None
+    return side or "left"
 
 
 DOOR_SUFFIXES = ("Л", "П")  # больше двух дверей на модуль шаблоны не строят
@@ -376,7 +430,12 @@ def build_base_door(
     n_shelves = 0 if no_shelf else _shelf_count(module, dims, c)
     out = TemplateOut()
 
-    def carcass(pid: str, name: str, a: Span, b: Span, at: Position, rule: EdgeRule) -> None:
+    def carcass(
+        pid: str, name: str, a: Span, b: Span, at: Position, rule: EdgeRule, *, joined: bool = False
+    ) -> None:
+        """Деталь корпуса; `joined` — горизонтальная деталь между боковинами на конфирматах к обеим."""
+        if joined:
+            out.joints.extend(Joint(f"{module.label}-бок-{s}", f"{module.label}-{pid}") for s in ("Л", "П"))
         out.parts.append(
             make_part(
                 pid=f"{module.label}-{pid}",
@@ -399,11 +458,25 @@ def build_base_door(
         )
 
     if not no_bottom:
-        carcass("дно", "дно", Span(W - 2 * t, "x"), Span(D, "y"), Position(x=t, y=0, z=0), c.edging.case)
+        carcass(
+            "дно",
+            "дно",
+            Span(W - 2 * t, "x"),
+            Span(D, "y"),
+            Position(x=t, y=0, z=0),
+            c.edging.case,
+            joined=True,
+        )
     rail = c.lower.rail_width
     if upper_carcass:
         carcass(
-            "крыш", "крыша", Span(W - 2 * t, "x"), Span(D, "y"), Position(x=t, y=0, z=H - t), c.edging.case
+            "крыш",
+            "крыша",
+            Span(W - 2 * t, "x"),
+            Span(D, "y"),
+            Position(x=t, y=0, z=H - t),
+            c.edging.case,
+            joined=True,
         )
     else:
         for n, y in ((1, D - rail), (2, 0)):
@@ -414,6 +487,7 @@ def build_base_door(
                 Span(rail, "y"),
                 Position(x=t, y=y, z=H - t),
                 c.edging.rails,
+                joined=True,
             )
 
     # полки с отступами от боковин и спереди; i-я полка выше предыдущей на шаг
@@ -462,9 +536,12 @@ def build_base_door(
         facade_w = _calc(module, dims, "фасад", f.single_door_width, H=H, W=W)
     for i in range(n_doors):
         suffix = DOOR_SUFFIXES[i] if n_doors == 2 else ""
+        pid = f"{module.label}-фасад-{suffix}" if suffix else f"{module.label}-фасад"
+        if not no_hinges:  # две двери — петли снаружи: левая слева, правая справа
+            out.doors.append(HingedDoor(pid, ("left", "right")[i] if n_doors == 2 else _hinge_side(module)))
         out.parts.append(
             make_part(
-                pid=f"{module.label}-фасад-{suffix}" if suffix else f"{module.label}-фасад",
+                pid=pid,
                 module_label=module.label,
                 name="фасад",
                 a=Span(facade_h, "z"),
@@ -477,25 +554,14 @@ def build_base_door(
             )
         )
 
-    # фурнитура; соотношения («по одной на петлю») — из construction.yaml
-    hinges = 0
-    if n_doors and not no_hinges:
-        hinges = steps_pick(c.hinges_by_facade_height, facade_h, "петли_по_высоте_фасада") * n_doors
-        out.hardware[hw.hinges] += hinges
-        out.hardware[hw.plates] += hinges * c.plates.per_unit
-    joints = [(D, 2)] * (1 + int(not no_bottom)) if upper_carcass else [(D, 2)] + [(rail, 2)] * 2
-    confirmats = sum(
-        steps_pick(c.confirmats_by_joint_length, length, "конфирматы_по_длине_соединения") * count
-        for length, count in joints
-    )
-    out.hardware[hw.confirmats] += confirmats
-    out.hardware[hw.caps] += confirmats * c.caps.per_unit
+    # фурнитура; соотношения («по одной на петлю») — из construction.yaml. Конфирматы, петли, планки и
+    # саморезы петель считает `kitchen.drilling` по соединениям и дверям шаблона.
     if n_shelves:
         out.hardware[hw.shelf_pins] += c.shelf.pins * n_shelves
     # ключи ножек «до_800»/«свыше_800» должны совпадать с порогом (DECISIONS, тикет 05)
     if not upper_carcass:
         out.hardware[hw.legs] += c.legs.up_to_800 if W <= c.legs.threshold else c.legs.over_800
-    screws = c.screws_3_5x16.per_hinge * hinges
+    screws = 0
     if not no_back:
         perimeter = 2 * (back_h + back_w)
         screws += _ceil_div(perimeter, bp.fastening_pitch)  # саморезы на ХДФ: периметр / шаг
@@ -839,6 +905,7 @@ def build_wall_hood(
         lift=bool(module.contents and module.contents.lift),
     )
     body = _material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
+    out.joints.extend(Joint(f"{module.label}-бок-{s}", f"{module.label}-дно-выт-1") for s in ("Л", "П"))
     out.parts.append(
         make_part(
             pid=f"{module.label}-дно-выт-1",
@@ -853,9 +920,6 @@ def build_wall_hood(
             edges={c.edging.case.face: _edge_id(ws, body.id)},
         )
     )
-    added = 2 * steps_pick(c.confirmats_by_joint_length, front_depth, "конфирматы_по_длине_соединения")
-    out.hardware[c.furniture.confirmats] += added
-    out.hardware[c.furniture.caps] += added * c.caps.per_unit
     return out
 
 
@@ -926,10 +990,9 @@ def _build_corner(
             area=True,
         )
     )
-    hinges = steps_pick(c.hinges_by_facade_height, facade_h, "петли_по_высоте_фасада")
-    out.hardware[c.furniture.hinges] += hinges
-    out.hardware[c.furniture.plates] += hinges * c.plates.per_unit
-    out.hardware[c.furniture.screws] += hinges * c.screws_3_5x16.per_hinge + rules.filler_screws
+    # петли со стороны прохода, у боковины: глухая часть справа — петли слева, и наоборот
+    out.doors.append(HingedDoor(f"{module.label}-фасад", "right" if blind_left else "left"))
+    out.hardware[c.furniture.screws] += rules.filler_screws
     out.hardware[materials.handles] += c.handles.per_unit
     return out
 
@@ -1245,7 +1308,29 @@ def build_module(
     dims = module_dims(module, row.kind, ws)
     out = template.build(module, dims, resolved_materials, ws, BuildContext(appliances, row))
     _check_sound(module, dims, out)
+    _check_hinge_side(module, out)
+    from kitchen.drilling import apply_drilling
+
+    out.parts, drilled, warnings = apply_drilling(module.label, out.parts, out.joints, out.doors, ws)
+    out.hardware.update(drilled)
+    out.warnings += warnings
     return out
+
+
+def _check_hinge_side(module: ModuleSpec, out: TemplateOut) -> None:
+    """Сторону петель задают только одной двери на петлях; у углового модуля она следует из места в ряду."""
+    if module.contents is None or module.contents.hinge_side is None:
+        return
+    if module.template in ("base_corner", "wall_corner"):
+        raise OrderError(
+            f"Модуль {module.label}: у углового модуля сторона петель следует из места в ряду, "
+            "поле hinge_side не задаётся."
+        )
+    if len(out.doors) != 1:
+        raise OrderError(
+            f"Модуль {module.label}: сторона петель (hinge_side) задаётся только у модуля с одной дверью на петлях, "
+            f"а дверей на петлях {len(out.doors)}."
+        )
 
 
 def _negative_hardware(hardware: Counter) -> list[str]:

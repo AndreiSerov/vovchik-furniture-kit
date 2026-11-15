@@ -162,6 +162,22 @@
           ],
           "default": null,
           "title": "Lift"
+        },
+        "hinge_side": {
+          "anyOf": [
+            {
+              "enum": [
+                "left",
+                "right"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hinge Side"
         }
       },
       "title": "Contents",

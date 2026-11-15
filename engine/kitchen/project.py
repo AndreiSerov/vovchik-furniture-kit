@@ -37,6 +37,8 @@ class Contents(Section):
     drawers: StrictInt | None = Field(default=None, ge=0)
     inserts: list[str] = Field(default_factory=list)
     lift: str | None = None
+    # сторона петель одной двери (решение мастера, тикет 19); по умолчанию слева, у угловых — по месту в ряду
+    hinge_side: Literal["left", "right"] | None = None
 
 
 class Corner(Section):

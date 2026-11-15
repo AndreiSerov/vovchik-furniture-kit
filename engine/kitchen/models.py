@@ -394,6 +394,71 @@ class CornerRules(Section):
     filler_edges: StrictBool = _f("кромить_заглушку")
 
 
+# Базовая кромка детали словом -> грань в осях модуля (x вдоль стены, y от стены в комнату, z вверх).
+BASE_EDGE_FACES = {
+    "нижняя": "-z",
+    "верхняя": "+z",
+    "передняя": "+y",
+    "задняя": "-y",
+    "левая": "-x",
+    "правая": "+x",
+}
+
+
+def parse_base_edges(value: object) -> tuple[str, ...]:
+    """`[нижняя, передняя, левая]` -> грани `("-z", "+y", "-x")`: по одной кромке на каждую ось модуля, в порядке
+    приоритета. Деталь берёт первые две, чьи оси лежат в её плоскости, поэтому у любой детали их ровно две."""
+    if isinstance(value, tuple):
+        return value
+    words = value if isinstance(value, list) else None
+    faces = [BASE_EDGE_FACES.get(w) if isinstance(w, str) else None for w in words or []]
+    if not faces or None in faces or len(faces) != 3 or len({f[1] for f in faces}) != 3:  # type: ignore[index]
+        accepted = ", ".join(BASE_EDGE_FACES)
+        raise ValueError(
+            "ожидалось три кромки, по одной на ось: нижняя или верхняя, передняя или задняя, левая или правая "
+            f"(допустимы: {accepted})"
+        )
+    return tuple(faces)  # type: ignore[arg-type]
+
+
+class ConfirmatDrilling(Section):
+    """Конфирмат: сквозное отверстие в пласти одной детали и отверстие в торце парной, оси совпадают."""
+
+    front_offset: PosInt = _f("отступ_от_лицевой_кромки")
+    back_offset: PosInt = _f("отступ_от_задней_кромки")
+    face_diameter: PosInt = _f("диаметр_в_пласть")
+    end_diameter: PosInt = _f("диаметр_в_торец")
+    end_depth: PosInt = _f("глубина_в_торец")
+
+
+class HingeDrilling(Section):
+    """Чашка петли на фасаде: отступ центра от кромки фасада со стороны петель и от торцов."""
+
+    cup_diameter: PosInt = _f("диаметр_чашки")
+    cup_depth: PosInt = _f("глубина_чашки")
+    edge_offset: PosInt = _f("отступ_от_кромки_фасада")
+    end_offset: PosInt = _f("отступ_от_торца")
+
+
+class PlateDrilling(Section):
+    """Ответная планка петли на боковине: отверстия по вертикали на высоте чашки."""
+
+    holes: PosInt = _f("отверстий")
+    pitch: PosInt = _f("шаг")
+    front_offset: PosInt = _f("отступ_от_передней_кромки")
+    diameter: PosInt = _f("диаметр")
+    depth: PosInt = _f("глубина")
+
+
+class DrillingRules(Section):
+    """ДОБАВЛЕНО (МОК), тикет 19: базовые кромки деталей и отверстия конфирматов, чашек и ответных планок."""
+
+    base_edges: Annotated[tuple[str, ...], BeforeValidator(parse_base_edges)] = _f("базовые_кромки")
+    confirmat: ConfirmatDrilling = _f("конфирмат")
+    hinge: HingeDrilling = _f("петля")
+    plate: PlateDrilling = _f("ответная_планка")
+
+
 class LinearItem(Section):
     """Погонная позиция из `hardware.yaml`, которая продаётся штуками фиксированной длины."""
 
@@ -451,6 +516,7 @@ class Construction(Section):
     common: CommonRules = _f("общие_позиции")  # ДОБАВЛЕНО (МОК): цоколь, шина, LED, столешница
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
+    drilling: DrillingRules = _f("присадка")  # ДОБАВЛЕНО (МОК): правила присадки (тикет 19)
 
     @model_validator(mode="after")
     def _steps_sorted(self) -> "Construction":
