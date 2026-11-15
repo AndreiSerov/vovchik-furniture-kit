@@ -2255,7 +2255,7 @@ class PlacementResult(Result):
     modules: list[ModulePlace]
     gaps: list[GapPlace]
     top_of_uppers: int  # верх верхних модулей от пола, мм
-    findings: list[Finding]  # ошибки расстановки при готовых положениях: `corner_overlap`
+    findings: list[Finding]  # находки расстановки при готовых положениях: `corner_overlap`, `tall_heights`
     scene: list[SceneObject]  # модель сцены: модули, стены, пол
 
 

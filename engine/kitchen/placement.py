@@ -3,8 +3,9 @@
 Начало координат — начало первой стены цепочки на полу; x вдоль неё, y от стены в комнату, z вверх, как у
 `Position` (решение координатора). Поворот стены — градусы вокруг вертикали (0, 90, 180, 270). Коробка модуля —
 корпус плюс фасад; вне её только задняя стенка ХДФ (y < 0). Высоты рядов (решение мастера 2026-11-15): низ
-нижних и пенала — на ножках (`ножки.высота`), верх верхних = верх пенала (`ножки.высота` + `пенал.высота`),
-верхний модуль выравнивается по верху.
+нижних и пенала — на ножках (`ножки.высота`), верх верхних = верх самого высокого пенала проекта (`ножки.высота`
++ своя `height` пенала, иначе `пенал.высота`; без пенала — `пенал.высота`), верхний модуль выравнивается по верху;
+пеналы разной высоты — предупреждение `tall_heights` (тикет 41).
 
 Стены соединены, только если между ними угловой модуль (решение мастера 2026-11-15): угловой у правого края
 ряда стены A с соседом Б — конец A встречается с началом Б; у левого — начало A с концом Б (сторона —
@@ -201,7 +202,8 @@ class Placement(BaseModel):
     modules: list[ModulePlace]
     gaps: list[GapPlace]
     top_of_uppers: int
-    findings: list[Finding]  # ошибки расстановки, при которых положения ещё есть (`corner_overlap`)
+    # находки, при которых положения есть: `corner_overlap` (error), `tall_heights` (warning)
+    findings: list[Finding]
     scene: list[SceneObject]
 
 
@@ -335,7 +337,31 @@ def place_project(project: Project, ws: Workshop) -> Placement:
         raise OrderError("В проекте нет стен: расставлять нечего.")
     c = ws.construction
     floor = c.legs.height
-    top = floor + c.tall.height
+    talls = [
+        (m.label, module_dims(m, row.kind, ws).height)
+        for w in project.walls
+        for row in w.rows
+        for m in row.cabinets
+        if is_tall(m)
+    ]
+    tallest = max(talls, key=lambda t: t[1], default=None)
+    top = floor + (tallest[1] if tallest else c.tall.height)
+    tall_findings = (
+        [
+            Finding(
+                code="tall_heights",
+                level="warning",
+                subject=tallest[0],
+                message=(
+                    "Пеналы разной высоты: "
+                    + ", ".join(f"{label} {height} мм" for label, height in talls)
+                    + f" — верх верхних по {tallest[0]} ({top} мм)."
+                ),
+            )
+        ]
+        if tallest and len({h for _, h in talls}) > 1
+        else []
+    )
     problems: list[str] = []
     rises = any(
         row.kind == "upper" or is_tall(m) for w in project.walls for row in w.rows for m in row.cabinets
@@ -412,7 +438,7 @@ def place_project(project: Project, ws: Workshop) -> Placement:
         modules=modules,
         gaps=gaps,
         top_of_uppers=top,
-        findings=_corner_overlaps(modules, links),
+        findings=tall_findings + _corner_overlaps(modules, links),
         scene=_scene(project, walls, modules, colors),
     )
 
