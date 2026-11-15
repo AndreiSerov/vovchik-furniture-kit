@@ -700,9 +700,9 @@ class EconomyCase(Section):
 
 
 class EconomyRule(Section):
-    id: str
-    name: str = _f("название")
-    client_text: str = _f("текст_клиенту")
+    id: str = Field(min_length=1)
+    name: str = Field(alias="название", min_length=1)
+    client_text: str = Field(alias="текст_клиенту", min_length=1)
     cases: list[EconomyCase] = Field(alias="случаи", min_length=1)
 
 

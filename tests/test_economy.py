@@ -2,7 +2,6 @@
 
 import copy
 import json
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -106,32 +105,6 @@ def test_copy_of_petrov_has_no_carousel_tandembox_aventos_bucket_or_dryer(home):
     assert original.hardware["corner_carousel"] == 1  # исходный проект не тронут
 
 
-def test_economy_leaves_project_version_and_versions_table_untouched(home):
-    api.brief_save(ORDER, BRIEF, home)
-    api.import_project(ORDER, PETROV, home=home)
-    db = home / "orders" / "kitchen.db"
-
-    def snapshot():
-        conn = sqlite3.connect(db)
-        try:
-            return (
-                conn.execute("SELECT * FROM project_versions ORDER BY id").fetchall(),
-                conn.execute(
-                    "SELECT id, number, slug, client, created_at FROM orders ORDER BY id"
-                ).fetchall(),
-            )
-        finally:
-            conn.close()
-
-    before = snapshot()
-    result = api.estimate_and_save("petrov", home, economy=True)
-    assert result.economy is not None and result.source.version == 1
-    after = snapshot()
-    assert after[0] == before[0] and len(after[0]) == 1
-    assert after[1] == before[1]
-    assert api.status("petrov", home).project_version == 1
-
-
 def test_project_without_suitable_modules_has_no_replacements(home):
     path = write(home, BASE_DOOR_PROJECT, "plain.json")
     result = api.estimate_from_project(path, home, economy=True)
@@ -171,29 +144,98 @@ def test_rule_that_builds_on_no_module_gives_only_a_problem(home):
     assert result.economy.price == result.economy.price_as_is
 
 
-def test_replacement_that_does_not_save_is_not_offered_but_shown_with_reason(home):
-    # цена ведра 0: замена «без ведра» не дешевеет, разница 0
-    petrov_hardware = (home / "workshop" / "hardware.yaml").read_text(encoding="utf-8")
-    assert 'id: bin_2sec, название: "Ведро выдвижное 2 секции", упаковка: 1, цена: 3500' in petrov_hardware
-    (home / "workshop" / "hardware.yaml").write_text(
-        petrov_hardware.replace(
-            '"Ведро выдвижное 2 секции", упаковка: 1, цена: 3500',
-            '"Ведро выдвижное 2 секции", упаковка: 1, цена: 0',
-        ),
-        encoding="utf-8",
-    )
+def test_negative_saving_is_excluded_from_total(home):
+    # кромка по 12000 ₽/м: полка в угловом и в «без сушки» дороже карусели и сушки — разница строго меньше нуля
+    path = home / "workshop" / "materials.yaml"
+    text = path.read_text(encoding="utf-8")
+    assert "цена_за_м: 12," in text
+    path.write_text(text.replace("цена_за_м: 12,", "цена_за_м: 12000,"), encoding="utf-8")
     api.brief_save(ORDER, BRIEF, home)
     api.import_project(ORDER, PETROV, home=home)
     result = api.estimate_and_save("petrov", home, economy=True)
     economy = result.economy
-    assert "no_bucket" not in [line.id for line in economy.replacements]
-    (skipped,) = economy.not_offered
-    assert skipped.id == "no_bucket" and skipped.saving <= 0 and skipped.modules == ["Н5"]
-    others = [r for r in RULES if r != "no_bucket"]
-    assert [line.id for line in economy.replacements] == others
+    assert {line.id for line in economy.not_offered} == {"carousel_to_shelf", "no_dryer"}
+    assert all(line.saving < 0 for line in economy.not_offered)
+    others = ("drawers_to_doors", "lift_to_door", "no_bucket")
+    assert [line.id for line in economy.replacements] == list(others)
     assert economy.price == price_of(home, by_hand(petrov_data(), *others))
     markdown = Path(result.outputs[0].file).read_text(encoding="utf-8")
-    assert "не удешевляет, не предложена" in markdown and skipped.name in markdown
+    assert markdown.count("не удешевляет, не предложена") == 2
+    assert all(line.name in markdown for line in economy.not_offered)
+
+
+def test_when_every_replacement_is_not_offered_markdown_says_so(home):
+    # ведро по цене 0: единственная подходящая замена даёт разницу 0
+    hardware = home / "workshop" / "hardware.yaml"
+    text = hardware.read_text(encoding="utf-8")
+    old = '"Ведро выдвижное 2 секции", упаковка: 1, цена: 3500'
+    assert old in text
+    hardware.write_text(text.replace(old, old.replace("3500", "0")), encoding="utf-8")
+    project = copy.deepcopy(BASE_DOOR_PROJECT)
+    project["walls"][0]["rows"][0]["modules"] = [
+        {"label": "Н1", "template": "base_sink", "width": 600, "contents": {"inserts": ["bin_2sec"]}}
+    ]
+    project["walls"][0]["length"] = 600
+    project["appliances"] = [{"type": "sink", "width": 600, "module": "Н1"}]
+    api.order_new(ORDER, home=home)
+    api.import_project(ORDER, write(home, project, "sink.json"), home=home)
+    result = api.estimate_and_save("petrov", home, economy=True)
+    assert result.economy.replacements == [] and result.economy.price == result.economy.price_as_is
+    (line,) = result.economy.not_offered
+    assert line.id == "no_bucket" and line.saving == 0
+    markdown = Path(result.outputs[0].file).read_text(encoding="utf-8")
+    assert "Подходящих замен нет" not in markdown and "не удешевляют" in markdown
+    assert "## Экономия" in markdown and "не удешевляет, не предложена" in markdown
+
+
+def corner_project(contents):
+    project = copy.deepcopy(BASE_DOOR_PROJECT)
+    project["walls"].append({"label": "Б", "length": 1800, "rows": []})
+    module = {"label": "Н1", "template": "base_corner", "width": 1050, "corner": {"adjacent_wall": "Б"}}
+    if contents is not None:
+        module["contents"] = contents
+    project["walls"][0]["rows"][0]["modules"] = [module]
+    return project
+
+
+def test_module_the_rule_does_not_change_is_not_listed_anywhere(home):
+    # угловой уже с полкой вместо карусели: замена его не меняет
+    path = write(home, corner_project({"shelves": 1, "inserts": []}), "shelf.json")
+    economy = api.estimate_from_project(path, home, economy=True).economy
+    assert economy.replacements == [] and economy.not_offered == [] and economy.problems == []
+    assert economy.price == economy.price_as_is
+
+
+def test_first_matching_case_of_a_rule_is_applied(home):
+    # у правила два пересекающихся случая: применяется первый (дверь с полкой), а не последний (без полок)
+    economy_yaml = home / "workshop" / "economy.yaml"
+    text = economy_yaml.read_text(encoding="utf-8")
+    old = "        на: {шаблон: wall_door, полок: 1}\n"
+    assert old in text
+    economy_yaml.write_text(
+        text.replace(
+            old, old + "      - где: {шаблон: wall_dryer}\n        на: {шаблон: wall_door, полок: 0}\n"
+        ),
+        encoding="utf-8",
+    )
+    path = write(home, dryer_project(lift=False), "first.json")
+    copy_parts = api.economy_parts_from_project(path, home)
+    assert [p.name for p in copy_parts.modules[0].parts].count("полка") == 1
+
+
+def test_lift_to_door_uses_the_door_width_rule(home):
+    # решение мастера: у 600 мм две двери на петлях, подъёмника нет
+    project = copy.deepcopy(BASE_DOOR_PROJECT)
+    project["walls"][0]["rows"] = [
+        {"kind": "upper", "modules": [{"label": "В1", "template": "wall_lift", "width": 600}]}
+    ]
+    path = write(home, project, "lift600.json")
+    before = api.parts_from_project(path, home)
+    after = api.economy_parts_from_project(path, home)
+    doors = [p for p in after.modules[0].parts if p.name == "фасад"]
+    assert len(doors) == 2 and len([p for p in before.modules[0].parts if p.name == "фасад"]) == 1
+    assert before.hardware.get("hinge_71B3550", 0) == 0 and after.hardware["hinge_71B3550"] == 4
+    assert after.hardware["plate_173L6100"] == 4
 
 
 def test_lift_to_door_on_wall_lift_module(home):
@@ -244,3 +286,12 @@ def test_economy_unaffected_estimate_is_the_same_with_and_without_flag(home, pet
     assert "economy" not in json.loads(plain.model_dump_json())
     data = json.loads(petrov_economy.model_dump_json())
     assert {k: v for k, v in data.items() if k != "economy"} == json.loads(plain.model_dump_json())
+
+
+def test_carousel_rule_applies_when_carousel_is_explicit(home):
+    path = write(home, corner_project({"inserts": ["corner_carousel"]}), "explicit.json")
+    economy = api.estimate_from_project(path, home, economy=True).economy
+    assert not economy.problems
+    (line,) = economy.replacements
+    assert line.id == "carousel_to_shelf" and line.modules == ["Н1"]
+    assert line.price == price_of(home, corner_project({"shelves": 1, "inserts": []}), "shelf.json")

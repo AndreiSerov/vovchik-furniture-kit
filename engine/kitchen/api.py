@@ -979,15 +979,7 @@ def _brief_of_project(home: Path, order: str) -> sqlite3.Row | None:
 def parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
     """`kitchen parts --project <файл>`: детали проекта из файла (черновик до импорта)."""
     home = home or resolve_home()
-    data = _read_json(Path(path), "Файл проекта")
-    project = parse_project(data)
-    source = PartsSource(
-        kind="file",
-        order=project.order,
-        version=project.version,
-        content_hash=_project_hash(project),
-        path=str(path),
-    )
+    project, source = _project_file(path)
     return _build_parts(project, home, source, _brief_of_project(home, project.order), [])
 
 
@@ -1093,15 +1085,7 @@ def _build_cut(
 def cut_from_project(path: Path, home: Path | None = None) -> CutResult:
     """`kitchen cut --project <файл>`: раскрой деталей проекта из файла (черновик до импорта)."""
     home = home or resolve_home()
-    data = _read_json(Path(path), "Файл проекта")
-    project = parse_project(data)
-    source = PartsSource(
-        kind="file",
-        order=project.order,
-        version=project.version,
-        content_hash=_project_hash(project),
-        path=str(path),
-    )
+    project, source = _project_file(path)
     return _build_cut(project, home, source, _brief_of_project(home, project.order), [])
 
 
@@ -1408,7 +1392,12 @@ def _priced(project: Project, home: Path, source: PartsSource, workshop: Worksho
 
 
 def _economy(
-    project: Project, home: Path, source: PartsSource, workshop: Workshop, price_as_is: int
+    project: Project,
+    home: Path,
+    source: PartsSource,
+    workshop: Workshop,
+    price_as_is: int,
+    price_together: bool = True,
 ) -> tuple[EconomyVariant, Project]:
     """Вариант «экономия»: цена с каждой заменой отдельно (разница на правило) и со всеми предложенными сразу.
     Замена с разницей не больше нуля не предлагается. Копия проекта нигде не сохраняется."""
@@ -1437,7 +1426,14 @@ def _economy(
             applied = apply_rule(together, rule, workshop)
             together = applied.project
             problems += [p for p in applied.problems if p not in problems]
-    price = _priced(together, home, source, workshop).price if offered else price_as_is
+    if not offered:
+        price = price_as_is
+    elif len(offered) == 1:
+        price = offered[0].price  # одна замена: «со всеми» и «с одной» — один и тот же проект
+    elif price_together:
+        price = _priced(together, home, source, workshop).price
+    else:
+        price = 0  # цена нужна только вариантам с `price_together`; детали копии от неё не зависят
     variant = EconomyVariant(
         price_as_is=price_as_is,
         price=price,
@@ -1506,8 +1502,9 @@ def economy_parts_from_project(path: Path, home: Path | None = None) -> PartsRes
     home = home or resolve_home()
     project, source = _project_file(path)
     workshop = load_workshop(home)
-    _, together = _economy(project, home, source, workshop, _priced(project, home, source, workshop).price)
-    return _build_parts(together, home, source, None, [], workshop)
+    base = _priced(project, home, source, workshop).price  # без неё не известно, какие замены предлагаются
+    _, together = _economy(project, home, source, workshop, base, price_together=False)
+    return _build_parts(together, home, source, _brief_of_project(home, project.order), [], workshop)
 
 
 def _economy_markdown(economy: EconomyVariant) -> list[str]:
@@ -1523,6 +1520,14 @@ def _economy_markdown(economy: EconomyVariant) -> list[str]:
             f"**Цена «экономии» со всеми заменами: {economy.price} ₽, разница {economy.saving} ₽**",
             "",
             "Сумма разниц по строкам может не совпасть с итогом: листы закупаются целыми, цена округляется.",
+            "",
+        ]
+    elif economy.not_offered:
+        lines += [
+            (
+                "Подходящие замены не удешевляют, поэтому не предложены: "
+                f"цена «экономии» {economy.price} ₽, разница {economy.saving} ₽."
+            ),
             "",
         ]
     else:
