@@ -21,7 +21,7 @@ def test_check_workshop_json_equals_api(home):
     assert r.exit_code == 0
     assert json.loads(r.output) == json.loads(api.check_workshop(home).model_dump_json())
     assert json.loads(r.output)["mock"] is True
-    assert len(json.loads(r.output)["mock_files"]) == 7
+    assert len(json.loads(r.output)["mock_files"]) == 9
     assert json.loads(r.output)["warning"] == MOCK_BANNER
 
 

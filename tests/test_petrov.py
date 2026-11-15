@@ -111,7 +111,7 @@ def common(result):
 def test_petrov_common_items(petrov):
     """Руками по правилам МОК: нижний фронт 2800 + 1200 − угловое смещение 600 = 3400 мм, верхние ряды 2200 + 1200 = 3400 мм,
     запас на стыки 5%: цоколь 3570 мм → 1 штука 4 м; шина 3570 мм → 2 по 2 м; LED 3.57 → 4 м,
-    блок питания 1 (5 м на блок); столешница: куски 2200 и 1200 мм с пропилом 4 мм влезают в один лист 4100."""
+    блок питания 1 (5 м на блок); столешница: общая длина 2200 + 1200 = 3400 мм — один лист 4100."""
     c = common(api.parts_from_order(ORDER, petrov))
     assert list(c) == ["plinth", "rail", "hangers", "led", "led_power_supply", "countertop"]
     assert (c["plinth"].item, c["plinth"].quantity, c["plinth"].length_mm) == ("plinth_100", 1, 3400)
@@ -130,7 +130,7 @@ def test_petrov_common_items(petrov):
     assert (c["led_power_supply"].item, c["led_power_supply"].quantity) == ("led_psu", 1)
     top = c["countertop"]
     assert (top.item, top.quantity, top.unit, top.length_mm) == ("top_38_marble", 1, "лист", 3400)
-    assert "2200" in top.basis and "1200" in top.basis
+    assert "3400" in top.basis
     assert not any(x.in_hardware for k, x in c.items() if k != "hangers")
 
 
@@ -149,12 +149,12 @@ def test_without_led_and_countertop_those_items_are_absent(home):
     assert kinds == ["plinth", "rail", "hangers"]
 
 
-def test_countertop_longer_than_sheet_is_split_and_packed(home):
+def test_countertop_longer_than_sheet_takes_whole_sheets(home):
     materials = home / "workshop/materials.yaml"
     materials.write_text(materials.read_text().replace("лист: [4100, 600]", "лист: [2000, 600]"))
     result = api.parts_from_project(FIXTURES / "petrov_project.json", home)
     top = common(result)["countertop"]
-    # куски 2000 + 200 (стена А режется по листу) и 1200: [2000] и [1200 + 4 + 200] — два листа
+    # общая длина 3400 мм при листе 2000 — два листа
     assert top.quantity == 2
 
 
@@ -174,7 +174,7 @@ def test_common_rules_come_from_workshop(home):
 
 def test_tall_in_upper_row_gives_same_plinth_and_countertop_as_in_lower_row(home):
     # Пенал описывается один раз и входит в оба ряда: цоколь 3400 мм (2800 + 1200 - 600 глухой части угла)
-    # и куски столешницы 2200 и 1200 мм не зависят от того, в каком ряду описан П1.
+    # и общая длина столешницы 3400 мм не зависят от того, в каком ряду описан П1.
     project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
     rows = {row["kind"]: row for row in project["walls"][0]["rows"]}
     assert rows["lower"]["modules"][0]["label"] == "П1"
@@ -186,11 +186,10 @@ def test_tall_in_upper_row_gives_same_plinth_and_countertop_as_in_lower_row(home
     assert c["plinth"].length_mm == 3400
     assert c["rail"].length_mm == 3400
     assert c["countertop"].length_mm == 3400
-    assert "2200" in c["countertop"].basis and "1200" in c["countertop"].basis
 
 
 def test_tall_in_upper_row_breaks_countertop_at_its_place(home):
-    # Н1 600 | П1 600 | Н2 400 на стене 1600: столешница двумя кусками 600 и 400 мм, цоколь 1600 мм.
+    # Н1 600 | П1 600 | Н2 400 на стене 1600: общая длина столешницы 1000 мм, цоколь 1600 мм.
     project = {
         "order": ORDER,
         "ceiling_height": 2700,
@@ -231,7 +230,6 @@ def test_tall_in_upper_row_breaks_countertop_at_its_place(home):
     assert c["plinth"].length_mm == 1600
     assert c["countertop"].length_mm == 1000
     assert c["countertop"].quantity == 1
-    assert "600 + 400" in c["countertop"].basis
 
 
 def test_workshop_rejects_unknown_common_item_id(home):

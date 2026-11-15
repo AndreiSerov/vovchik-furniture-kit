@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from kitchen import formulas
 from kitchen.brief import BriefAppliance
 from kitchen.brief import appliances as brief_appliances
+from kitchen.common import row_layouts
 from kitchen.errors import KitchenError, WorkshopError
 from kitchen.models import SheetMaterial, Workshop
 from kitchen.parts import (
@@ -24,8 +25,10 @@ from kitchen.parts import (
     accepts,
     build_module,
     built_niche,
+    drawer_depth_shortfall,
     module_dims,
     niche_item,
+    unknown_template_error,
 )
 from kitchen.project import ModuleSpec, Project
 
@@ -49,25 +52,16 @@ def _num(x: float) -> int | float:
     return int(x) if float(x).is_integer() else x
 
 
-def _both_rows(module: ModuleSpec) -> bool:
-    """Модуль записан в одном ряду стены и занимает оба — свойство шаблона в реестре."""
-    template = TEMPLATES.get(module.template)
-    return template is not None and template.both_rows
-
-
 def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
-    """Ширины модулей ряда + угловые смещения с соседней стены (+ пенал из другого ряда) = длина стены."""
+    """Ширины модулей ряда + угловые смещения с соседней стены + пеналы стены из других рядов = длина стены."""
     rules = ws.construction.corner_rules
     offsets = {"lower": rules.lower_offset, "upper": rules.upper_offset}
     extra: dict[tuple[str, str], float] = {}  # (стена, вид ряда) -> смещения и пеналы
-    tall_widths: dict[str, float] = {}
     found: list[Finding] = []
     walls = {w.label for w in project.walls}
     for wall in project.walls:
         for row in wall.rows:
             for m in row.modules:
-                if _both_rows(m):
-                    tall_widths[wall.label] = tall_widths.get(wall.label, 0) + m.width
                 if m.corner is None:
                     continue
                 adjacent = m.corner.adjacent_wall
@@ -83,10 +77,8 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
                     continue
                 extra[(adjacent, row.kind)] = extra.get((adjacent, row.kind), 0) + offsets[row.kind]
     for wall in project.walls:
-        for row in wall.rows:
-            total = sum(m.width for m in row.modules) + extra.get((wall.label, row.kind), 0)
-            if not any(_both_rows(m) for m in row.modules):
-                total += tall_widths.get(wall.label, 0)
+        for row, modules in zip(wall.rows, row_layouts(wall), strict=True):
+            total = sum(m.width for m in modules) + extra.get((wall.label, row.kind), 0)
             if abs(total - wall.length) > rules.wall_tolerance:
                 found.append(
                     Finding(
@@ -106,19 +98,24 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
 
 
 def _drawer_depth(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -> Finding | None:
-    """Внутренняя глубина — глубина корпуса: задняя стенка накладная, фасад снаружи."""
-    guide = ws.construction.tandembox.guide_length
-    if not TEMPLATES[module.template].drawers or dims.depth >= guide:
+    """Глубина корпуса под ящик: нужная глубина считается `parts.drawer_depth_shortfall`, той же функцией,
+    что и расчёт деталей. Сбой формул ящика здесь не назван: его назовёт расчёт модуля."""
+    if not TEMPLATES[module.template].drawers:
         return None
+    try:
+        shortfall = drawer_depth_shortfall(module, dims, ws)
+    except KitchenError:
+        return None
+    if shortfall is None:
+        return None
+    need, message = shortfall
     return Finding(
         code="drawer_depth",
         level="error",
         subject=module.label,
-        message=(
-            f"Модуль {module.label}: внутренняя глубина {dims.depth} мм меньше направляющей ящика {_num(guide)} мм."
-        ),
+        message=message,
         value=dims.depth,
-        limit=guide,
+        limit=need,
     )
 
 
@@ -236,6 +233,8 @@ def _niches(
         ]
     for a in project.appliances:
         if a.module not in dims:
+            if a.module in failed:  # модуль не рассчитался: причина уже названа находкой `module_build`
+                continue
             found.append(
                 Finding(
                     code="appliance_module",
@@ -350,25 +349,56 @@ def _modules(project: Project):
 
 
 def _build(project: Project, ws: Workshop, found: list[Finding]):
-    """Габариты и детали каждого модуля; сбой расчёта модуля — находка, а не обрыв."""
+    """Габариты и детали каждого модуля; сбой расчёта модуля — находка, а не обрыв. Модули с одной меткой
+    считаются все (находка `duplicate_label` — отдельно): `dims` хранит первый, `built` — каждый."""
     dims: dict[str, tuple[ModuleSpec, ModuleDims]] = {}
-    built: dict[str, TemplateOut] = {}
+    built: list[tuple[ModuleSpec, TemplateOut]] = []
     for row, module in _modules(project):
+        if module.template not in TEMPLATES:
+            found.append(_build_failure(module, unknown_template_error(module)))
+            continue
         try:
             d = module_dims(module, row.kind, ws)
         except KitchenError as e:
             found.append(_build_failure(module, e))
             continue
-        dims[module.label] = (module, d)
+        dims.setdefault(module.label, (module, d))
         depth = _drawer_depth(module, d, ws)
         if depth:
             found.append(depth)
             continue  # расчёт упёрся бы в ту же глубину
         try:
-            built[module.label] = build_module(module, row, project.materials, ws, project.appliances)
+            built.append((module, build_module(module, row, project.materials, ws, project.appliances)))
         except KitchenError as e:
             found.append(_build_failure(module, e))
     return dims, built
+
+
+_LOOKALIKE = str.maketrans("ABCEHKMOPTXabcehkmoptx", "АВСЕНКМОРТХавсенкмортх")  # латиница → похожая кириллица
+
+
+def _label_key(label: str) -> str:
+    """Метка для сравнения: без пробелов по краям, без различия регистра и латинских двойников кириллицы."""
+    return label.strip().translate(_LOOKALIKE).casefold()
+
+
+def duplicate_labels(project: Project) -> list[Finding]:
+    """Метка модуля уникальна в проекте: пенал, записанный в двух рядах, тоже повтор. Метки, совпадающие после
+    нормализации (регистр, пробелы по краям, латинские «H1» и кириллические «Н1»), — повтор. Одна находка на
+    метку, в сообщении все записи."""
+    groups: dict[str, list[str]] = {}
+    for _, module in _modules(project):
+        groups.setdefault(_label_key(module.label), []).append(module.label)
+    return [
+        Finding(
+            code="duplicate_label",
+            level="error",
+            subject=labels[0],
+            message=f"Метка модуля «{labels[0]}» не уникальна: повторяется как {', '.join(f'«{x}»' for x in labels[1:])}.",
+        )
+        for labels in groups.values()
+        if len(labels) > 1
+    ]
 
 
 def _build_failure(module: ModuleSpec, error: KitchenError) -> Finding:
@@ -419,38 +449,62 @@ def part_fit_findings(part: Part, sheet: SheetMaterial, ws: Workshop) -> list[Fi
     ]
 
 
-def _sheet_fit(built: dict[str, TemplateOut], ws: Workshop) -> list[Finding]:
+def _sheet_fit(built: list[tuple[ModuleSpec, TemplateOut]], ws: Workshop) -> list[Finding]:
     """Все листовые детали проекта в рабочем поле листа."""
     sheets = {m.id: m for m in ws.materials.sheets}
     return [
         f
-        for out in built.values()
+        for _, out in built
         for part in out.parts
         if part.material in sheets  # фасады и столешница — не листовые детали
         for f in part_fit_findings(part, sheets[part.material], ws)
     ]
 
 
-def _no_back(built: dict[str, TemplateOut], dims: dict[str, tuple[ModuleSpec, ModuleDims]]) -> list[Finding]:
+def _no_back(built: list[tuple[ModuleSpec, TemplateOut]]) -> list[Finding]:
     """Корпус без задней стенки. Модуль без корпуса (только фасад) не в счёт."""
     return [
         Finding(
             code="no_back_panel",
             level="warning",
-            subject=label,
-            message=f"Модуль {label}: без задней стенки — проверьте, что так и задумано.",
+            subject=module.label,
+            message=f"Модуль {module.label}: без задней стенки — проверьте, что так и задумано.",
         )
-        for label, out in built.items()
-        if TEMPLATES[dims[label][0].template].carcass and not any(p.name == BACK_PANEL for p in out.parts)
+        for module, out in built
+        if TEMPLATES[module.template].carcass and not any(p.name == BACK_PANEL for p in out.parts)
     ]
+
+
+def _countertop_overrides(project: Project) -> list[Finding]:
+    """Столешница одна на проект (`common.size_countertop`): переопределение у ряда или модуля цену, раскрой и
+    закупку не меняло бы, а КП расходилось бы с ценой, поэтому проект с ним отклоняется."""
+    found: list[Finding] = []
+    for wall in project.walls:
+        for row in wall.rows:
+            places = [(f"ряд {_KIND_RU[row.kind]} на стене «{wall.label}»", wall.label, row.materials)]
+            places += [(f"Модуль {m.label}", m.label, m.materials) for m in row.modules]
+            for where, subject, overrides in places:
+                if overrides is not None and overrides.countertop is not None:
+                    found.append(
+                        Finding(
+                            code="countertop_override",
+                            level="error",
+                            subject=subject,
+                            message=(
+                                f"{where[:1].upper() + where[1:]}: столешница задаётся только для всего проекта "
+                                "(materials.countertop), переопределение у ряда или модуля не поддерживается."
+                            ),
+                        )
+                    )
+    return found
 
 
 def check_project(project: Project, ws: Workshop, brief: dict | None = None) -> list[Finding]:
     """Все проверки проекта, ошибки и предупреждения вместе. `brief` — последний бриф заказа (или `None`)."""
-    found = _row_sums(project, ws)
+    found = duplicate_labels(project) + _row_sums(project, ws) + _countertop_overrides(project)
     dims, built = _build(project, ws, found)
     failed = {f.subject for f in found if f.code == "module_build"}
     found += _niches(project, ws, dims, None if brief is None else brief_appliances(brief), failed)
     found += _sheet_fit(built, ws)
-    found += _no_back(built, dims)
+    found += _no_back(built)
     return found

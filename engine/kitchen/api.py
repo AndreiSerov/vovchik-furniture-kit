@@ -17,43 +17,62 @@ from pydantic import BaseModel, Field
 
 from kitchen import brief as brief_check
 from kitchen import store
-from kitchen.checks import Finding
+from kitchen.checks import Finding, duplicate_labels
 from kitchen.checks import check_project as run_checks
-from kitchen.common import CommonItem, CountertopCut, compute_common, plan_countertop
-from kitchen.cutting import MaterialCut, cut_parts
+from kitchen.common import CommonItem, CountertopSize, compute_common, size_countertop
+from kitchen.cutting import MaterialCut, cut_parts, kerf_warnings
 from kitchen.cutting_pdf import write_cutting_map
+from kitchen.drilling import DrillingCheck, reconcile
+from kitchen.drilling_pdf import PageLayout, map_layout, write_drilling_map
+from kitchen.economy import EconomyLine, EconomyVariant, apply_rule
 from kitchen.edging_pdf import write_edging_map
-from kitchen.errors import InputError, OrderError
-from kitchen.models import Workshop
-from kitchen.parts import EdgeTotals, ModuleParts, Part, compute_parts
+from kitchen.errors import InputError, KitchenError, OrderError
+from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
+from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
+from kitchen.parts import PURPOSE_RU, EdgeTotals, ModuleParts, Part, compute_parts
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
+from kitchen.quote import DAYS_ERROR, QuoteBody, build_quote, check_days, money, parse_days, percent, plural
+from kitchen.quote_pdf import write_quote
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
 __all__ = [
+    "DAYS_ERROR",
+    "HOLE_PURPOSES",
+    "OUTPUT_RECOMPUTE",
     "BriefSaveResult",
     "BriefShowResult",
     "CheckResult",
     "CommonItem",
     "DiffResult",
+    "DrillingCheck",
+    "DrillingResult",
+    "EconomyLine",
+    "EconomyVariant",
     "EdgeTotals",
     "EdgingResult",
+    "EstimateLabor",
+    "EstimateResult",
     "ExportResult",
     "FileSummary",
     "Finding",
     "ImportResult",
+    "LaborLine",
     "LogEntry",
     "LogResult",
     "ModuleParts",
     "OrderInfo",
     "OrderResult",
     "OutputInfo",
+    "PageLayout",
     "PartsResult",
     "PartsSource",
     "ProductionResult",
     "PurchaseResult",
     "QuickEstimate",
+    "QuoteResult",
+    "StaleOutput",
     "StatusResult",
     "ValidationContext",
     "ValidationResult",
@@ -66,22 +85,37 @@ __all__ = [
     "cut_from_order",
     "cut_from_project",
     "diff_project",
+    "drilling_and_save",
+    "drilling_from_order",
+    "drilling_from_project",
+    "drilling_map_layout",
+    "economy_parts_from_project",
     "edges_and_save",
     "edges_from_order",
     "edges_from_project",
+    "estimate_and_save",
+    "estimate_from_order",
+    "estimate_from_project",
     "export_project",
     "import_project",
     "list_outputs",
     "load_workshop",
     "log_add",
+    "money",
     "order_new",
     "order_show",
+    "parse_days",
     "parts_from_order",
     "parts_from_project",
+    "percent",
+    "plural",
     "production_and_save",
     "purchase_and_save",
     "purchase_from_order",
     "quick_estimate",
+    "quote_and_save",
+    "quote_from_order",
+    "quote_from_project",
     "resolve_home",
     "status",
     "validate_wrapper",
@@ -99,18 +133,22 @@ class WorkshopCheck(Result):
     errors: list[str]
 
 
-_LIST_KEYS = {
-    "materials.yaml": ["листовые", "кромка", "столешницы", "фасады"],
-    "hardware.yaml": ["позиции"],
-    "appliances.yaml": ["позиции"],
-    "labor.yaml": ["нормы_минут"],
+# Что считать в сводке файла: поля моделей; русские ключи берём из алиасов моделей, а не повторяем здесь.
+_COUNTED = {
+    "materials.yaml": (Materials, ("sheets", "edges", "countertops", "facades")),
+    "hardware.yaml": (Hardware, ("items",)),
+    "appliances.yaml": (Appliances, ("items",)),
+    "labor.yaml": (Labor, ("norms_min",)),
+    "economy.yaml": (Economy, ("rules",)),
 }
 
 
 def _counts(name: str, data: dict) -> dict[str, int]:
-    keys = _LIST_KEYS.get(name)
-    if keys:
-        return {k: len(data.get(k) or []) for k in keys}
+    if name in _COUNTED:
+        model, fields = _COUNTED[name]
+        keys = [model.model_fields[f].alias or f for f in fields]
+        # Скаляр под списочным ключом не считаем: его назовёт ошибка загрузки (файл и ключ).
+        return {k: len(v) if isinstance(v := data.get(k), list | dict) else 0 for k in keys}
     return {"ключей": len([k for k in data if k != "mock"])}
 
 
@@ -177,12 +215,25 @@ class ExportResult(Result):
     project: dict[str, Any]
 
 
+class StaleOutput(BaseModel):
+    """Устаревший вывод: версия-источник меньше текущей версии проекта."""
+
+    kind: store.OutputKind
+    path: str  # относительно KITCHEN_HOME, как в БД
+    source_version: int
+    command: str  # команда пересчёта целиком, `kitchen cut <заказ>`
+
+
 class StatusResult(Result):
     order: str
     stage: str
     project_version: int | None
     path: str
     text: str
+    stale: list[StaleOutput] = Field(default_factory=list)
+
+
+OUTPUT_RECOMPUTE = store.OUTPUT_RECOMPUTE
 
 
 LOG_KINDS = ("done", "decision", "next", "note")
@@ -198,6 +249,14 @@ def _info(row: sqlite3.Row) -> OrderInfo:
 def _mock_of(loaded: Loaded) -> dict[str, Any]:
     """Плашка мока на всех командах заказа: показываем, пока хоть один файл мастерской мок."""
     return {"mock": bool(loaded.mock_files), "mock_files": loaded.mock_files}
+
+
+def is_mock(home: Path | None = None) -> bool:
+    """Мок ли мастерская сейчас; мастерской нет — `False` (выводить нечего). Для плашки на сообщении об ошибке."""
+    try:
+        return bool(load(home or resolve_home()).mock_files)
+    except KitchenError:
+        return False
 
 
 def _mock(home: Path) -> dict[str, Any]:
@@ -332,13 +391,6 @@ def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
         project = parse_project({k: v for k, v in data.items() if k != "version"})
     except OrderError as e:
         return ValidationResult(errors=e.problems)
-    seen = set()
-    for wall in project.walls:
-        for row in wall.rows:
-            for module in row.modules:
-                if module.label in seen:
-                    return ValidationResult(errors=[f"Метка модуля «{module.label}» не уникальна."])
-                seen.add(module.label)
     if ctx.workshop is None:  # без мастерской проект не проверить, а непроверенный не принимаем
         return ValidationResult(
             errors=[
@@ -375,11 +427,49 @@ def _read_json(path: Path, what: str) -> Any:
     if not path.is_file():
         raise OrderError(f"{what} {path} не найден.")
     try:
-        return json.loads(path.read_text(encoding="utf-8"), parse_constant=_reject_constant)
+        return json.loads(path.read_text(encoding="utf-8-sig"), parse_constant=_reject_constant)
     except json.JSONDecodeError as e:
         raise OrderError(f"{path.name}: не JSON (строка {e.lineno}, столбец {e.colno}).") from e
-    except ValueError as e:  # NaN/Infinity и ошибка кодировки
+    except UnicodeDecodeError as e:
+        raise OrderError(f"{path.name}: файл не в кодировке UTF-8; сохраните его как UTF-8.") from e
+    except ValueError as e:  # NaN/Infinity
         raise OrderError(f"{path.name}: не JSON ({e}).") from e
+
+
+_WRITE_REASONS: dict[type[OSError], str] = {
+    IsADirectoryError: "по этому пути папка, а не файл",
+    NotADirectoryError: "часть пути — не папка",
+    PermissionError: "нет доступа",
+    FileNotFoundError: "путь недоступен",
+    FileExistsError: "по этому пути уже есть файл вместо папки",
+    OSError: "ошибка записи",
+}
+
+
+def _write_reason(e: OSError) -> str:
+    return next((text for kind, text in _WRITE_REASONS.items() if isinstance(e, kind)), "ошибка записи")
+
+
+def _write_text(path: Path, text: str) -> None:
+    """Запись файла заказа: папка вместо файла, нет доступа, нет места — русская ошибка, а не трейсбек."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    except OSError as e:
+        raise OrderError(f"Не удалось записать файл {path}: {_write_reason(e)}.") from e
+
+
+def _same_project(version: sqlite3.Row, digest: str) -> bool:
+    """Версия в БД совпадает с проектом по нормализованному хешу.
+
+    Версии, записанные до нормализации, хранят хеш сырого JSON: их хеш пересчитывается из данных версии,
+    история не переписывается."""
+    if version["content_hash"] == digest:
+        return True
+    try:
+        return _data_hash(json.loads(version["data"])) == digest
+    except ValueError:
+        return False
 
 
 def import_project(
@@ -406,11 +496,11 @@ def import_project(
             raise OrderError([*checked.errors, tail])
         data = {k: v for k, v in data.items() if k != "version"}  # номер версии ставит движок
         text = _canonical(data)
-        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        digest = _data_hash(data)
         o.conn.execute("BEGIN IMMEDIATE")
         current = _current_version(o.conn, o.pk)  # перечитать под блокировкой
         prev = current["version"] if current else None
-        if current and current["content_hash"] == digest:
+        if current and _same_project(current, digest):
             return ImportResult(
                 order=o.ref,
                 changed=False,
@@ -466,10 +556,7 @@ def export_project(
                 raise OrderError(f"У заказа {o.ref} нет версии {version} проекта.")
         project = {**json.loads(found["data"]), "version": found["version"]}
         target = Path(out) if out else o.home / "orders" / o.ref / "project.json"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(
-            json.dumps(project, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
+        _write_text(target, json.dumps(project, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
         return ExportResult(
             order=o.ref, version=found["version"], path=str(target), project=project, **_mock(o.home)
         )
@@ -621,6 +708,47 @@ def _section(title: str, lines: list[str], empty: str) -> list[str]:
     return [f"## {title}", "", *(lines or [empty]), ""]
 
 
+def _stale_outputs(
+    conn: sqlite3.Connection, order_pk: int, order_ref: str, current_version: int | None
+) -> list[StaleOutput]:
+    """Выводы, чья версия-источник меньше текущей версии проекта (смена данных мастерской не в счёт)."""
+    if current_version is None:
+        return []
+    rows = conn.execute(
+        "SELECT kind, path, source_version FROM outputs WHERE order_id = ? AND source_version < ? ORDER BY id",
+        (order_pk, current_version),
+    ).fetchall()
+    unknown = sorted({r["kind"] for r in rows if r["kind"] not in OUTPUT_RECOMPUTE})
+    if unknown:
+        raise OrderError(
+            f"В БД есть выводы неизвестного вида: {', '.join(unknown)}. "
+            "Их записал более новый движок — обновите kitchen."
+        )
+    return [
+        StaleOutput(
+            kind=r["kind"],
+            path=r["path"],
+            source_version=r["source_version"],
+            command=" ".join(
+                part
+                for part in (
+                    "kitchen",
+                    OUTPUT_RECOMPUTE[r["kind"]].command,
+                    order_ref,
+                    OUTPUT_RECOMPUTE[r["kind"]].args,
+                )
+                if part
+            ),
+        )
+        for r in rows
+    ]
+
+
+def _stale_line(s: StaleOutput) -> str:
+    label = OUTPUT_RECOMPUTE[s.kind].label
+    return f"- {label} `{s.path}`: версия {s.source_version}, пересчитать: `{s.command}`"
+
+
 def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> StatusResult:
     """Собирает status.md. Даты в нём — по местному времени (`tz` — для тестов)."""
 
@@ -651,6 +779,8 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
         lines += ["## Этап", "", stage, "", "## Версия проекта", ""]
         lines += [f"Версия {cur['version']} от {day(cur['created_at'])}."] if cur else ["Проекта ещё нет."]
         lines.append("")
+        stale = _stale_outputs(o.conn, o.pk, o.ref, cur["version"] if cur else None)
+        lines += _section("Устарело", [_stale_line(s) for s in stale], "Пока ничего.")
         lines += _section("Решения клиента", dated(entries("decision")[::-1]), "Пока нет.")
         lines += _section("Сделано", dated(entries("done")[::-1]), "Пока ничего.")
         lines += _section("Дальше", dated(entries("next", 5)), "Пока не записано.")
@@ -660,15 +790,14 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
         text = "\n".join(lines).rstrip() + "\n"
         mock = _mock(o.home)
         target = o.home / "orders" / o.ref / "status.md"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        body = f"{MOCK_BANNER}\n\n{text}\n{MOCK_BANNER}\n" if mock["mock"] else text
-        target.write_text(body, encoding="utf-8")
+        _write_text(target, f"{MOCK_BANNER}\n\n{text}\n{MOCK_BANNER}\n" if mock["mock"] else text)
         return StatusResult(
             order=o.ref,
             stage=stage,
             project_version=cur["version"] if cur else None,
             path=str(target),
             text=text,
+            stale=stale,
             **mock,
         )
 
@@ -789,7 +918,7 @@ class PartsSource(BaseModel):
     kind: Literal["order", "file"]
     order: str  # номер-фамилия (из БД) или поле order файла
     version: int | None  # версия проекта; у файла — только если она записана в самом файле
-    content_hash: str  # sha256 канонического JSON без поля version (как у версии в БД)
+    content_hash: str  # sha256 нормализованного проекта (`_project_hash`): у файла и версии из БД одинаков
     path: str | None = None  # путь файла проекта
     brief_id: int | None = None  # последний бриф заказа: с ним посчитаны проверки
     brief_saved_at: str | None = None
@@ -811,8 +940,24 @@ class PartsResult(Result):
     warnings: list[str]
 
 
-def _project_hash(data: dict) -> str:
-    return hashlib.sha256(_canonical({k: v for k, v in data.items() if k != "version"}).encode()).hexdigest()
+def _project_hash(project: Project) -> str:
+    """Хеш нормализованного проекта: написание `order`, `600` и `600.0`, порядок ключей хеш не меняют."""
+    normalized = project.model_dump(mode="json", exclude={"order", "version"})
+    for wall in normalized["walls"]:
+        for row in wall["rows"]:
+            for module in row["modules"]:
+                # `contents: {}` и отсутствующий `contents` — один проект
+                if module["contents"] and not any(module["contents"].values()):
+                    module["contents"] = None
+    return hashlib.sha256(_canonical(normalized).encode()).hexdigest()
+
+
+def _data_hash(data: dict) -> str:
+    """Хеш проекта из JSON. Проект, который схема не читает (старая версия, чужая проверка), — хеш сырого JSON."""
+    try:
+        return _project_hash(parse_project(data))
+    except OrderError:
+        return hashlib.sha256(_canonical(data).encode("utf-8")).hexdigest()
 
 
 def _build_parts(
@@ -824,6 +969,9 @@ def _build_parts(
     workshop: Workshop | None = None,
 ) -> PartsResult:
     workshop = workshop or load_workshop(home)
+    repeated = duplicate_labels(project)
+    if repeated:  # тот же текст, что в находке проверок и при импорте
+        raise OrderError([f.message for f in repeated])
     computed = compute_parts(project, workshop)
     source = source.model_copy(
         update={
@@ -861,15 +1009,7 @@ def _brief_of_project(home: Path, order: str) -> sqlite3.Row | None:
 def parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
     """`kitchen parts --project <файл>`: детали проекта из файла (черновик до импорта)."""
     home = home or resolve_home()
-    data = _read_json(Path(path), "Файл проекта")
-    project = parse_project(data)
-    source = PartsSource(
-        kind="file",
-        order=project.order,
-        version=project.version,
-        content_hash=_project_hash(data),
-        path=str(path),
-    )
+    project, source = _project_file(path)
     return _build_parts(project, home, source, _brief_of_project(home, project.order), [])
 
 
@@ -893,7 +1033,7 @@ def _order_project(order: str, home: Path) -> tuple[Project, PartsSource, sqlite
         kind="order",
         order=o.ref,
         version=current["version"],
-        content_hash=current["content_hash"],
+        content_hash=_project_hash(project),  # нормализованный: версии со старым хешем в БД сходятся с файлом
         version_brief_id=current["brief_id"],
     )
     return project, source, latest, warnings
@@ -928,11 +1068,12 @@ class CutResult(Result):
 
     order: str
     source: PartsSource
-    kerf: int  # пропил, мм (equipment.yaml)
+    kerf: int  # пропил, мм, как его учёл раскрой (дробный из equipment.yaml — вверх до целого)
+    kerf_declared: float  # пропил, как он записан в equipment.yaml
     trim: int  # обрезка по периметру, мм
     max_cut_length: int  # макс. длина реза станка, мм
     materials: list[MaterialCut]
-    countertop: CountertopCut | None  # линейный раскрой столешницы; нет столешницы в проекте — `None`
+    countertop: CountertopSize | None  # общая длина и листы столешницы; нет столешницы в проекте — `None`
     warnings: list[str]
     output: OutputInfo | None = None  # PDF карты раскроя; только после `cut_and_save`
 
@@ -946,6 +1087,9 @@ def _build_cut(
     workshop: Workshop | None = None,
 ) -> CutResult:
     workshop = workshop or load_workshop(home)
+    repeated = duplicate_labels(project)
+    if repeated:  # тот же текст, что в находке проверок и при импорте
+        raise OrderError([f.message for f in repeated])
     computed = compute_parts(project, workshop)
     saw = workshop.equipment.saw
     return CutResult(
@@ -956,12 +1100,13 @@ def _build_cut(
                 "brief_saved_at": brief["created_at"] if brief else None,
             }
         ),
-        kerf=round(saw.kerf),
-        trim=round(workshop.equipment.sheet.perimeter_trim),
-        max_cut_length=round(saw.max_cut_length),
+        kerf=saw.kerf_mm,
+        kerf_declared=saw.kerf,
+        trim=workshop.equipment.sheet.perimeter_trim,
+        max_cut_length=saw.max_cut_length,
         materials=cut_parts(computed.modules, workshop),
-        countertop=plan_countertop(project, workshop),
-        warnings=[*computed.warnings, *extra],
+        countertop=size_countertop(project, workshop),
+        warnings=[*computed.warnings, *extra, *kerf_warnings(saw)],
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,
     )
@@ -970,15 +1115,7 @@ def _build_cut(
 def cut_from_project(path: Path, home: Path | None = None) -> CutResult:
     """`kitchen cut --project <файл>`: раскрой деталей проекта из файла (черновик до импорта)."""
     home = home or resolve_home()
-    data = _read_json(Path(path), "Файл проекта")
-    project = parse_project(data)
-    source = PartsSource(
-        kind="file",
-        order=project.order,
-        version=project.version,
-        content_hash=_project_hash(data),
-        path=str(path),
-    )
+    project, source = _project_file(path)
     return _build_cut(project, home, source, _brief_of_project(home, project.order), [])
 
 
@@ -1006,8 +1143,11 @@ def _save_outputs(
     if source.version is None:
         raise OrderError(f"У заказа {source.order} нет версии проекта.")
     directory = home / "orders" / source.order / "out"
-    directory.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=".output-", dir=directory))
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(prefix=".output-", dir=directory))
+    except OSError as e:
+        raise OrderError(f"Не удалось подготовить папку выводов {directory}: {_write_reason(e)}.") from e
     installed: list[tuple[Path, Path | None]] = []
     preserve_staging = False
     try:
@@ -1077,6 +1217,7 @@ def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -
             path,
             result.materials,
             kerf=result.kerf,
+            kerf_declared=result.kerf_declared,
             trim=result.trim,
             order=result.source.order,
             version=result.source.version,
@@ -1138,6 +1279,78 @@ def edges_and_save(order: str, home: Path | None = None, on: date | None = None)
     return result.model_copy(update={"output": output})
 
 
+# --- присадка -----------------------------------------------------------------
+
+
+HOLE_PURPOSES = PURPOSE_RU  # назначение отверстия -> по-русски, для текста CLI
+
+
+class DrillingResult(Result):
+    """Карта присадки: детали с отверстиями (по модулям проекта) и сверка с фурнитурой этапа 1."""
+
+    source: PartsSource
+    parts: list[Part]
+    checks: list[DrillingCheck]
+    warnings: list[str]
+    output: OutputInfo | None = None
+
+
+def _drilling(parts: PartsResult, workshop: Workshop) -> DrillingResult:
+    drilled = [p for m in parts.modules for p in m.parts if p.holes]
+    return DrillingResult(
+        source=parts.source,
+        parts=drilled,
+        checks=reconcile(drilled, parts.hardware, workshop),
+        warnings=parts.warnings,
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+    )
+
+
+def drilling_from_order(order: str, home: Path | None = None) -> DrillingResult:
+    """Присадка текущей версии проекта заказа, без записи файлов."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
+    workshop = load_workshop(home)
+    return _drilling(_build_parts(project, home, source, latest, warnings, workshop), workshop)
+
+
+def drilling_from_project(path: Path, home: Path | None = None) -> DrillingResult:
+    """`kitchen drilling --project <файл>`: присадка проекта из файла, файлов не пишет."""
+    home = home or resolve_home()
+    return _drilling(parts_from_project(path, home), load_workshop(home))
+
+
+DRILLING_PDF = "drilling-map.pdf"
+
+
+def drilling_map_layout(result: DrillingResult) -> list[PageLayout]:
+    """Раскладка страниц карты присадки (строки, контуры, базовые кромки, цепочки) — ровно то, что рисует PDF."""
+    return map_layout(result.parts, result.checks)
+
+
+def drilling_and_save(order: str, home: Path | None = None, on: date | None = None) -> DrillingResult:
+    """`kitchen drilling <заказ>`: присадка текущей версии, PDF карты и регистрация вывода (как у раскроя)."""
+    home = home or resolve_home()
+    result = drilling_from_order(order, home)
+    output = _save_output(
+        home,
+        result.source,
+        store.DRILLING,
+        DRILLING_PDF,
+        lambda path: write_drilling_map(
+            path,
+            result.parts,
+            result.checks,
+            order=result.source.order,
+            version=result.source.version,
+            mock=result.mock,
+            on=on or store.today(),
+        ),
+    )
+    return result.model_copy(update={"output": output})
+
+
 class PurchaseResult(Result):
     """Позиции закупки с количеством, ценами и суммами по магазинам."""
 
@@ -1164,7 +1377,7 @@ def _purchase(project: Project, parts: PartsResult, cut: CutResult, workshop: Wo
         source=parts.source,
         shops=shops,
         total=total,
-        warnings=parts.warnings,
+        warnings=[*parts.warnings, *kerf_warnings(workshop.equipment.saw)],
         mock=parts.mock,
         mock_files=parts.mock_files,
         mock_notice=MOCK_BANNER if parts.mock else None,
@@ -1234,6 +1447,348 @@ def purchase_and_save(order: str, home: Path | None = None) -> PurchaseResult:
     return result
 
 
+class EstimateResult(Result):
+    """Смета: себестоимость материалов из закупки, труд по операциям, цена с округлением."""
+
+    source: PartsSource
+    materials_cost: float
+    markup: float
+    consumables: float
+    delivery: float
+    labor: EstimateLabor
+    price_before_rounding: float
+    price: int
+    margin: float
+    rounding: str
+    warnings: list[str]
+    mock_notice: str | None = None
+    outputs: list[OutputInfo] = Field(default_factory=list)
+    # вариант «экономия» (`--economy`); без него ключа в выводе нет
+    economy: EconomyVariant | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
+def _estimate(project: Project, parts: PartsResult, cut: CutResult, workshop: Workshop) -> EstimateResult:
+    purchase = _purchase(project, parts, cut, workshop)
+    labor = build_labor(project, workshop, parts.modules, parts.hardware, parts.edges, cut.materials)
+    pricing = build_pricing(workshop, purchase.total, labor.total)
+    return EstimateResult(
+        source=parts.source,
+        materials_cost=purchase.total,
+        labor=labor,
+        warnings=[*parts.warnings, *kerf_warnings(workshop.equipment.saw)],
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+        mock_notice=MOCK_BANNER if parts.mock else None,
+        **pricing.model_dump(),
+    )
+
+
+def _priced(project: Project, home: Path, source: PartsSource, workshop: Workshop) -> EstimateResult:
+    """Смета копии проекта тем же путём, что и смета проекта: детали -> раскрой -> закупка -> смета."""
+    return _estimate(
+        project,
+        _build_parts(project, home, source, None, [], workshop),
+        _build_cut(project, home, source, None, [], workshop),
+        workshop,
+    )
+
+
+def _economy(
+    project: Project,
+    home: Path,
+    source: PartsSource,
+    workshop: Workshop,
+    price_as_is: int,
+    price_together: bool = True,
+) -> tuple[EconomyVariant, Project]:
+    """Вариант «экономия»: цена с каждой заменой отдельно (разница на правило) и со всеми предложенными сразу.
+    Замена с разницей не больше нуля не предлагается. Копия проекта нигде не сохраняется."""
+    offered: list[EconomyLine] = []
+    not_offered: list[EconomyLine] = []
+    problems: list[str] = []
+    for rule in workshop.economy.rules:
+        applied = apply_rule(project, rule, workshop)
+        problems += applied.problems
+        if not applied.modules:
+            continue
+        price = _priced(applied.project, home, source, workshop).price
+        line = EconomyLine(
+            id=rule.id,
+            name=rule.name,
+            client_text=rule.client_text,
+            modules=applied.modules,
+            price=price,
+            saving=price_as_is - price,
+        )
+        (offered if line.saving > 0 else not_offered).append(line)
+    chosen = {line.id for line in offered}
+    together = project
+    for rule in workshop.economy.rules:
+        if rule.id in chosen:
+            applied = apply_rule(together, rule, workshop)
+            together = applied.project
+            problems += [p for p in applied.problems if p not in problems]
+    if not offered:
+        price = price_as_is
+    elif len(offered) == 1:
+        price = offered[0].price  # одна замена: «со всеми» и «с одной» — один и тот же проект
+    elif price_together:
+        price = _priced(together, home, source, workshop).price
+    else:
+        price = 0  # цена нужна только вариантам с `price_together`; детали копии от неё не зависят
+    variant = EconomyVariant(
+        price_as_is=price_as_is,
+        price=price,
+        saving=price_as_is - price,
+        replacements=offered,
+        not_offered=not_offered,
+        problems=problems,
+    )
+    return variant, together
+
+
+def _with_economy(
+    result: EstimateResult, project: Project, home: Path, workshop: Workshop, economy: bool
+) -> EstimateResult:
+    if not economy:
+        return result
+    variant, _ = _economy(project, home, result.source, workshop, result.price)
+    return result.model_copy(update={"economy": variant})
+
+
+def _estimate_run(
+    project: Project,
+    home: Path,
+    source: PartsSource,
+    brief: sqlite3.Row | None,
+    warnings: list[str],
+    workshop: Workshop,
+    economy: bool,
+) -> tuple[EstimateResult, PartsResult]:
+    """Смета снимка проекта и его детали: одна цепочка для сметы и КП, цена у них одна."""
+    parts = _build_parts(project, home, source, brief, warnings, workshop)
+    cut = _build_cut(project, home, source, brief, warnings, workshop)
+    result = _estimate(project, parts, cut, workshop)
+    return _with_economy(result, project, home, workshop, economy), parts
+
+
+def estimate_from_order(order: str, home: Path | None = None, economy: bool = False) -> EstimateResult:
+    """Смета текущей версии проекта; `economy` добавляет вариант «экономия» (копия, версия не меняется)."""
+    home = home or resolve_home()
+    project, source, brief, warnings = _order_project(order, home)
+    return _estimate_run(project, home, source, brief, warnings, load_workshop(home), economy)[0]
+
+
+def _project_file(path: Path) -> tuple[Project, PartsSource]:
+    data = _read_json(Path(path), "Файл проекта")
+    project = parse_project(data)
+    source = PartsSource(
+        kind="file",
+        order=project.order,
+        version=project.version,
+        content_hash=_project_hash(project),
+        path=str(path),
+    )
+    return project, source
+
+
+def estimate_from_project(path: Path, home: Path | None = None, economy: bool = False) -> EstimateResult:
+    """`kitchen estimate --project <файл>`: смета проекта из файла, без файлов выводов и записи в БД."""
+    home = home or resolve_home()
+    project, source = _project_file(path)
+    brief = _brief_of_project(home, project.order)
+    return _estimate_run(project, home, source, brief, [], load_workshop(home), economy)[0]
+
+
+def economy_parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
+    """Детали копии проекта из файла со всеми предложенными заменами «экономии»: то, из чего считана цена
+    «экономии». Ничего не пишет."""
+    home = home or resolve_home()
+    project, source = _project_file(path)
+    workshop = load_workshop(home)
+    base = _priced(project, home, source, workshop).price  # без неё не известно, какие замены предлагаются
+    _, together = _economy(project, home, source, workshop, base, price_together=False)
+    return _build_parts(together, home, source, _brief_of_project(home, project.order), [], workshop)
+
+
+def _economy_markdown(economy: EconomyVariant) -> list[str]:
+    lines = ["## Экономия", "", f"Цена как в проекте: {economy.price_as_is} ₽", ""]
+    if economy.replacements:
+        lines += [
+            f"- {line.name} (модули {', '.join(line.modules)}): цена с этой заменой {line.price} ₽, "
+            f"разница {line.saving} ₽. {line.client_text}"
+            for line in economy.replacements
+        ]
+        lines += [
+            "",
+            f"**Цена «экономии» со всеми заменами: {economy.price} ₽, разница {economy.saving} ₽**",
+            "",
+            "Сумма разниц по строкам может не совпасть с итогом: листы закупаются целыми, цена округляется.",
+            "",
+        ]
+    elif economy.not_offered:
+        lines += [
+            (
+                "Подходящие замены не удешевляют, поэтому не предложены: "
+                f"цена «экономии» {economy.price} ₽, разница {economy.saving} ₽."
+            ),
+            "",
+        ]
+    else:
+        lines += [f"Подходящих замен нет: цена «экономии» {economy.price} ₽, разница {economy.saving} ₽.", ""]
+    if economy.not_offered:
+        lines += ["### Не предложено", ""]
+        lines += [
+            f"- {line.name} (модули {', '.join(line.modules)}): не удешевляет, не предложена; "
+            f"цена с этой заменой {line.price} ₽, разница {line.saving} ₽"
+            for line in economy.not_offered
+        ]
+        lines.append("")
+    if economy.problems:
+        lines += ["### Замена не строится", "", *(f"- {problem}" for problem in economy.problems), ""]
+    return lines
+
+
+def _estimate_markdown(result: EstimateResult) -> str:
+    """Телефонная версия сметы: все суммы и количества из единой модели."""
+    lines = []
+    if result.mock_notice:
+        lines += [f"**{result.mock_notice}**", ""]
+    lines += ["# Смета", "", f"Заказ {result.source.order} · версия проекта {result.source.version}", ""]
+    if result.warnings:
+        lines += ["## Предупреждения", "", *(f"- {warning}" for warning in result.warnings), ""]
+    labor = result.labor
+    lines += [
+        "## Труд",
+        "",
+        f"Ставка {labor.rate_per_hour:g} ₽/ч.",
+        "",
+        *(
+            f"- {line.name}: {line.quantity:g} {line.unit} ({line.basis}) × {line.norm_min:g} мин = "
+            f"{line.minutes:g} мин = {line.amount:.2f} ₽"
+            for line in labor.lines
+        ),
+        "",
+        f"**Итого труд: {labor.minutes:g} мин, {labor.total:.2f} ₽**",
+        "",
+        "## Цена",
+        "",
+        f"- Материалы (закупка): {result.materials_cost:.2f} ₽",
+        f"- Наценка на материалы: {result.markup:.2f} ₽",
+        f"- Расходники: {result.consumables:.2f} ₽",
+        f"- Доставка материалов: {result.delivery:.2f} ₽",
+        f"- Труд: {labor.total:.2f} ₽",
+        f"- Итого до округления: {result.price_before_rounding:.2f} ₽",
+        f"- Маржа с учётом округления: {result.margin:.2f} ₽",
+        "",
+        f"**Цена: {result.price} ₽** (округление: {result.rounding})",
+        "",
+    ]
+    if result.economy:
+        lines += _economy_markdown(result.economy)
+    return "\n".join(lines)
+
+
+def _estimate_files(
+    home: Path, result: EstimateResult
+) -> tuple[EstimateResult, list[tuple[OutputInfo, Callable]]]:
+    outputs = [
+        _output_info(home, result.source, store.ESTIMATE_MD, "estimate.md"),
+        _output_info(home, result.source, store.ESTIMATE_JSON, "estimate.json"),
+    ]
+    result = result.model_copy(update={"outputs": outputs})
+    return result, [
+        (outputs[0], lambda path: path.write_text(_estimate_markdown(result), encoding="utf-8")),
+        (outputs[1], lambda path: path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")),
+    ]
+
+
+def estimate_and_save(order: str, home: Path | None = None, economy: bool = False) -> EstimateResult:
+    home = home or resolve_home()
+    result, files = _estimate_files(home, estimate_from_order(order, home, economy))
+    _save_outputs(home, result.source, files)
+    return result
+
+
+class QuoteResult(QuoteBody, Result):
+    """КП: то, что видит клиент. Цена — из сметы того же снимка проекта; себестоимости и наценки нет."""
+
+    source: PartsSource
+    outputs: list[OutputInfo] = Field(default_factory=list)
+
+
+def _quote(
+    project: Project,
+    home: Path,
+    source: PartsSource,
+    brief: sqlite3.Row | None,
+    warnings: list[str],
+    days: int,
+    economy: bool,
+) -> QuoteResult:
+    check_days(days)  # единственная проверка срока: до расчёта, без срока КП не выдать
+    workshop = load_workshop(home)
+    estimate, parts = _estimate_run(project, home, source, brief, warnings, workshop, economy)
+    body = build_quote(
+        project, parts.modules, workshop, days=days, price=estimate.price, economy=estimate.economy
+    )
+    return QuoteResult(
+        **body.model_dump(),
+        source=estimate.source,
+        mock=estimate.mock,
+        mock_files=estimate.mock_files,
+    )
+
+
+def quote_from_order(order: str, days: int, home: Path | None = None, economy: bool = False) -> QuoteResult:
+    """КП текущей версии проекта заказа. `days` — срок изготовления и монтажа в рабочих днях, вписывает мастер."""
+    home = home or resolve_home()
+    project, source, brief, warnings = _order_project(order, home)
+    return _quote(project, home, source, brief, warnings, days, economy)
+
+
+def quote_from_project(path: Path, days: int, home: Path | None = None, economy: bool = False) -> QuoteResult:
+    """`kitchen quote --project <файл>`: КП проекта из файла, без файлов выводов и записи в БД."""
+    home = home or resolve_home()
+    project, source = _project_file(path)
+    return _quote(project, home, source, _brief_of_project(home, project.order), [], days, economy)
+
+
+def quote_and_save(
+    order: str, days: int, home: Path | None = None, economy: bool = False, on: date | None = None
+) -> QuoteResult:
+    """КП заказа: `quote.pdf` и `quote.json` из одной модели, обе записи — в реестре выводов заказа."""
+    home = home or resolve_home()
+    result = quote_from_order(order, days, home, economy)
+    outputs = [
+        _output_info(home, result.source, store.QUOTE_PDF, "quote.pdf"),
+        _output_info(home, result.source, store.QUOTE_JSON, "quote.json"),
+    ]
+    result = result.model_copy(update={"outputs": outputs})
+    _save_outputs(
+        home,
+        result.source,
+        [
+            (
+                outputs[0],
+                lambda path: write_quote(
+                    path,
+                    result,
+                    order=result.source.order,
+                    version=result.source.version,
+                    mock=result.mock,
+                    on=on or store.today(),
+                ),
+            ),
+            (
+                outputs[1],
+                lambda path: path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8"),
+            ),
+        ],
+    )
+    return result
+
+
 class ProductionResult(Result):
     """Все производственные выводы одной версии проекта."""
 
@@ -1261,6 +1816,7 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
                 path,
                 cut.materials,
                 kerf=cut.kerf,
+                kerf_declared=cut.kerf_declared,
                 trim=cut.trim,
                 order=source.order,
                 version=source.version,

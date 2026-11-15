@@ -1,6 +1,7 @@
 """Поиск мастерской и загрузка её файлов с русскими сообщениями об ошибках."""
 
 import os
+from collections.abc import Hashable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeVar
@@ -13,9 +14,11 @@ from kitchen.models import (
     APPLIANCE_KINDS,
     Appliances,
     Construction,
+    Economy,
     Equipment,
     Hardware,
     Labor,
+    Master,
     Materials,
     Pricing,
     Workshop,
@@ -29,6 +32,8 @@ FILES: tuple[str, ...] = (
     "labor.yaml",
     "pricing.yaml",
     "appliances.yaml",
+    "economy.yaml",
+    "master.yaml",
 )
 
 NOT_FOUND = (
@@ -51,6 +56,39 @@ def resolve_home(start: Path | None = None) -> Path:
     raise WorkshopError(NOT_FOUND)
 
 
+class DuplicateKeyError(yaml.YAMLError):
+    """Один и тот же ключ дважды в одном разделе YAML: вторая запись молча затёрла бы первую."""
+
+    def __init__(self, key: object, mark: yaml.Mark | None):
+        super().__init__(f"повторный ключ {key}")
+        self.key = key
+        self.problem_mark = mark
+
+
+class _StrictLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        if isinstance(node, yaml.MappingNode):
+            seen = set()
+            for key_node, _ in node.value:
+                if key_node.tag == "tag:yaml.org,2002:merge":  # `<<:` подмешивает и может быть переопределён
+                    continue
+                key = self.construct_object(key_node, deep=True)
+                if not isinstance(key, Hashable):  # нехешируемый ключ отклонит базовый разбор
+                    continue
+                if key in seen:
+                    raise DuplicateKeyError(key, key_node.start_mark)
+                seen.add(key)
+        return super().construct_mapping(node, deep)
+
+
+def _syntax_problem(name: str, e: yaml.YAMLError) -> str:
+    mark = getattr(e, "problem_mark", None)
+    where = f"строка {mark.line + 1}, столбец {mark.column + 1}" if mark else "место не определено"
+    if isinstance(e, DuplicateKeyError):
+        return f"{name}: {where}: ключ «{e.key}» повторяется (вторая запись затёрла бы первую)."
+    return f"{name}: {where}: ошибка синтаксиса YAML."
+
+
 def read_raw(home: Path) -> tuple[dict[str, dict], list[str]]:
     """Читает YAML-файлы как есть. Возвращает (данные по файлам, проблемы чтения)."""
     raw: dict[str, dict] = {}
@@ -61,11 +99,12 @@ def read_raw(home: Path) -> tuple[dict[str, dict], list[str]]:
             problems.append(f"{name}: файл не найден в {path.parent}.")
             continue
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            data = yaml.load(path.read_text(encoding="utf-8-sig"), Loader=_StrictLoader)
+        except UnicodeDecodeError:
+            problems.append(f"{name}: файл не в кодировке UTF-8; сохраните его как UTF-8.")
+            continue
         except yaml.YAMLError as e:
-            mark = getattr(e, "problem_mark", None)
-            where = f"строка {mark.line + 1}, столбец {mark.column + 1}" if mark else "место не определено"
-            problems.append(f"{name}: {where}: ошибка синтаксиса YAML.")
+            problems.append(_syntax_problem(name, e))
             continue
         if not isinstance(data, dict):
             problems.append(f"{name}: ожидался набор «ключ: значение» в корне файла.")
@@ -88,9 +127,21 @@ _EXPECT = {
     "list_type": "ожидался список",
     "tuple_type": "ожидался список из нескольких значений",
     "too_short": "в списке не хватает значений",
+    "string_too_short": "строка не должна быть пустой",
     "too_long": "в списке лишние значения",
+    "finite_number": "ожидалось конечное число (не inf и не nan)",
     "model_type": "ожидался раздел с вложенными ключами",
     "dict_type": "ожидался раздел с вложенными ключами",
+    "literal_error": "значение не из допустимых (см. подсказку в шапке файла)",
+    "string_pattern_mismatch": "значение не того формата (см. подсказку в шапке файла)",
+}
+
+
+_BOUNDS = {
+    "greater_than": ("больше", "gt"),
+    "greater_than_equal": ("не меньше", "ge"),
+    "less_than": ("меньше", "lt"),
+    "less_than_equal": ("не больше", "le"),
 }
 
 
@@ -120,9 +171,14 @@ def translate(name: str, err: ValidationError) -> list[str]:
             expect = str(e["ctx"]["error"])
         elif e["type"] == "missing" and isinstance(e["loc"][-1], int):
             expect = "в строке списка не хватает значения"
+        elif e["type"] in _BOUNDS:
+            word, key = _BOUNDS[e["type"]]
+            expect = f"значение должно быть {word} {e['ctx'][key]:g}"
         else:
             expect = _EXPECT.get(e["type"]) or f"значение не подходит ({e['type']}: {e['msg']})"
-        if e["type"] == "missing" and not isinstance(e["loc"][-1], int):
+        if not e["loc"]:  # правило раздела целиком (повторный id и т. п.)
+            msgs.append(f"{name}: {expect}.")
+        elif e["type"] == "missing" and not isinstance(e["loc"][-1], int):
             msgs.append(f"{name}: ключ «{path}»: {expect}.")
         else:
             shown = f"«{e['input']}»"
@@ -227,10 +283,43 @@ def _cross_refs(w: Workshop) -> list[str]:
                 f"materials.yaml: ключ «кромка_к_материалу»: «{material_id}: {edge_id}» — нет такой "
                 f"кромки в кромке materials.yaml (есть: {', '.join(sorted(edge_ids))})."
             )
+    probs += _economy_refs(w, hw_ids)
     return probs
 
 
-M = TypeVar("M", Equipment, Construction, Materials, Hardware, Labor, Pricing, Appliances)
+def _economy_refs(w: Workshop, hw_ids: set[str]) -> list[str]:
+    """Шаблоны и вставки правил `economy.yaml` существуют; шаблон замены стоит в том же ряду, что исходный."""
+    from kitchen.parts import TEMPLATES  # локально: `parts` импортирует `project`, а тот — этот модуль
+
+    probs = []
+    known = ", ".join(sorted(TEMPLATES))
+    for i, rule in enumerate(w.economy.rules):
+        for j, case in enumerate(rule.cases):
+            where = f"замены[{i}].случаи[{j}]"
+            for key, template in (("где.шаблон", case.where.template), ("на.шаблон", case.change.template)):
+                if template is not None and template not in TEMPLATES:
+                    probs.append(
+                        f"economy.yaml: ключ «{where}.{key}»: значение «{template}» — нет такого шаблона (есть: {known})."
+                    )
+            old, new = TEMPLATES.get(case.where.template), TEMPLATES.get(case.change.template or "")
+            if old and new and old.row_kind != new.row_kind:
+                probs.append(
+                    f"economy.yaml: ключ «{where}.на.шаблон»: «{case.change.template}» стоит в другом ряду, "
+                    f"чем «{case.where.template}» ({new.row_kind} вместо {old.row_kind})."
+                )
+            for key, insert in (
+                ("где.вставка", case.where.insert),
+                ("на.убрать_вставку", case.change.remove_insert),
+            ):
+                if insert is not None and insert not in hw_ids:
+                    probs.append(
+                        f"economy.yaml: ключ «{where}.{key}»: значение «{insert}» — нет такого id в позициях "
+                        f"hardware.yaml (есть: {', '.join(sorted(hw_ids))})."
+                    )
+    return probs
+
+
+M = TypeVar("M", Equipment, Construction, Materials, Hardware, Labor, Pricing, Appliances, Economy, Master)
 
 
 @dataclass
@@ -266,6 +355,8 @@ def load(home: Path) -> Loaded:
     labor = parse("labor.yaml", Labor)
     pricing = parse("pricing.yaml", Pricing)
     appliances = parse("appliances.yaml", Appliances)
+    economy = parse("economy.yaml", Economy)
+    master = parse("master.yaml", Master)
 
     # Файл, который не прочитался или не прошёл проверку, считаем моком, пока он явно не `mock: false`.
     mock_files = [
@@ -284,6 +375,8 @@ def load(home: Path) -> Loaded:
         and labor
         and pricing
         and appliances
+        and economy
+        and master
     ):
         workshop = Workshop(
             equipment=equipment,
@@ -293,6 +386,8 @@ def load(home: Path) -> Loaded:
             labor=labor,
             pricing=pricing,
             appliances=appliances,
+            economy=economy,
+            master=master,
             mock_files=mock_files,
         )
         problems = _cross_refs(workshop)

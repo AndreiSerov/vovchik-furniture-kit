@@ -220,7 +220,7 @@ def test_countertop_is_cut_linearly_apart_from_sheet_parts(home):
     result = api.cut_from_project(write_project(home, lambda p: None), home)
     top = result.countertop
     assert (top.item, top.sheet_length, top.sheet_count) == ("top_38_marble", 4100, 1)
-    assert top.sheets == [[2200, 1200]]  # нижние ряды 2200 и 1200 мм без пенала; 2200 + 4 + 1200 ≤ 4100
+    assert top.total_length_mm == 3400  # нижние ряды 2200 и 1200 мм без пенала
     assert "top_38_marble" not in materials(result)  # в листовой раскрой столешница не попадает
 
 

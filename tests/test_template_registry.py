@@ -43,5 +43,10 @@ def test_registry_build_uses_project_appliances(home):
     catalog = parts.TEMPLATES["tall_oven"].build(
         module, dims, proj.materials, ws, parts.BuildContext(appliances=[], row=row)
     )
-    assert [p.model_dump() for p in via_registry.parts] == [p.model_dump() for p in via_module.parts]
-    assert [p.model_dump() for p in via_registry.parts] != [p.model_dump() for p in catalog.parts]
+
+    # отверстия присадки ставит `build_module` после шаблона (тикет 19): сравниваются детали без них
+    def dump(out):
+        return [p.model_dump(exclude={"holes", "base_edges"}) for p in out.parts]
+
+    assert dump(via_registry) == dump(via_module)
+    assert dump(via_registry) != dump(catalog)

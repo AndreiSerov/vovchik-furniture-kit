@@ -31,32 +31,45 @@
 
 ## Этап 3. Смета и КП
 
-- [ ] 16 — Смета (3.1, 3.2, 3.3) ([спека](docs/specs/stage-3-estimate.md))
-- [ ] 17 — Вариант «экономия» (3.3) ([спека](docs/specs/stage-3-estimate.md))
-- [ ] 18 — КП (3.4) ([спека](docs/specs/stage-3-estimate.md))
+- [x] 16 — Смета (3.1, 3.2, 3.3) ([спека](docs/specs/stage-3-estimate.md))
+- [x] 33 — Хотфикс: мастерская, заказы и раскрой отклоняют неверный ввод ([спека](docs/specs/hotfix-input-guards.md))
+- [x] 34 — Хотфикс: проект и шаблоны отклоняют неверный ввод ([спека](docs/specs/hotfix-input-guards.md))
+- [x] 35 — Столешница по общей длине ([спека](docs/specs/hotfix-input-guards.md))
+- [x] 17 — Вариант «экономия» (3.3) ([спека](docs/specs/stage-3-estimate.md))
+- [x] 18 — КП (3.4) ([спека](docs/specs/stage-3-estimate.md))
 
-**ВЕХА 2** — остановиться, показать результаты, дождаться подтверждения.
+**ВЕХА 2** — остановиться, показать результаты, дождаться подтверждения. Показана и подтверждена 2026-11-15 (выводы Петрова в `orders/_veha-2/`).
 
 
 ## Этап 4. Присадка и сборка
 
-- [ ] 19 — Присадка: конфирматы и петли (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
-- [ ] 20 — Присадка: направляющие и полкодержатели (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
+- [x] 19 — Присадка: конфирматы и петли (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
+- [x] 20 — Присадка: направляющие и полкодержатели (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [ ] 21 — Наклейки 70×37 (4.3) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [ ] 22 — Сборочный лист и чек-лист выезда (4.4) ([спека](docs/specs/stage-4-drilling-assembly.md))
 
 ## Этап 5. Проект и 3D
 
-- [ ] 23 — Модули в комнате и 3D (5.1) ([спека](docs/specs/stage-5-project-3d.md))
-- [ ] 24 — Устаревшие выводы в `status` (5.3) ([спека](docs/specs/stage-5-project-3d.md))
-- [ ] 32 — Пустое место и антресоль над холодильником (5.4) ([спека](docs/specs/stage-5-project-3d.md))
-- [ ] 25 — Черновик раскладки (5.2) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 23 — Упрощённое 3D: модули в комнате (5.1) ([спека](docs/specs/stage-5-project-3d.md))
+- [x] 24 — Устаревшие выводы в `status` (5.3) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 32 — Пустое место в ряду (5.4) ([спека](docs/specs/stage-5-project-3d.md))
 
 ## Этап 6. Скиллы
 
-- [ ] 26 — Статические проверки скиллов (6.6) ([спека](docs/specs/stage-6-skills.md))
+- [x] 26 — Статические проверки скиллов (6.6) ([спека](docs/specs/stage-6-skills.md))
+- [ ] 36 — Команда `kitchen check` (6.1) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 27 — Скилл `kitchen-project` (6.1, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 28 — Скилл `kitchen-production` (6.2, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 29 — Скилл `kitchen-estimate` (6.3, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 30 — Доработка `kitchen-brief` (6.5, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 31 — Триггеры и «продолжи заказ Петрова» (6.6) ([спека](docs/specs/stage-6-skills.md))
+
+## Бэклог (после MVP)
+
+Решение 2026-11-15: MVP — от брифа до документов цеха и КП, с упрощённым 3D. Остальное ждёт здесь.
+
+- [ ] 25 — Черновик раскладки (5.2; нужен грилинг) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 37 — Целевое 3D: детали, фасады, столешница (5.1) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 38 — Антресоль над холодильником (5.4) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 39 — Раскладка и целевое 3D в `kitchen-project` (6.1) ([спека](docs/specs/stage-6-skills.md))
+- [ ] Отложенные мелкие находки ревью — [`docs/reviews/2026-11-15/deferred.md`](docs/reviews/2026-11-15/deferred.md)

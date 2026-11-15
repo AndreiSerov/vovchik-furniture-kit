@@ -4,7 +4,7 @@ import pytest
 from kitchen import api
 from kitchen.errors import KitchenError, OrderError, WorkshopError
 
-from tests.conftest import FIELDS_NOT_IN_GOLDEN, load_golden
+from tests.conftest import golden_dump, load_golden
 
 
 def test_golden_base_door_600(home, base_door_project):
@@ -12,7 +12,7 @@ def test_golden_base_door_600(home, base_door_project):
     result = api.parts_from_project(base_door_project, home)
     expected = load_golden("base_door_600")
     # площадь есть только у фасадов: у остальных деталей area_m2 пуст и в эталон не входит
-    assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
+    assert golden_dump(result) == expected
 
 
 def test_mock_flag_on_result(home, base_door_project):
@@ -54,7 +54,7 @@ def test_duplicate_module_labels_break_part_ids(home, base_door_project):
     p.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(OrderError) as e:
         api.parts_from_project(p, home)
-    assert "не уникальна" in e.value.problems[0] and "Н1-бок-Л" in e.value.problems[0]
+    assert "Метка модуля «Н1» не уникальна" in e.value.problems[0]  # текст находки duplicate_label
 
 
 def test_base_door_rejected_in_upper_row(home, base_door_project):

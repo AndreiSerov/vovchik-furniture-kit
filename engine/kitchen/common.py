@@ -2,7 +2,7 @@
 
 Правила и позиции — в `construction.yaml` (`общие_позиции`, МОК). Длины берутся из рядов проекта:
 цоколь — по фронту всех нижних модулей (пенал и ПММ тоже стоят на цоколе), шина и LED — по верхним
-рядам, столешница — по нижним модулям без пенала. Угловой модуль считается на своей стене:
+рядам, столешница — по общей длине нижних модулей без пенала, целыми листами. Угловой модуль считается на своей стене:
 смещение на соседней стене его не удлиняет (стык в углу «встык»).
 """
 
@@ -17,7 +17,7 @@ from kitchen.models import Workshop
 from kitchen.parts import TEMPLATES
 from kitchen.project import Project
 
-__all__ = ["CommonItem", "CountertopCut", "compute_common", "plan_countertop"]
+__all__ = ["CommonItem", "CountertopSize", "compute_common", "is_tall", "row_layouts", "size_countertop"]
 
 
 class CommonItem(BaseModel):
@@ -37,59 +37,75 @@ def _ceil(value: Decimal) -> int:
     return int(value.to_integral_value(rounding=ROUND_CEILING))
 
 
-def _is_tall(m) -> bool:
+def is_tall(m) -> bool:
+    """Модуль записан в одном ряду стены и занимает оба — свойство шаблона в реестре."""
     return TEMPLATES[m.template].both_rows if m.template in TEMPLATES else False
 
 
+def row_layouts(wall) -> list[list]:
+    """Модули каждого ряда стены по порядку вдоль стены, с пеналами из других рядов: пенал входит в оба ряда
+    (и в ряд со своим пеналом тоже). Единственное место, где решается, что стоит в ряду: сумма ряда
+    (`checks`), цоколь, шина и столешница берут модули отсюда. Место пенала — отступ от начала стены:
+    его ряд считает отступ по своим модулям и пеналам, уже попавшим в этот ряд, поэтому отступы находятся
+    повторными проходами, пока не перестанут меняться."""
+    at: dict[int, float] = {}  # id пенала -> отступ от начала стены
+    layouts: list[list] = []
+    for _ in range(len(wall.rows) * 4 + 2):
+        layouts, found = [], {}
+        for number, row in enumerate(wall.rows):
+            talls = sorted(
+                (
+                    (at[id(m)], m)
+                    for o, other in enumerate(wall.rows)
+                    if o != number
+                    for m in other.modules
+                    if is_tall(m) and id(m) in at
+                ),
+                key=lambda t: t[0],
+            )
+            unplaced = [
+                m
+                for o, other in enumerate(wall.rows)
+                if o != number
+                for m in other.modules
+                if is_tall(m) and id(m) not in at
+            ]
+            merged: list = []
+            x = 0.0
+            for m in row.modules:
+                while talls and talls[0][0] <= x:
+                    tall = talls.pop(0)[1]
+                    merged.append(tall)
+                    x += tall.width
+                if is_tall(m):
+                    found[id(m)] = x
+                merged.append(m)
+                x += m.width
+            merged += [t for _, t in talls] + unplaced
+            layouts.append(merged)
+        if found == at:
+            break
+        at = found
+    return layouts
+
+
 def _row_modules(wall, row) -> list:
-    """Модули ряда по порядку вдоль стены. В нижний ряд без своего пенала добавлены пеналы, описанные в других
-    рядах стены: пенал входит в оба ряда. Место пенала — по его отступу от начала стены в своём ряду."""
-    if row.kind != "lower" or any(_is_tall(m) for m in row.modules):
+    """Модули ряда для длин: нижний ряд — с пеналами из других рядов; верхний — свои."""
+    if row.kind != "lower":
         return list(row.modules)
-    talls: list[tuple[float, object]] = []
-    for other in wall.rows:
-        x = 0.0
-        for m in other.modules:
-            if _is_tall(m):
-                talls.append((x, m))
-            x += m.width
-    talls.sort(key=lambda t: t[0])
-    merged: list = []
-    x = 0.0
-    for m in row.modules:
-        while talls and talls[0][0] <= x:
-            tall = talls.pop(0)[1]
-            merged.append(tall)
-            x += tall.width
-        merged.append(m)
-        x += m.width
-    merged += [t for _, t in talls]
-    return merged
+    return row_layouts(wall)[next(i for i, r in enumerate(wall.rows) if r is row)]
 
 
-def _runs(project: Project, kinds: Iterable[str], with_tall: bool) -> list[tuple[str, list[int]]]:
-    """Непрерывные участки модулей нужного ряда по стенам: пенал либо входит в участок, либо разрывает его."""
-    runs: list[tuple[str, list[int]]] = []
-    for wall in project.walls:
-        for row in wall.rows:
-            if row.kind not in kinds:
-                continue
-            current: list[int] = []
-            for m in _row_modules(wall, row):
-                tall = TEMPLATES[m.template].both_rows if m.template in TEMPLATES else False
-                if tall and not with_tall:
-                    if current:
-                        runs.append((wall.label, current))
-                    current = []
-                else:
-                    current.append(round(m.width))
-            if current:
-                runs.append((wall.label, current))
-    return runs
-
-
-def _total(runs: list[tuple[str, list[int]]]) -> int:
-    return sum(sum(widths) for _, widths in runs)
+def _length(project: Project, kinds: Iterable[str], with_tall: bool) -> int:
+    """Сумма ширин модулей рядов нужного вида по всем стенам; пенал входит в сумму только при `with_tall`."""
+    return sum(
+        int(m.width)  # целую ширину обеспечивает `module_dims`
+        for wall in project.walls
+        for row in wall.rows
+        if row.kind in kinds
+        for m in _row_modules(wall, row)
+        if with_tall or not is_tall(m)
+    )
 
 
 def _named(items: list, item_id: str) -> str:
@@ -100,42 +116,20 @@ def _pieces(total_mm: int, rule_piece_mm: int, reserve: Decimal) -> int:
     return _ceil(Decimal(total_mm) * (1 + reserve) / rule_piece_mm)
 
 
-def _countertop_sheets(runs: list[tuple[str, list[int]]], sheet_mm: int, kerf: int) -> list[list[int]]:
-    """Куски столешницы (участок = кусок, длиннее листа режется по длине листа) по листам: первый подходящий,
-    куски по убыванию; между кусками одного листа пропил. Результат — длины кусков каждого листа."""
-    pieces: list[int] = []
-    for _, widths in runs:
-        length = sum(widths)
-        while length > sheet_mm:
-            pieces.append(sheet_mm)
-            length -= sheet_mm
-        if length:
-            pieces.append(length)
-    sheets: list[list[int]] = []
-    for piece in sorted(pieces, reverse=True):
-        for sheet in sheets:
-            if sum(sheet) + kerf * len(sheet) + piece <= sheet_mm:
-                sheet.append(piece)
-                break
-        else:
-            sheets.append([piece])
-    return sheets
-
-
-class CountertopCut(BaseModel):
-    """Линейный раскрой столешницы: куски по листам (длины вдоль листа, мм)."""
+class CountertopSize(BaseModel):
+    """Столешница: общая длина под ней и целые листы (без нарезки на куски)."""
 
     item: str
     name: str
     sheet_length: int
     sheet_width: int
-    sheets: list[list[int]]
     sheet_count: int
-    total_length_mm: int  # сумма длин нижних рядов без пенала
+    total_length_mm: int  # сумма ширин нижних модулей без пенала, угол без смещения
 
 
-def plan_countertop(project: Project, ws: Workshop) -> CountertopCut | None:
-    """Куски столешницы по листам; `None`, если столешница в проекте не задана."""
+def size_countertop(project: Project, ws: Workshop) -> CountertopSize | None:
+    """Общая длина столешницы и число листов (вверх до целого); `None`, если столешница в проекте не задана.
+    Одна функция для общих позиций, раскроя, закупки и сметы."""
     top_id = project.materials.countertop
     if not top_id:
         return None
@@ -143,16 +137,14 @@ def plan_countertop(project: Project, ws: Workshop) -> CountertopCut | None:
     if top is None:
         known = ", ".join(sorted(t.id for t in ws.materials.countertops))
         raise OrderError(f"Столешница «{top_id}» не найдена в materials.yaml (столешницы: {known}).")
-    runs = _runs(project, ("lower",), with_tall=False)
-    sheets = _countertop_sheets(runs, round(top.sheet[0]), round(ws.equipment.saw.kerf))
-    return CountertopCut(
+    total = _length(project, ("lower",), with_tall=False)
+    return CountertopSize(
         item=top_id,
         name=top.name,
-        sheet_length=round(top.sheet[0]),
-        sheet_width=round(top.sheet[1]),
-        sheets=sheets,
-        sheet_count=len(sheets),
-        total_length_mm=_total(runs),
+        sheet_length=top.sheet[0],
+        sheet_width=top.sheet[1],
+        sheet_count=_ceil(Decimal(total) / top.sheet[0]),
+        total_length_mm=total,
     )
 
 
@@ -173,7 +165,7 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
         for m in row.modules
         if m.corner
     )
-    lower = _total(_runs(project, ("lower",), with_tall=True)) - dead
+    lower = _length(project, ("lower",), with_tall=True) - dead
     n = _pieces(lower, rules.plinth.piece_length, reserve)
     items.append(
         CommonItem(
@@ -186,8 +178,7 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
             basis=f"фронт нижних рядов {lower} мм (без глухой части углов {dead} мм) + запас {percent}, штуки по {rules.plinth.piece_length} мм",
         )
     )
-    upper_runs = _runs(project, ("upper",), with_tall=False)
-    upper = _total(upper_runs)
+    upper = _length(project, ("upper",), with_tall=False)
     n = _pieces(upper, rules.rail.piece_length, reserve)
     items.append(
         CommonItem(
@@ -236,18 +227,17 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
                 basis=f"{led.meters_per_supply:g} м ленты на блок",
             )
         )
-    plan = plan_countertop(project, ws)
-    if plan is not None:
-        listed = " + ".join(str(p) for p in sorted((p for sheet in plan.sheets for p in sheet), reverse=True))
+    size = size_countertop(project, ws)
+    if size is not None:
         items.append(
             CommonItem(
                 kind="countertop",
-                item=plan.item,
-                name=plan.name,
-                quantity=plan.sheet_count,
+                item=size.item,
+                name=size.name,
+                quantity=size.sheet_count,
                 unit="лист",
-                length_mm=plan.total_length_mm,
-                basis=f"куски {listed} мм из листов по {plan.sheet_length} мм, стык в углу встык",
+                length_mm=size.total_length_mm,
+                basis=f"общая длина {size.total_length_mm} мм, листы по {size.sheet_length} мм вверх до целого",
             )
         )
     return items

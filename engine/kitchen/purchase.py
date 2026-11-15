@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from kitchen.common import CommonItem, CountertopCut
+from kitchen.common import CommonItem, CountertopSize
 from kitchen.cutting import MaterialCut
 from kitchen.errors import OrderError
 from kitchen.models import Workshop
@@ -73,7 +73,7 @@ def build_purchase(
     edges: dict[str, EdgeTotals],
     common: list[CommonItem],
     materials: list[MaterialCut],
-    countertop: CountertopCut | None,
+    countertop: CountertopSize | None,
 ) -> tuple[list[PurchaseShop], float]:
     grouped: dict[str, list[PurchaseItem]] = defaultdict(list)
 

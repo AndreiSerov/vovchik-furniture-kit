@@ -7,7 +7,7 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, tzinfo
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from kitchen.errors import OrderError
 from kitchen.workshop import resolve_home
@@ -255,12 +255,48 @@ def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
 # --- выводы -----------------------------------------------------------------
 
 OutputKind = Literal[
-    "cutting", "edging", "purchase_md", "purchase_json"
+    "cutting",
+    "edging",
+    "purchase_md",
+    "purchase_json",
+    "estimate_md",
+    "estimate_json",
+    "quote_pdf",
+    "quote_json",
+    "drilling",
 ]  # виды выводов; этапы 2-4 добавляют свои
 CUTTING: OutputKind = "cutting"
 EDGING: OutputKind = "edging"
 PURCHASE_MD: OutputKind = "purchase_md"
 PURCHASE_JSON: OutputKind = "purchase_json"
+ESTIMATE_MD: OutputKind = "estimate_md"
+ESTIMATE_JSON: OutputKind = "estimate_json"
+QUOTE_PDF: OutputKind = "quote_pdf"
+QUOTE_JSON: OutputKind = "quote_json"
+DRILLING: OutputKind = "drilling"
+
+
+class Recompute(NamedTuple):
+    """Как пересчитать вывод: название вида для человека и команда CLI (`kitchen <command> <заказ>`)."""
+
+    label: str
+    command: str
+    args: str = ""  # подсказка к команде, без которой её не запустить: срок КП вписывает мастер
+
+
+# Реестр «вид вывода → команда пересчёта» (тикет 24). Новый OutputKind без записи роняет
+# tests/test_status_stale.py; команда должна существовать в CLI.
+OUTPUT_RECOMPUTE: dict[OutputKind, Recompute] = {
+    CUTTING: Recompute("карта раскроя", "cut"),
+    EDGING: Recompute("карта кромления", "edges"),
+    PURCHASE_MD: Recompute("закупка (md)", "purchase"),
+    PURCHASE_JSON: Recompute("закупка (json)", "purchase"),
+    ESTIMATE_MD: Recompute("смета (md)", "estimate"),
+    ESTIMATE_JSON: Recompute("смета (json)", "estimate"),
+    QUOTE_PDF: Recompute("КП (pdf)", "quote", "--days <рабочих дней>"),
+    QUOTE_JSON: Recompute("КП (json)", "quote", "--days <рабочих дней>"),
+    DRILLING: Recompute("карта присадки", "drilling"),
+}
 
 
 def register_output(

@@ -4,7 +4,7 @@ import json
 
 from kitchen import api
 
-from tests.conftest import FIELDS_NOT_IN_GOLDEN, load_golden
+from tests.conftest import golden_dump, load_golden
 
 
 def test_tall_oven_contains_two_niches_and_drawer(home, base_door_project):
@@ -29,7 +29,7 @@ def test_tall_oven_manual_golden(home, base_door_project):
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     result = api.parts_from_project(base_door_project, home)
     expected = load_golden("tall_oven_600")
-    assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
+    assert golden_dump(result) == expected
 
 
 def test_tall_oven_project_microwave_dimensions_change_niche(home, base_door_project):

@@ -1,5 +1,6 @@
 """Модели файлов мастерской. Поля английские, ключи YAML (русские) — алиасы."""
 
+import math
 import re
 from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from itertools import pairwise
@@ -11,6 +12,8 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StringConstraints,
+    WithJsonSchema,
     field_validator,
     model_validator,
 )
@@ -26,8 +29,15 @@ def _not_bool(v):
 
 
 # Числа без молчаливого превращения true/false в 1/0.
-Num = Annotated[float, BeforeValidator(_not_bool)]
+# Конечные: `.inf` и `.nan` в YAML — ошибка загрузки, а не цена или норма.
+Num = Annotated[float, BeforeValidator(_not_bool), Field(allow_inf_nan=False)]
 Int = Annotated[int, BeforeValidator(_not_bool)]
+# Диапазоны живут в типах: цена, ставка, норма, доля — не меньше нуля; упаковка, шаг, размер листа — больше нуля.
+NonNegNum = Annotated[Num, Field(ge=0)]
+NonNegInt = Annotated[Int, Field(ge=0)]
+PosInt = Annotated[Int, Field(gt=0)]
+# В JSON Schema — `exclusiveMinimum`: из-за `BeforeValidator` в `Num` pydantic иначе пишет нестандартное `gt`.
+PosNum = Annotated[Num, Field(gt=0), WithJsonSchema({"type": "number", "exclusiveMinimum": 0})]
 
 
 # Виды техники, которые знает движок: перечень брифа (тест сверяет с его схемой) и вытяжка из `appliances.hood`.
@@ -61,17 +71,22 @@ def _f(alias: str):
 
 class Saw(Section):
     type: str = _f("тип")
-    max_cut_length: Num = _f("макс_длина_реза")
-    kerf: Num = _f("пропил")
+    max_cut_length: PosInt = _f("макс_длина_реза")
+    kerf: NonNegNum = _f("пропил")  # решение мастера: дробный учитывается вверх до целого мм (`kerf_mm`)
+
+    @property
+    def kerf_mm(self) -> int:
+        """Пропил, который берёт раскрой: целый, дробный — вверх (иначе детали выйдут меньше номинала)."""
+        return math.ceil(self.kerf)
 
 
 class SheetTrim(Section):
-    perimeter_trim: Num = _f("обрезка_по_периметру")
+    perimeter_trim: NonNegInt = _f("обрезка_по_периметру")
 
 
 class EdgingMachine(Section):
     machine: str = _f("станок")
-    allowance_per_side: Int = _f("припуск_на_сторону")
+    allowance_per_side: NonNegInt = _f("припуск_на_сторону")
 
 
 class Drilling(Section):
@@ -92,42 +107,42 @@ class Equipment(Section):
 
 
 class LowerModule(Section):
-    height: Int = _f("высота")
-    depth: Int = _f("глубина")
+    height: PosInt = _f("высота")
+    depth: PosInt = _f("глубина")
     scheme: str = _f("схема")
-    rail_width: Int = _f("царга_ширина")
+    rail_width: PosInt = _f("царга_ширина")
 
 
 class UpperModule(Section):
-    height: Int = _f("высота")
-    depth: Int = _f("глубина")
+    height: PosInt = _f("высота")
+    depth: PosInt = _f("глубина")
     scheme: str = _f("схема")
 
 
 class TallModule(Section):
-    height: Int = _f("высота")
-    depth: Int = _f("глубина")
+    height: PosInt = _f("высота")
+    depth: PosInt = _f("глубина")
 
 
 class BackPanel(Section):
     material: str = _f("материал")
-    contour_offset: Int = _f("отступ_по_контуру")
-    fastening_pitch: Int = _f("крепёж_шаг")
+    contour_offset: NonNegInt = _f("отступ_по_контуру")
+    fastening_pitch: PosInt = _f("крепёж_шаг")
 
 
 class Shelf(Section):
-    side_gap: Int = _f("отступ_от_боковин")
-    front_gap: Int = _f("отступ_спереди")
-    pins: Int = _f("полкодержателей")
-    height: Int = _f("высота")  # ДОБАВЛЕНО (МОК): положение полки от низа корпуса
-    step: Annotated[Int, Field(gt=0)] = _f("шаг")  # ДОБАВЛЕНО (МОК): расстояние между полками по высоте
+    side_gap: NonNegInt = _f("отступ_от_боковин")
+    front_gap: NonNegInt = _f("отступ_спереди")
+    pins: NonNegInt = _f("полкодержателей")
+    height: PosInt = _f("высота")  # ДОБАВЛЕНО (МОК): положение полки от низа корпуса
+    step: PosInt = _f("шаг")  # ДОБАВЛЕНО (МОК): расстояние между полками по высоте
 
 
 class Legs(Section):
-    height: Int = _f("высота")
-    up_to_800: Int = _f("до_800")
-    over_800: Int = _f("свыше_800")
-    threshold: Num = _f("порог_ширины")  # ДОБАВЛЕНО (МОК): порог «до 800» — значением, а не именем ключа
+    height: PosInt = _f("высота")
+    up_to_800: NonNegInt = _f("до_800")
+    over_800: NonNegInt = _f("свыше_800")
+    threshold: PosNum = _f("порог_ширины")  # ДОБАВЛЕНО (МОК): порог «до 800» — значением, а не именем ключа
 
 
 class MeterRounding(BaseModel):
@@ -241,7 +256,7 @@ def parse_edge_rule(value: object) -> EdgeRule:
 
 
 class ThreeDrawers(Section):
-    top: Num = _f("верхний")
+    top: PosNum = _f("верхний")
     others: str = _f("остальные")
 
     @field_validator("others")
@@ -253,14 +268,14 @@ class ThreeDrawers(Section):
 
 
 class Facades(Section):
-    gap: Int = _f("зазор")
+    gap: NonNegInt = _f("зазор")
     height_lower: FormulaField = _f("высота_нижнего")
     height_upper: FormulaField = _f("высота_верхнего")
     single_door_width: FormulaField = _f("одна_дверь_ширина")
-    two_doors_if_wider_than: Num = _f("две_двери_если_ширина_больше")
+    two_doors_if_wider_than: PosNum = _f("две_двери_если_ширина_больше")
     two_doors_width: FormulaField = _f("две_двери_ширина")
-    single_door_max_module_width: Num = _f("одна_дверь_макс_ширина_модуля")  # ДОБАВЛЕНО (МОК)
-    two_doors_min_module_width: Num = _f("две_двери_мин_ширина_модуля")  # ДОБАВЛЕНО (МОК)
+    single_door_max_module_width: PosNum = _f("одна_дверь_макс_ширина_модуля")  # ДОБАВЛЕНО (МОК)
+    two_doors_min_module_width: PosNum = _f("две_двери_мин_ширина_модуля")  # ДОБАВЛЕНО (МОК)
     three_drawers: ThreeDrawers = _f("ящики_3_шт")
 
     @model_validator(mode="after")
@@ -296,7 +311,7 @@ class SinkRules(Section):
 
 class BottleRules(Section):
     insert: str = _f("вставка")
-    max_width: Int = _f("макс_ширина")
+    max_width: PosInt = _f("макс_ширина")
 
 
 class DrawerRules(Section):
@@ -315,22 +330,22 @@ class DrawerRules(Section):
 
 
 class Screws(Section):
-    per_hinge: Int = _f("на_петлю")
-    per_drawer: Int = _f("на_ящик")
+    per_hinge: NonNegInt = _f("на_петлю")
+    per_drawer: NonNegInt = _f("на_ящик")
 
 
 class ConstructionEdging(Section):
     case: Annotated[EdgeRule, BeforeValidator(parse_edge_rule)] = _f("корпус")
     rails: Annotated[EdgeRule, BeforeValidator(parse_edge_rule)] = _f("царги")
     shelves: Annotated[EdgeRule, BeforeValidator(parse_edge_rule)] = _f("полки")
-    reserve: Num = _f("запас")
+    reserve: NonNegNum = _f("запас")
     purchase_rounding: Annotated["MeterRounding", BeforeValidator(parse_meter_rounding)] = _f(
         "округление_закупки"
     )
 
 
 class Tandembox(Section):
-    guide_length: Num = _f("длина_направляющей")
+    guide_length: PosNum = _f("длина_направляющей")
     bottom: FormulaField = _f("дно")
     back: FormulaField = _f("задняя_стенка")
     material: str = _f("материал")
@@ -342,7 +357,7 @@ class Tandembox(Section):
 
 
 # Таблица ступеней: [[порог, значение], ...]; берётся первая ступень, где значение <= порога.
-Steps = list[tuple[Num, Int]]
+Steps = list[tuple[NonNegNum, NonNegInt]]
 
 
 class TallRules(Section):
@@ -360,12 +375,12 @@ class TallRules(Section):
 
 class UpperRules(Section):
     hanger: str = _f("навес")
-    hangers: Int = _f("навесов")
+    hangers: NonNegInt = _f("навесов")
     lift: str = _f("подъёмник")
     dryer: str = _f("сушка")
-    dryer_width: Int = _f("ширина_сушки")
+    dryer_width: PosInt = _f("ширина_сушки")
     hood: str = _f("вытяжка")
-    hood_rail_min: Int = _f("мин_глубина_планки")
+    hood_rail_min: NonNegInt = _f("мин_глубина_планки")
     hood_bottom: Literal["передняя планка, открытый проём сзади"] = _f("дно_вытяжки")
 
 
@@ -380,6 +395,119 @@ class CornerRules(Section):
     filler_screws: Annotated[Int, Field(ge=0)] = _f("саморезов_заглушки")
     filler_material: str = _f("материал_заглушки")
     filler_edges: StrictBool = _f("кромить_заглушку")
+
+
+# Базовая кромка детали словом -> грань в осях модуля (x вдоль стены, y от стены в комнату, z вверх).
+BASE_EDGE_FACES = {
+    "нижняя": "-z",
+    "верхняя": "+z",
+    "передняя": "+y",
+    "задняя": "-y",
+    "левая": "-x",
+    "правая": "+x",
+}
+
+
+def parse_base_edges(value: object) -> tuple[str, ...]:
+    """`[нижняя, передняя, левая]` -> грани `("-z", "+y", "-x")`: по одной кромке на каждую ось модуля, в порядке
+    приоритета. Деталь берёт первые две, чьи оси лежат в её плоскости, поэтому у любой детали их ровно две."""
+    if isinstance(value, tuple):
+        return value
+    words = value if isinstance(value, list) else None
+    faces = [BASE_EDGE_FACES.get(w) if isinstance(w, str) else None for w in words or []]
+    if not faces or None in faces or len(faces) != 3 or len({f[1] for f in faces}) != 3:  # type: ignore[index]
+        accepted = ", ".join(BASE_EDGE_FACES)
+        raise ValueError(
+            "ожидалось три кромки, по одной на ось: нижняя или верхняя, передняя или задняя, левая или правая "
+            f"(допустимы: {accepted})"
+        )
+    return tuple(faces)  # type: ignore[arg-type]
+
+
+class ConfirmatDrilling(Section):
+    """Конфирмат: сквозное отверстие в пласти одной детали и отверстие в торце парной, оси совпадают."""
+
+    front_offset: PosInt = _f("отступ_от_лицевой_кромки")
+    back_offset: PosInt = _f("отступ_от_задней_кромки")
+    face_diameter: PosInt = _f("диаметр_в_пласть")
+    end_diameter: PosInt = _f("диаметр_в_торец")
+    end_depth: PosInt = _f("глубина_в_торец")
+
+
+class HingeDrilling(Section):
+    """Чашка петли на фасаде: отступ центра от кромки фасада со стороны петель и от торцов."""
+
+    cup_diameter: PosInt = _f("диаметр_чашки")
+    cup_depth: PosInt = _f("глубина_чашки")
+    edge_offset: PosInt = _f("отступ_от_кромки_фасада")
+    end_offset: PosInt = _f("отступ_от_торца")
+
+
+class PlateDrilling(Section):
+    """Ответная планка петли на боковине: отверстия по вертикали на высоте чашки."""
+
+    holes: PosInt = _f("отверстий")
+    pitch: PosInt = _f("шаг")
+    front_offset: PosInt = _f("отступ_от_передней_кромки")
+    diameter: PosInt = _f("диаметр")
+    depth: PosInt = _f("глубина")
+
+
+class ShelfPinDrilling(Section):
+    """Ряд отверстий под полкодержатели (тикет 20): на каждой боковине спереди и сзади, отступы — от передней и
+    задней кромок полки. Нечётное число отверстий: по столько же шагов выше и ниже отверстия под полку, центр
+    которого на `центр_ниже_полки` ниже нижней пласти полки (верх штыря — низ полки), в десятых долях мм."""
+
+    holes: PosInt = _f("отверстий_в_ряду")
+    pitch: PosInt = _f("шаг")
+    front_offset: PosInt = _f("отступ_от_передней_кромки_полки")
+    back_offset: PosInt = _f("отступ_от_задней_кромки_полки")
+    below_shelf: NonNegNum = _f("центр_ниже_полки")
+    diameter: PosInt = _f("диаметр")
+    depth: PosInt = _f("глубина")
+
+    @field_validator("holes")
+    @classmethod
+    def _odd(cls, v: int) -> int:
+        if v % 2 == 0:
+            raise ValueError("ожидалось нечётное число: ряд симметричен относительно отверстия под полку")
+        return v
+
+    @field_validator("below_shelf")
+    @classmethod
+    def _tenths(cls, v: float) -> float:
+        if Decimal(str(v)) != Decimal(str(v)).quantize(Decimal("0.1")):
+            raise ValueError("ожидалось число мм с точностью до десятых (например 2.5)")
+        return v
+
+
+class RunnerDrilling(Section):
+    """Отверстия направляющей Tandembox на боковине (тикет 20): расстояния от передней кромки боковины,
+    высота — над дном ящика."""
+
+    from_front: list[PosInt] = _f("отверстия_от_передней_кромки")
+    above_bottom: NonNegInt = _f("над_дном_ящика")
+    diameter: PosInt = _f("диаметр")
+    depth: PosInt = _f("глубина")
+
+    @field_validator("from_front")
+    @classmethod
+    def _increasing(cls, v: list[int]) -> list[int]:
+        if not v or any(a >= b for a, b in pairwise(v)):
+            raise ValueError("ожидался непустой список расстояний по возрастанию")
+        return v
+
+
+class DrillingRules(Section):
+    """ДОБАВЛЕНО (МОК), тикеты 19 и 20: базовые кромки деталей и отверстия конфирматов, чашек, ответных планок,
+    полкодержателей и направляющих."""
+
+    base_edges: Annotated[tuple[str, ...], BeforeValidator(parse_base_edges)] = _f("базовые_кромки")
+    confirmat: ConfirmatDrilling = _f("конфирмат")
+    hinge: HingeDrilling = _f("петля")
+    plate: PlateDrilling = _f("ответная_планка")
+    shelf_pin: ShelfPinDrilling = _f("полкодержатель")
+    runner: RunnerDrilling = _f("направляющая")
 
 
 class LinearItem(Section):
@@ -412,7 +540,7 @@ class CommonRules(Section):
 
 class Construction(Section):
     mock: StrictBool
-    case_thickness: Int = _f("толщина_корпуса")
+    case_thickness: PosInt = _f("толщина_корпуса")
     lower: LowerModule = _f("нижний")
     upper: UpperModule = _f("верхний")
     tall: TallModule = _f("пенал")
@@ -439,6 +567,7 @@ class Construction(Section):
     common: CommonRules = _f("общие_позиции")  # ДОБАВЛЕНО (МОК): цоколь, шина, LED, столешница
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
+    drilling: DrillingRules = _f("присадка")  # ДОБАВЛЕНО (МОК): правила присадки (тикет 19)
 
     @model_validator(mode="after")
     def _steps_sorted(self) -> "Construction":
@@ -459,12 +588,12 @@ class Construction(Section):
 class SheetMaterial(Section):
     id: str
     name: str = _f("название")
-    sheet: tuple[Num, Num] = _f("лист")
+    sheet: tuple[PosInt, PosInt] = _f("лист")
     texture: bool | str = _f("текстура")
-    thickness: Int | None = Field(
+    thickness: PosInt | None = Field(
         default=None, alias="толщина"
     )  # ДОБАВЛЕНО (МОК): у ХДФ — 3 (у ЛДСП корпуса толщина из construction.yaml)
-    price: Num = _f("цена")
+    price: NonNegNum = _f("цена")
     shop: str = _f("магазин")
 
     @field_validator("texture", mode="before")
@@ -478,7 +607,7 @@ class SheetMaterial(Section):
 class EdgeMaterial(Section):
     id: str
     name: str = _f("название")
-    price_per_m: Num = _f("цена_за_м")
+    price_per_m: NonNegNum = _f("цена_за_м")
     sale: str = _f("продажа")
     shop: str = _f("магазин")
 
@@ -486,19 +615,28 @@ class EdgeMaterial(Section):
 class Countertop(Section):
     id: str
     name: str = _f("название")
-    sheet: tuple[Num, Num] = _f("лист")
-    price: Num = _f("цена")
+    sheet: tuple[PosInt, PosInt] = _f("лист")
+    price: NonNegNum = _f("цена")
     shop: str = _f("магазин")
 
 
 class FacadeMaterial(Section):
     id: str
     name: str = _f("название")
-    thickness: Int | None = Field(default=None, alias="толщина")  # ДОБАВЛЕНО (МОК): 19 у МДФ
-    price_per_m2: Num = _f("цена_за_м2")
+    thickness: PosInt | None = Field(default=None, alias="толщина")  # ДОБАВЛЕНО (МОК): 19 у МДФ
+    price_per_m2: NonNegNum = _f("цена_за_м2")
     outsourced: bool = _f("заказ_на_стороне")
-    lead_days: Int = _f("срок_раб_дней")
+    lead_days: NonNegInt = _f("срок_раб_дней")
     shop: str = _f("магазин")
+
+
+def _unique_ids(items: list, what: str, key: str) -> None:
+    """Повторный `id` в одном списке — ошибка загрузки: какая цена верна, решал бы порядок поиска."""
+    seen: set[str] = set()
+    repeated = sorted({i.id for i in items if i.id in seen or seen.add(i.id)})
+    if repeated:
+        listed = ", ".join(f"«{i}»" for i in repeated)
+        raise ValueError(f"ключ «{key}»: повторяется id {what}: {listed}")
 
 
 class Materials(Section):
@@ -507,6 +645,18 @@ class Materials(Section):
     edges: list[EdgeMaterial] = _f("кромка")
     countertops: list[Countertop] = _f("столешницы")
     facades: list[FacadeMaterial] = _f("фасады")
+
+    @model_validator(mode="after")
+    def _ids_unique(self) -> "Materials":
+        for items, what, key in (
+            (self.sheets, "листового материала", "листовые"),
+            (self.edges, "кромки", "кромка"),
+            (self.countertops, "столешницы", "столешницы"),
+            (self.facades, "фасада", "фасады"),
+        ):
+            _unique_ids(items, what, key)
+        return self
+
     # ДОБАВЛЕНО (МОК): какая кромка клеится на какой материал корпуса
     edge_by_material: dict[str, str] = Field(default_factory=dict, alias="кромка_к_материалу")
 
@@ -517,36 +667,45 @@ class Materials(Section):
 class HardwareItem(Section):
     id: str
     name: str = _f("название")
-    pack: Int = _f("упаковка")
-    price: Num = _f("цена")
+    pack: PosInt = _f("упаковка")
+    price: NonNegNum = _f("цена")
     shop: str = _f("магазин")
+    client_name: str | None = Field(default=None, alias="для_клиента", min_length=1)
+    client_name_many: str | None = Field(
+        default=None, alias="для_клиента_мн", min_length=1
+    )  # «выдвижными вёдрами»
 
 
 class Hardware(Section):
     mock: StrictBool
     items: list[HardwareItem] = _f("позиции")
 
+    @model_validator(mode="after")
+    def _ids_unique(self) -> "Hardware":
+        _unique_ids(self.items, "позиции фурнитуры", "позиции")
+        return self
+
 
 # --- labor.yaml -------------------------------------------------------------
 
 
 class LaborNorms(Section):
-    cut_per_part: Num = _f("распил_на_деталь")
-    edge_per_m: Num = _f("кромка_на_метр")
-    drill_per_part: Num = _f("присадка_на_деталь")
-    case_assembly: Num = _f("сборка_корпуса")
-    drawer_assembly_extra: Num = _f("сборка_доп_на_ящик")
-    install_per_module: Num = _f("монтаж_на_модуль")
-    sink_cutout: Num = _f("врезка_мойки")
-    hob_cutout: Num = _f("врезка_варочной")
-    site_visit: Num = _f("выезд")
-    measuring: Num = _f("замер")
-    design: Num = _f("проектирование")
+    cut_per_part: NonNegNum = _f("распил_на_деталь")
+    edge_per_m: NonNegNum = _f("кромка_на_метр")
+    drill_per_part: NonNegNum = _f("присадка_на_деталь")
+    case_assembly: NonNegNum = _f("сборка_корпуса")
+    drawer_assembly_extra: NonNegNum = _f("сборка_доп_на_ящик")
+    install_per_module: NonNegNum = _f("монтаж_на_модуль")
+    sink_cutout: NonNegNum = _f("врезка_мойки")
+    hob_cutout: NonNegNum = _f("врезка_варочной")
+    site_visit: NonNegNum = _f("выезд")
+    measuring: NonNegNum = _f("замер")
+    design: NonNegNum = _f("проектирование")
 
 
 class Labor(Section):
     mock: StrictBool
-    hourly_rate: Num = _f("ставка_в_час")
+    hourly_rate: NonNegNum = _f("ставка_в_час")
     norms_min: LaborNorms = _f("нормы_минут")
 
 
@@ -586,12 +745,24 @@ def parse_rounding(value: object) -> RoundingRule:
 
 class Pricing(Section):
     mock: StrictBool
-    materials_markup: Num = _f("наценка_на_материалы")
-    consumables_share: Num = _f("расходники_от_материалов")
-    materials_delivery: Num = _f("доставка_материалов")
+    materials_markup: NonNegNum = _f("наценка_на_материалы")
+    consumables_share: NonNegNum = _f("расходники_от_материалов")
+    materials_delivery: NonNegNum = _f("доставка_материалов")
     price_rounding: Annotated[RoundingRule, BeforeValidator(parse_rounding)] = _f("округление_цены")
-    prepayment: Num = _f("предоплата")
+    prepayment: Annotated[Num, Field(ge=0, le=1)] = _f(
+        "предоплата"
+    )  # доля итога КП; больше 1 — отрицательный остаток
     quick_estimate_per_m: tuple[Num, Num] = _f("быстрая_оценка_за_пог_м")
+
+    @field_validator("quick_estimate_per_m")
+    @classmethod
+    def _range_positive_ascending(cls, value: tuple[float, float]) -> tuple[float, float]:
+        low, high = value
+        if low <= 0 or high < low:
+            raise ValueError(
+                "вилка должна быть из двух положительных чисел по возрастанию, например [85000, 110000]"
+            )
+        return value
 
 
 class ApplianceItem(Section):
@@ -612,10 +783,78 @@ class Appliances(Section):
 
     @model_validator(mode="after")
     def unique_ids(self):
-        ids = [item.id for item in self.items]
-        if len(ids) != len(set(ids)):
-            raise ValueError("id техники должны быть уникальны")
+        _unique_ids(self.items, "прибора", "позиции")
         return self
+
+
+# --- economy.yaml -----------------------------------------------------------
+
+
+class EconomyWhere(Section):
+    """Какие модули подходят правилу: шаблон, по желанию — подъёмник в наполнении или вставка."""
+
+    template: str = _f("шаблон")
+    lift: StrictBool | None = Field(default=None, alias="подъёмник")
+    insert: str | None = Field(default=None, alias="вставка")
+
+
+class EconomyChange(Section):
+    """Что меняется в копии модуля. Новый шаблон собирает наполнение заново: остаётся только указанное."""
+
+    template: str | None = Field(default=None, alias="шаблон")
+    shelves: NonNegInt | None = Field(default=None, alias="полок")
+    remove_lift: StrictBool = Field(default=False, alias="убрать_подъёмник")
+    remove_insert: str | None = Field(default=None, alias="убрать_вставку")
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> "EconomyChange":
+        if self.template is None and self.shelves is None and not self.remove_lift and not self.remove_insert:
+            raise ValueError(
+                "ключ «на»: пусто, укажите хотя бы одно из «шаблон», «полок», «убрать_подъёмник», «убрать_вставку»"
+            )
+        return self
+
+
+class EconomyCase(Section):
+    where: EconomyWhere = _f("где")
+    change: EconomyChange = _f("на")
+
+
+class EconomyRule(Section):
+    id: str = Field(min_length=1)
+    name: str = Field(alias="название", min_length=1)
+    client_text: str = Field(alias="текст_клиенту", min_length=1)
+    cases: list[EconomyCase] = Field(alias="случаи", min_length=1)
+
+
+class Economy(Section):
+    mock: StrictBool
+    rules: list[EconomyRule] = _f("замены")
+
+    @model_validator(mode="after")
+    def _ids_unique(self) -> "Economy":
+        _unique_ids(self.rules, "замены", "замены")
+        return self
+
+
+# --- master.yaml ------------------------------------------------------------
+
+
+Text = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1)
+]  # пустая и из одних пробелов — ошибка
+
+
+class Master(Section):
+    """Реквизиты мастера для КП."""
+
+    mock: StrictBool
+    name: Text = Field(alias="имя")
+    phone: Text = Field(alias="телефон")
+    city: Text = Field(alias="город")
+    status: Literal["самозанятый", "ИП"] = _f("статус")
+    inn: str = Field(alias="инн", pattern=r"^[0-9]{12}$")
+    offer_days: PosInt = _f("срок_действия_предложения_дней")
 
 
 class Workshop(BaseModel):
@@ -628,6 +867,8 @@ class Workshop(BaseModel):
     labor: Labor
     pricing: Pricing
     appliances: Appliances
+    economy: Economy
+    master: Master
     mock_files: list[str]
 
     @property

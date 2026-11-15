@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Annotated, NoReturn, TypeVar
 
 import typer
+from typer.core import TyperCommand
 
 from kitchen import api
 from kitchen.errors import InputError, KitchenError
@@ -41,7 +42,9 @@ def emit(result: R, render: Callable[[R], str], as_json: bool, ok: bool = True) 
 
 
 def fail(err: KitchenError) -> NoReturn:
-    typer.echo("\n".join(err.problems), err=True)
+    text = "\n".join(err.problems)
+    # Принцип 4: цифры в тексте ошибки могли быть посчитаны из мок-мастерской, плашка нужна и здесь.
+    typer.echo(f"{MOCK_BANNER}\n\n{text}\n\n{MOCK_BANNER}" if api.is_mock() else text, err=True)
     raise typer.Exit(1)
 
 
@@ -319,6 +322,48 @@ def edges(
     emit(result, _render_edges, json)
 
 
+def _render_drilling(r: api.DrillingResult) -> str:
+    lines = ["Карта присадки:", _render_source(r.source)]
+    for p in r.parts:
+        holes = p.holes or []
+        kinds = ", ".join(
+            f"{api.HOLE_PURPOSES[k]} {n}"
+            for k in api.HOLE_PURPOSES
+            if (n := sum(1 for h in holes if h.purpose == k))
+        )
+        lines.append(f"  {p.id} {p.length}×{p.width} мм — отверстий {len(holes)}: {kinds}")
+    lines.append("Сверка с фурнитурой:")
+    for c in r.checks:
+        lines.append(f"  {c.name} {c.holes} = {c.expected} ({c.basis})")
+    if r.output:
+        lines.append(f"Карта присадки PDF: {r.output.file} (версия проекта {r.output.source_version})")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("drilling")
+def drilling(
+    order: Annotated[
+        str | None, typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project.")
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Присадка: отверстия под конфирматы и петли, сверка с фурнитурой; для заказа также PDF карты."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError(
+                "Укажите либо заказ (kitchen drilling petrov), либо файл: --project project.json."
+            )
+        result = api.drilling_and_save(order) if order is not None else api.drilling_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_drilling, json)
+
+
 def _render_cut(r: api.CutResult) -> str:
     lines = [
         f"Раскрой проекта {r.order}:",
@@ -344,9 +389,9 @@ def _render_cut(r: api.CutResult) -> str:
                 )
     if r.countertop:
         t = r.countertop
-        sheets = "; ".join(" + ".join(str(p) for p in sheet) for sheet in t.sheets)
         lines.append(
-            f"Столешница {t.item} — {t.name}: листов {t.sheet_count} ({t.sheet_length} мм), куски, мм: {sheets}"
+            f"Столешница {t.item} — {t.name}: общая длина {t.total_length_mm} мм, "
+            f"листов {t.sheet_count} ({t.sheet_length} мм)"
         )
     if r.output:
         lines.append(f"Карта раскроя PDF: {r.output.file} (версия проекта {r.output.source_version})")
@@ -414,6 +459,156 @@ def purchase(order: OrderArg, json: JsonOpt = False) -> None:
     emit(result, _render_purchase, json)
 
 
+def _render_order_estimate(r: api.EstimateResult) -> str:
+    lines = [
+        "Смета:",
+        _render_source(r.source),
+        f"Себестоимость материалов (закупка): {r.materials_cost:.2f} ₽",
+    ]
+    lines.append(f"Труд (ставка {r.labor.rate_per_hour:g} ₽/ч):")
+    for line in r.labor.lines:
+        lines.append(
+            f"  {line.name}: {line.quantity:g} {line.unit} ({line.basis}) × {line.norm_min:g} мин = "
+            f"{line.minutes:g} мин = {line.amount:.2f} ₽"
+        )
+    lines += [
+        f"  Итого труд: {r.labor.minutes:g} мин, {r.labor.total:.2f} ₽",
+        f"Наценка на материалы: {r.markup:.2f} ₽",
+        f"Расходники: {r.consumables:.2f} ₽",
+        f"Доставка материалов: {r.delivery:.2f} ₽",
+        f"Итого до округления: {r.price_before_rounding:.2f} ₽",
+        f"Цена: {r.price} ₽ (округление: {r.rounding}); маржа {r.margin:.2f} ₽",
+    ]
+    if r.economy:
+        lines += _render_economy(r.economy)
+    for output in r.outputs:
+        lines.append(f"Файл: {output.file} (версия проекта {output.source_version})")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+def _render_economy(e: api.EconomyVariant) -> list[str]:
+    lines = ["Экономия:", f"  Цена как в проекте: {e.price_as_is} ₽"]
+    lines += [
+        f"  {line.name} (модули {', '.join(line.modules)}): цена с заменой {line.price} ₽, разница {line.saving} ₽"
+        for line in e.replacements
+    ]
+    lines += [
+        f"  Не предложено, не удешевляет: {line.name} (модули {', '.join(line.modules)}), разница {line.saving} ₽"
+        for line in e.not_offered
+    ]
+    lines += [f"  Не строится: {problem}" for problem in e.problems]
+    lines.append(f"  Цена «экономии» со всеми заменами: {e.price} ₽, разница {e.saving} ₽")
+    if e.replacements:
+        lines.append("  Сумма разниц по строкам может не совпасть с итогом: целые листы, округление.")
+    return lines
+
+
+@app.command("estimate")
+def estimate(
+    order: Annotated[
+        str | None,
+        typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project."),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, файлы не пишутся).")
+    ] = None,
+    economy: Annotated[
+        bool,
+        typer.Option(
+            "--economy", help="Добавить вариант «экономия»: замены из economy.yaml и разница в цене."
+        ),
+    ] = False,
+    json: JsonOpt = False,
+) -> None:
+    """Смета: себестоимость из закупки, труд по операциям, цена. Заказ — ещё и estimate.md, estimate.json."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError(
+                "Укажите либо заказ (kitchen estimate petrov), либо файл: --project project.json."
+            )
+        result = (
+            api.estimate_and_save(order, economy=economy)
+            if order is not None
+            else api.estimate_from_project(project, economy=economy)
+        )
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_order_estimate, json)
+
+
+def _render_quote(r: api.QuoteResult) -> str:
+    lines = [
+        "КП:",
+        _render_source(r.source),
+        f"Итого: {api.money(r.price)}",
+        f"Предоплата ({api.percent(r.prepayment_share)}): {api.money(r.prepayment)}",
+        f"Остаток: {api.money(r.balance)}",
+        f"Срок изготовления и монтажа: {api.plural(r.days, 'рабочий день', 'рабочих дня', 'рабочих дней')}",
+    ]
+    if r.economy:
+        e = r.economy
+        lines.append(
+            f"Экономия: цена как в проекте {api.money(e.price_as_is)}, цена «экономии» {api.money(e.price)}, "
+            f"разница {api.money(e.saving)}"
+        )
+    lines += [f"Файл: {output.file} (версия проекта {output.source_version})" for output in r.outputs]
+    return "\n".join(lines)
+
+
+class _QuoteCommand(TyperCommand):
+    """`--days` без значения падает в разборе опций раньше нашей проверки: ошибка тоже по-русски."""
+
+    def parse_args(self, ctx, args):
+        given = list(args)  # разбор съедает список: проверять после ошибки нечего
+        try:
+            return super().parse_args(ctx, args)
+        except Exception as e:  # UsageError живёт во внутреннем модуле typer: берём по тексту
+            if "--days" in str(e) or "--days=" in given:  # «--days= 35»: пустое значение и лишний аргумент
+                fail(InputError(api.DAYS_ERROR))
+            raise
+
+
+@app.command("quote", cls=_QuoteCommand)
+def quote(
+    order: Annotated[
+        str | None,
+        typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project."),
+    ] = None,
+    days: Annotated[
+        str | None,
+        typer.Option(
+            "--days",
+            metavar="N",
+            help="Срок изготовления и монтажа в рабочих днях: целое от 1 до 365 (обязательно).",
+        ),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, файлы не пишутся).")
+    ] = None,
+    economy: Annotated[
+        bool, typer.Option("--economy", help="Добавить вариант «экономия»: две цены и список замен.")
+    ] = False,
+    json: JsonOpt = False,
+) -> None:
+    """КП клиенту: состав, итог, предоплата, срок, без себестоимости и наценки. Заказ — ещё quote.pdf и quote.json."""
+    try:
+        term = api.parse_days(days)
+        if (order is None) == (project is None):
+            raise InputError(
+                "Укажите либо заказ (kitchen quote petrov --days 35), либо файл: --project project.json."
+            )
+        result = (
+            api.quote_and_save(order, term, economy=economy)
+            if order is not None
+            else api.quote_from_project(project, term, economy=economy)
+        )
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_quote, json)
+
+
 def _render_production(r: api.ProductionResult) -> str:
     lines = ["Производство:", _render_source(r.purchase.source)]
     for material in r.cutting.materials:
@@ -423,7 +618,7 @@ def _render_production(r: api.ProductionResult) -> str:
         )
     if r.cutting.countertop:
         top = r.cutting.countertop
-        lines.append(f"Столешница {top.item}: листов {top.sheet_count}")
+        lines.append(f"Столешница {top.item}: общая длина {top.total_length_mm} мм, листов {top.sheet_count}")
     purchase_edges = {
         item.id: item.quantity for shop in r.purchase.shops for item in shop.items if item.kind == "edge"
     }

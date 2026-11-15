@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 
 from kitchen.errors import OrderError
-from kitchen.models import Num
+from kitchen.models import Num, PosNum
 from kitchen.workshop import translate
 
 __all__ = ["ModuleSpec", "Project", "ProjectMaterials", "Row", "Wall", "parse_project"]
@@ -32,21 +32,32 @@ class Contents(Section):
     drawers: StrictInt | None = Field(default=None, ge=0)
     inserts: list[str] = Field(default_factory=list)
     lift: str | None = None
+    # сторона петель одной двери (решение мастера, тикет 19); по умолчанию слева, у угловых — по месту в ряду
+    hinge_side: Literal["left", "right"] | None = None
 
 
 class Corner(Section):
     adjacent_wall: str
 
 
+def _template_names(schema: dict) -> None:
+    """В JSON Schema `template` — перечень реестра `TEMPLATES`. Реестр импортируется при выгрузке схемы:
+    `parts` сам читает этот модуль. Неизвестный шаблон схему проекта проходит и получает находку
+    `module_build` в проверках, поэтому на разбор перечень не влияет."""
+    from kitchen.parts import TEMPLATES
+
+    schema["enum"] = sorted(TEMPLATES)
+
+
 class ModuleSpec(Section):
     """Модуль ряда; пенал указывается в одном ряду и занимает оба."""
 
     label: str
-    template: str
-    width: Num
-    height: Num | None = None
-    depth: Num | None = None
-    shelves: StrictInt = 1  # совместимость с проектами тикета 05
+    template: str = Field(json_schema_extra=_template_names)
+    width: PosNum
+    height: PosNum | None = None
+    depth: PosNum | None = None
+    shelves: StrictInt = Field(default=1, ge=0)  # совместимость с проектами тикета 05
     materials: MaterialOverrides | None = None
     contents: Contents | None = None
     without_back: bool = False
@@ -77,13 +88,13 @@ class ProjectMaterials(Section):
 
 class Appliance(Section):
     type: str
-    width: Num  # габариты корпуса прибора (справочно): на нишу не влияют
+    width: PosNum  # габариты корпуса прибора (справочно): на нишу не влияют
     model: str | None = None
-    height: Num | None = None
-    depth: Num | None = None
-    niche_width: Num | None = None  # размеры ниши (встраивания): строит модуль, недостающие — из каталога
-    niche_height: Num | None = None
-    niche_depth: Num | None = None
+    height: PosNum | None = None
+    depth: PosNum | None = None
+    niche_width: PosNum | None = None  # размеры ниши (встраивания): строит модуль, недостающие — из каталога
+    niche_height: PosNum | None = None
+    niche_depth: PosNum | None = None
     module: str
 
 

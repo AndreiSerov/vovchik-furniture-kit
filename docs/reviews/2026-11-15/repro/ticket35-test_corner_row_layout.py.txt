@@ -1,0 +1,252 @@
+"""Тикет 35: раскладка ряда начинается со смещения углового модуля соседней стены, с той стороны, где стоит угол.
+Сумма ряда и раскладка берут смещение из одной функции (`common.corner_offsets`)."""
+
+import json
+import random
+
+from kitchen import api
+from kitchen.cli import app
+from kitchen.common import corner_offsets
+from kitchen.errors import KitchenError
+from kitchen.project import parse_project
+from kitchen.workshop import load_workshop
+from typer.testing import CliRunner
+
+import pytest
+
+MATERIALS = {
+    "body": "ldsp_16_white",
+    "facades_lower": "mdf_enamel_matt",
+    "facades_upper": "mdf_enamel_matt",
+    "handles": "handle_profile",
+    "countertop": "top_38_marble",
+}
+
+
+def mod(label, template, width, **extra):
+    return {"label": label, "template": template, "width": width, **extra}
+
+
+def run(home, walls):
+    path = home / "project.json"
+    data = {"order": "2026-047-petrov", "ceiling_height": 2700, "walls": walls, "materials": MATERIALS}
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return api.parts_from_project(path, home)
+
+
+def countertop(result):
+    return next(c for c in result.common if c.kind == "countertop")
+
+
+def two_walls(a_lower, b_lower, a_length=1650, b_length=2400):
+    a_upper = [mod("В1", "wall_door", 600), mod("В2", "wall_door", 450), mod("В3", "wall_door", 600)]
+    b_upper = [
+        mod("В5", "wall_door", 600),
+        mod("В6", "wall_door", 600),
+        mod("П1", "tall_oven", 600),
+        mod("В7", "wall_door", 600),
+    ]
+    return [
+        {"label": "A", "length": a_length, "rows": [{"kind": "lower", "modules": a_lower}, {"kind": "upper", "modules": a_upper}]},
+        {"label": "Б", "length": b_length, "rows": [{"kind": "lower", "modules": b_lower}, {"kind": "upper", "modules": b_upper}]},
+    ]
+
+
+def test_corner_last_in_wall_a_puts_offset_at_the_start_of_wall_b(home):
+    # Н4 последний на стене A: на стене Б смещение 600 стоит от угла, пенал П1 верхнего ряда (x = 1200)
+    # в нижнем ряду после Н5 (600 + 600 = 1200), а не после Н6.
+    walls = two_walls(
+        [mod("Н1", "base_door", 600), mod("Н4", "base_corner", 1050, corner={"adjacent_wall": "Б"})],
+        [mod("Н5", "base_door", 600), mod("Н6", "base_door", 600)],
+    )
+    result = run(home, walls)
+    assert [f for f in result.findings if f.code == "row_sum"] == []
+    assert "1650 + 600 + 600" in countertop(result).basis
+
+
+def test_corner_first_in_wall_b_puts_offset_at_the_end_of_wall_a(home):
+    # Н4 первый на стене Б (с соседями), adjacent_wall A: смещение 600 на конце стены A. Пенал верхнего ряда A
+    # стоит на x = 1050, после Н1 + Н2 одним куском 1050 (стена 2250 = 1050 + пенал 600 + смещение 600). Со
+    # смещением в начале нижний ряд разошёлся бы на «600 + 450».
+    a_lower = [mod("Н1", "base_door", 600), mod("Н2", "base_door", 450)]
+    a_upper = [mod("В1", "wall_door", 1050), mod("П1", "tall_oven", 600), mod("В2", "wall_door", 600)]
+    b_lower = [mod("Н4", "base_corner", 1050, corner={"adjacent_wall": "A"}), mod("Н5", "base_door", 1200)]
+    b_upper = [mod("В5", "wall_door", 2250)]
+    walls = [
+        {"label": "A", "length": 2250, "rows": [{"kind": "lower", "modules": a_lower}, {"kind": "upper", "modules": a_upper}]},
+        {"label": "Б", "length": 2250, "rows": [{"kind": "lower", "modules": b_lower}, {"kind": "upper", "modules": b_upper}]},
+    ]
+    result = run(home, walls)
+    assert [f for f in result.findings if f.code == "row_sum"] == []
+    assert countertop(result).basis.startswith("куски 2250 + 1050 мм")
+
+
+def test_offset_side_follows_corner_place_in_row(home):
+    ws = load_workshop(home)
+    last = parse_project(
+        {"order": "o", "ceiling_height": 2700, "materials": MATERIALS, "walls": two_walls(
+            [mod("Н1", "base_door", 600), mod("Н4", "base_corner", 1050, corner={"adjacent_wall": "Б"})],
+            [mod("Н5", "base_door", 1800)])}
+    )
+    assert corner_offsets(last, ws) == {("Б", "lower"): (600, 0)}
+    first = parse_project(
+        {"order": "o", "ceiling_height": 2700, "materials": MATERIALS, "walls": two_walls(
+            [mod("Н4", "base_corner", 1050, corner={"adjacent_wall": "Б"}), mod("Н1", "base_door", 600)],
+            [mod("Н5", "base_door", 1800)])}
+    )
+    assert corner_offsets(first, ws) == {("Б", "lower"): (0, 600)}
+    sole = parse_project(
+        {"order": "o", "ceiling_height": 2700, "materials": MATERIALS, "walls": two_walls(
+            [mod("Н4", "base_corner", 1050, corner={"adjacent_wall": "Б"})],
+            [mod("Н5", "base_door", 1800)])}
+    )
+    assert corner_offsets(sole, ws) == {("Б", "lower"): (600, 0)}
+
+
+def test_corners_in_both_rows_as_before(home):
+    # Угловые в обоих рядах без пенала: сумма ряда как раньше (1050 + 600 нижний, 600 + 600 верхний)
+    walls = [
+        {"label": "A", "length": 1650, "rows": [
+            {"kind": "lower", "modules": [mod("Н4", "base_corner", 1050, corner={"adjacent_wall": "Б"}), mod("Н1", "base_door", 600)][::-1]},
+            {"kind": "upper", "modules": [mod("В1", "wall_door", 1050), mod("В4", "wall_corner", 600, corner={"adjacent_wall": "Б"})]}]},
+        {"label": "Б", "length": 1800, "rows": [
+            {"kind": "lower", "modules": [mod("Н5", "base_door", 1200)]},
+            {"kind": "upper", "modules": [mod("В5", "wall_door", 1200)]}]},
+    ]
+    result = run(home, walls)
+    assert [f for f in result.findings if f.code == "row_sum"] == []
+    assert countertop(result).length_mm == 1650 + 1200
+
+
+def test_kitchen_cut_repeats_the_duplicate_label_text(home):
+    walls = [{"label": "A", "length": 1200, "rows": [{"kind": "lower", "modules": [
+        mod("Н1", "base_door", 600), mod("Н1", "base_door", 600)]}]}]
+    path = home / "project.json"
+    path.write_text(json.dumps({"order": "2026-047-petrov", "ceiling_height": 2700, "walls": walls,
+                                "materials": MATERIALS}, ensure_ascii=False), encoding="utf-8")
+    message = next(f.message for f in api.check_project(path, home).errors if f.code == "duplicate_label")
+    with pytest.raises(KitchenError) as e:
+        api.cut_from_project(path, home)
+    assert message in e.value.problems
+    r = CliRunner().invoke(app, ["cut", "--project", str(path)])
+    assert r.exit_code == 1 and message in r.output
+
+
+def test_drawer_depth_finding_text_and_limit_name_one_number(home):
+    for depth in (400, 503):
+        walls = [{"label": "A", "length": 600, "rows": [{"kind": "lower", "modules": [
+            mod("Н1", "base_drawers", 600, depth=depth)]}]}]
+        path = home / "project.json"
+        path.write_text(json.dumps({"order": "2026-047-petrov", "ceiling_height": 2700, "walls": walls,
+                                    "materials": MATERIALS}, ensure_ascii=False), encoding="utf-8")
+        [f] = [f for f in api.check_project(path, home).errors if f.code == "drawer_depth"]
+        assert f.limit == 506 and "506" in f.message
+        assert "500 мм" not in f.message
+
+
+# --- фазз: согласованные стены с угловыми и пеналами в разных рядах -----------------------------------------
+
+LOWER_CORNER, UPPER_CORNER, OFFSET = 1050, 600, 600
+
+
+def split(total, rnd):
+    """Ширины модулей из набора, сумма — total (кратно 150), остаток никогда не меньше 300."""
+    out = []
+    while total:
+        choices = [p for p in (300, 450, 600, 900) if p <= total and (total - p == 0 or total - p >= 300)]
+        out.append(rnd.choice(choices))
+        total -= out[-1]
+    return out
+
+
+def build_case(rnd):
+    """Две стены. Угловые модули стоят первым или последним в нижнем и верхнем ряду; смещения соседней стены
+    выведены из них по правилу: последний -> начало соседней стены, первый -> её конец. Ожидание — ручная
+    раскладка по абсолютным отступам, без движка."""
+    corner_w = {"lower": LOWER_CORNER, "upper": UPPER_CORNER}
+    flags = {(w, k, s): rnd.random() < 0.4 for w in "AБ" for k in corner_w for s in ("first", "last")}
+    other = {"A": "Б", "Б": "A"}
+    walls, expected = [], {}
+    n = 0
+
+    def label(prefix):
+        nonlocal n
+        n += 1
+        return f"{prefix}{n}"
+
+    for w in "AБ":
+        off = {}
+        for k in corner_w:
+            # последний угол соседней стены -> начало этой; первый -> конец
+            off[k] = (OFFSET * flags[(other[w], k, "last")], OFFSET * flags[(other[w], k, "first")])
+        blocks = [("span", rnd.randrange(2400, 3301, 150))]
+        for _ in range(rnd.randint(0, 4)):
+            if rnd.random() < 0.5:
+                blocks.append(("tall", rnd.choice([450, 600]), rnd.choice(["lower", "upper"])))
+            else:
+                blocks.append(("span", rnd.randrange(600, 2101, 150)))
+        blocks.append(("span", rnd.randrange(2400, 3301, 150)))  # у концов стены всегда широкий участок
+        # две пенальные подряд и пенал рядом со смещением допустимы; соседние spans сливаются
+        length = sum(b[1] for b in blocks)
+        rows = {"lower": [], "upper": []}
+        runs, cur = [], 0
+        x = 0
+        for i, b in enumerate(blocks):
+            if b[0] == "tall":
+                rows[b[2]].append(mod(label("П"), "tall_oven", b[1]))
+                if cur:
+                    runs.append(cur)
+                    cur = 0
+                x += b[1]
+                continue
+            for kind, prefix, template in (("lower", "Н", "base_door"), ("upper", "В", "wall_door")):
+                width = b[1] - (off[kind][0] if i == 0 else 0) - (off[kind][1] if i == len(blocks) - 1 else 0)
+                modules = []
+                if i == 0 and flags[(w, kind, "first")]:
+                    modules.append(("corner", corner_w[kind]))
+                    width -= corner_w[kind]
+                tail = None
+                if i == len(blocks) - 1 and flags[(w, kind, "last")]:
+                    tail = ("corner", corner_w[kind])
+                    width -= corner_w[kind]
+                modules += [("plain", p) for p in split(width, rnd)]
+                if tail:
+                    modules.append(tail)
+                for what, p in modules:
+                    if what == "corner":
+                        t = "base_corner" if kind == "lower" else "wall_corner"
+                        rows[kind].append(mod(label(prefix), t, p, corner={"adjacent_wall": other[w]}))
+                    else:
+                        rows[kind].append(mod(label(prefix), template, p))
+            run = b[1] - off["lower"][0] * (i == 0) - off["lower"][1] * (i == len(blocks) - 1)
+            cur += run
+        if cur:
+            runs.append(cur)
+        expected[w] = runs
+        walls.append({"label": w, "length": length, "rows": [
+            {"kind": "lower", "modules": rows["lower"]}, {"kind": "upper", "modules": rows["upper"]}]})
+    return walls, expected
+
+
+def test_fuzz_row_layouts_match_hand_layout(home):
+    from kitchen.checks import _row_sums
+    from kitchen.common import plan_countertop
+
+    ws = load_workshop(home)
+    rnd = random.Random(35)
+    for trial in range(120):
+        walls, expected = build_case(rnd)
+        project = parse_project({"order": "2026-047-petrov", "ceiling_height": 2700, "walls": walls,
+                                 "materials": MATERIALS})
+        assert [f.message for f in _row_sums(project, ws)] == [], (trial, walls)
+        plan = plan_countertop(project, ws)
+        assert plan is not None
+        top = next(t for t in ws.materials.countertops if t.id == "top_38_marble")
+        sheet = top.sheet[0]
+        want = []
+        for run_mm in (r for runs in expected.values() for r in runs):
+            while run_mm > sheet:
+                want.append(sheet)
+                run_mm -= sheet
+            want.append(run_mm)
+        assert sorted(p for s in plan.sheets for p in s) == sorted(want), (trial, walls)

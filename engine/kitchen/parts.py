@@ -10,21 +10,42 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
-from typing import Literal
 
 from pydantic import BaseModel
 
 from kitchen import formulas
+from kitchen.drilling import apply_drilling, plate_warnings
 from kitchen.errors import OrderError, WorkshopError
 from kitchen.formulas import FormulaError, InexactDivisionError
+from kitchen.geometry import (
+    PURPOSE_RU,
+    Axis,
+    DrawerRunners,
+    HingedDoor,
+    HingeSide,
+    Hole,
+    Joint,
+    Orientation,
+    PinnedShelf,
+    Position,
+    side_of_face,
+    steps_pick,
+)
 from kitchen.models import ApplianceItem, EdgeRule, Num, Workshop
 from kitchen.project import Appliance, ModuleSpec, Project, ProjectMaterials, Row
 
 __all__ = [
+    "APPLIANCE_NAMES",
     "APPLIANCE_ROWS",
     "BACK_PANEL",
+    "DRAWER_BACK",
+    "DRAWER_BOTTOM",
+    "PURPOSE_RU",
     "TEMPLATES",
     "EdgeTotals",
+    "HingedDoor",
+    "Hole",
+    "Joint",
     "ModuleDims",
     "ModuleParts",
     "Orientation",
@@ -37,39 +58,28 @@ __all__ = [
     "build_module",
     "built_niche",
     "compute_parts",
+    "drawer_depth_shortfall",
+    "drawer_parts",
     "facade_color",
+    "lower_facades",
     "module_dims",
     "niche_item",
     "resolve_materials",
+    "steps_pick",
+    "unknown_template_error",
 ]
 
 EDGE_SIDES = ("L1", "L2", "W1", "W2")
+DRAWER_BOTTOM = "дно ящика"  # детали ящика Tandembox: по именам их отличают смета и присадка
+DRAWER_BACK = "задняя стенка ящика"
 BACK_PANEL = "задняя стенка"  # деталь, по которой находится корпус без задней стенки
-
-Axis = Literal["x", "y", "z"]
 
 
 # --- схема детали ------------------------------------------------------------
 
 
-class Position(BaseModel):
-    """Угол детали в системе модуля, мм: x вдоль стены, y от стены, z вверх от низа корпуса."""
-
-    x: int
-    y: int
-    z: int
-
-
-class Orientation(BaseModel):
-    """Какой оси модуля соответствует длина, ширина и толщина детали."""
-
-    length: Axis
-    width: Axis
-    thickness: Axis
-
-
 class Part(BaseModel):
-    """Деталь: маркировка, размеры, материал, кромка по 4 сторонам, положение в модуле."""
+    """Деталь: маркировка, размеры, материал, кромка по 4 сторонам, положение в модуле, отверстия."""
 
     id: str  # маркировка вида «Н1-бок-Л»
     module: str
@@ -83,6 +93,9 @@ class Part(BaseModel):
     position: Position
     orientation: Orientation
     area_m2: float | None = None  # только у фасадов (1.2): длина × ширина, м² без округления
+    # присадка (тикет 19): только у деталей с отверстиями; базовые кромки — грани в осях модуля («-z», «+y»)
+    holes: list[Hole] | None = None
+    base_edges: list[str] | None = None
 
 
 class EdgeTotals(BaseModel):
@@ -112,17 +125,6 @@ class Span:
 _FACES = {f"{sign}{axis}" for sign in "+-" for axis in "xyz"}
 
 
-def _side_of_face(face: str, length_axis: str, width_axis: str, pid: str) -> str:
-    """Грань детали (`+y`) -> сторона кромки: на оси ширины `+` — L1, `-` — L2;
-    на оси длины `-` — W1 (начало), `+` — W2 (конец)."""
-    sign, axis = face[0], face[1]
-    if axis == width_axis:
-        return "L1" if sign == "+" else "L2"
-    if axis == length_axis:
-        return "W2" if sign == "+" else "W1"
-    raise ValueError(f"Деталь {pid}: грань {face} — плоскость детали, кромить её нельзя.")
-
-
 def make_part(
     *,
     pid: str,
@@ -148,7 +150,7 @@ def make_part(
     edge_map = dict.fromkeys(EDGE_SIDES, "")
     for key, edge_id in (edges or {}).items():
         if key in _FACES:
-            key = _side_of_face(key, first.axis, second.axis, pid)
+            key = side_of_face(key, first.axis, second.axis, pid)
         elif key not in edge_map:
             raise ValueError(f"Деталь {pid}: неизвестная сторона кромки «{key}».")
         edge_map[key] = edge_id
@@ -169,17 +171,6 @@ def make_part(
 
 
 # --- общие помощники шаблонов -------------------------------------------------
-
-
-def steps_pick(steps: list[tuple[Num, int]], value: Num, table: str) -> int:
-    """Ступенчатая таблица: первая ступень, где значение ≤ порога."""
-    for threshold, count in steps:
-        if value <= threshold:
-            return count
-    thresholds = ", ".join(str(t) for t, _ in steps)
-    raise WorkshopError(
-        f"construction.yaml: в таблице «{table}» нет ступени для значения {value} (пороги: {thresholds})."
-    )
 
 
 @dataclass
@@ -287,11 +278,50 @@ def _calc(module: ModuleSpec, dims: ModuleDims, what: str, formula: str, **varia
 
 @dataclass
 class TemplateOut:
-    """Результат шаблона: детали, фурнитура, предупреждения."""
+    """Результат шаблона: детали, фурнитура, предупреждения; соединения на конфирматах и двери на петлях —
+    из них `kitchen.drilling` считает конфирматы, петли, планки и отверстия под них."""
 
     parts: list[Part] = field(default_factory=list)
     hardware: Counter = field(default_factory=Counter)
     warnings: list[str] = field(default_factory=list)
+    joints: list[Joint] = field(default_factory=list)
+    doors: list[HingedDoor] = field(default_factory=list)
+    shelves: list[PinnedShelf] = field(default_factory=list)  # полки на полкодержателях (тикет 20)
+    drawers: list[DrawerRunners] = field(default_factory=list)  # ящики на направляющих (тикет 20)
+
+
+SIDE_SUFFIX: dict[HingeSide, str] = {"left": "Л", "right": "П"}
+
+
+def side_part_id(label: str, side: HingeSide) -> str:
+    """Маркировка боковины модуля: «Н1-бок-Л» — левая, «Н1-бок-П» — правая. Одно место для шаблонов."""
+    return f"{label}-бок-{SIDE_SUFFIX[side]}"
+
+
+def joined_to_sides(label: str, end: str) -> list[Joint]:
+    """Деталь `end` между боковинами на конфирматах к обеим."""
+    return [Joint(side_part_id(label, side), end) for side in SIDE_SUFFIX]
+
+
+def both_sides(label: str) -> tuple[str, str]:
+    """Маркировки левой и правой боковин модуля — пара для полки и для ящика."""
+    return side_part_id(label, "left"), side_part_id(label, "right")
+
+
+def pinned(label: str, shelf: str) -> PinnedShelf:
+    """Полка между боковинами на полкодержателях: ряды отверстий — на обеих боковинах."""
+    return PinnedShelf(shelf, both_sides(label))
+
+
+def hinged(label: str, facade: str, side: HingeSide) -> HingedDoor:
+    """Дверь на петлях со стороны `side`: ответные планки — на боковине той же стороны."""
+    return HingedDoor(facade, side, side_part_id(label, side))
+
+
+def _hinge_side(module: ModuleSpec) -> HingeSide:
+    """Сторона петель одной двери: поле наполнения `hinge_side`, по умолчанию слева (решение мастера)."""
+    side = module.contents.hinge_side if module.contents is not None else None
+    return side or "left"
 
 
 DOOR_SUFFIXES = ("Л", "П")  # больше двух дверей на модуль шаблоны не строят
@@ -371,7 +401,12 @@ def build_base_door(
     n_shelves = 0 if no_shelf else _shelf_count(module, dims, c)
     out = TemplateOut()
 
-    def carcass(pid: str, name: str, a: Span, b: Span, at: Position, rule: EdgeRule) -> None:
+    def carcass(
+        pid: str, name: str, a: Span, b: Span, at: Position, rule: EdgeRule, *, joined: bool = False
+    ) -> None:
+        """Деталь корпуса; `joined` — горизонтальная деталь между боковинами на конфирматах к обеим."""
+        if joined:
+            out.joints.extend(joined_to_sides(module.label, f"{module.label}-{pid}"))
         out.parts.append(
             make_part(
                 pid=f"{module.label}-{pid}",
@@ -388,17 +423,36 @@ def build_base_door(
         )
 
     # боковины на всю высоту и глубину
-    for suffix, x in (("Л", 0), ("П", W - t)):
+    for side, x in (("left", 0), ("right", W - t)):
         carcass(
-            f"бок-{suffix}", "боковина", Span(H, "z"), Span(D, "y"), Position(x=x, y=0, z=0), c.edging.case
+            f"бок-{SIDE_SUFFIX[side]}",
+            "боковина",
+            Span(H, "z"),
+            Span(D, "y"),
+            Position(x=x, y=0, z=0),
+            c.edging.case,
         )
 
     if not no_bottom:
-        carcass("дно", "дно", Span(W - 2 * t, "x"), Span(D, "y"), Position(x=t, y=0, z=0), c.edging.case)
+        carcass(
+            "дно",
+            "дно",
+            Span(W - 2 * t, "x"),
+            Span(D, "y"),
+            Position(x=t, y=0, z=0),
+            c.edging.case,
+            joined=True,
+        )
     rail = c.lower.rail_width
     if upper_carcass:
         carcass(
-            "крыш", "крыша", Span(W - 2 * t, "x"), Span(D, "y"), Position(x=t, y=0, z=H - t), c.edging.case
+            "крыш",
+            "крыша",
+            Span(W - 2 * t, "x"),
+            Span(D, "y"),
+            Position(x=t, y=0, z=H - t),
+            c.edging.case,
+            joined=True,
         )
     else:
         for n, y in ((1, D - rail), (2, 0)):
@@ -409,11 +463,15 @@ def build_base_door(
                 Span(rail, "y"),
                 Position(x=t, y=y, z=H - t),
                 c.edging.rails,
+                joined=True,
             )
 
     # полки с отступами от боковин и спереди; i-я полка выше предыдущей на шаг
     shelf = c.shelf
     for n in range(1, n_shelves + 1):
+        out.shelves.append(
+            pinned(module.label, f"{module.label}-полка-{n}" if n_shelves > 1 else f"{module.label}-полка")
+        )
         carcass(
             f"полка-{n}" if n_shelves > 1 else "полка",
             "полка",
@@ -457,9 +515,13 @@ def build_base_door(
         facade_w = _calc(module, dims, "фасад", f.single_door_width, H=H, W=W)
     for i in range(n_doors):
         suffix = DOOR_SUFFIXES[i] if n_doors == 2 else ""
+        pid = f"{module.label}-фасад-{suffix}" if suffix else f"{module.label}-фасад"
+        if not no_hinges:  # две двери — петли снаружи: левая слева, правая справа
+            side: HingeSide = ("left", "right")[i] if n_doors == 2 else _hinge_side(module)
+            out.doors.append(hinged(module.label, pid, side))
         out.parts.append(
             make_part(
-                pid=f"{module.label}-фасад-{suffix}" if suffix else f"{module.label}-фасад",
+                pid=pid,
                 module_label=module.label,
                 name="фасад",
                 a=Span(facade_h, "z"),
@@ -472,25 +534,14 @@ def build_base_door(
             )
         )
 
-    # фурнитура; соотношения («по одной на петлю») — из construction.yaml
-    hinges = 0
-    if n_doors and not no_hinges:
-        hinges = steps_pick(c.hinges_by_facade_height, facade_h, "петли_по_высоте_фасада") * n_doors
-        out.hardware[hw.hinges] += hinges
-        out.hardware[hw.plates] += hinges * c.plates.per_unit
-    joints = [(D, 2)] * (1 + int(not no_bottom)) if upper_carcass else [(D, 2)] + [(rail, 2)] * 2
-    confirmats = sum(
-        steps_pick(c.confirmats_by_joint_length, length, "конфирматы_по_длине_соединения") * count
-        for length, count in joints
-    )
-    out.hardware[hw.confirmats] += confirmats
-    out.hardware[hw.caps] += confirmats * c.caps.per_unit
+    # фурнитура; соотношения («по одной на петлю») — из construction.yaml. Конфирматы, петли, планки и
+    # саморезы петель считает `kitchen.drilling` по соединениям и дверям шаблона.
     if n_shelves:
         out.hardware[hw.shelf_pins] += c.shelf.pins * n_shelves
     # ключи ножек «до_800»/«свыше_800» должны совпадать с порогом (DECISIONS, тикет 05)
     if not upper_carcass:
         out.hardware[hw.legs] += c.legs.up_to_800 if W <= c.legs.threshold else c.legs.over_800
-    screws = c.screws_3_5x16.per_hinge * hinges
+    screws = 0
     if not no_back:
         perimeter = 2 * (back_h + back_w)
         screws += _ceil_div(perimeter, bp.fastening_pitch)  # саморезы на ХДФ: периметр / шаг
@@ -549,6 +600,7 @@ class Template:
     appliances: tuple[str, ...] = ()  # виды техники, под которые шаблон строит нишу
     both_rows: bool = False  # модуль записан в одном ряду стены и занимает оба (пенал)
     default_depth: Callable[[Workshop], int] | None = None  # глубина по умолчанию вместо глубины ряда
+    title: str = field(kw_only=True)  # русское название для строки состава КП: «нижний модуль», «пенал»
 
 
 def _plain(build: Callable[[ModuleSpec, ModuleDims, ProjectMaterials, Workshop], TemplateOut]):
@@ -626,6 +678,89 @@ def build_base_bottle(
     return out
 
 
+def _drawer_sizes(module: ModuleSpec, dims: ModuleDims, ws: Workshop):
+    """Внутренняя ширина, дно и задняя стенка ящика по формулам мастерской."""
+    c = ws.construction
+    inner = _calc(
+        module, dims, "внутренняя ширина ящика", c.drawers.inner_width, W=dims.width, T=c.case_thickness
+    )
+    try:
+        bottom = formulas.evaluate(c.tandembox.bottom, внутр_ширина=inner)
+        back = formulas.evaluate(c.tandembox.back, внутр_ширина=inner)
+    except FormulaError as e:
+        raise OrderError(f"Модуль {module.label}: размеры ящика: {e}.") from e
+    if not isinstance(bottom, tuple) or not isinstance(back, tuple):
+        raise OrderError(f"Модуль {module.label}: формулы деталей ящика должны задавать два размера.")
+    return inner, bottom, back
+
+
+def drawer_depth_shortfall(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -> tuple[float, str] | None:
+    """Внутренняя глубина — глубина корпуса (задняя стенка накладная, фасад снаружи). Нужная глубина — одно
+    правило для проверок и `drawer_parts`: дно ящика по формуле мастерской плюс толщина задней стенки ящика,
+    но не меньше длины направляющей. Возвращает (нужная глубина, русский текст ошибки) или `None`."""
+    c = ws.construction
+    material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
+    thickness = _required_thickness(material, "деталей ящика")
+    _, bottom, _ = _drawer_sizes(module, dims, ws)
+    guide = c.tandembox.guide_length
+    need = max(guide, bottom[1] + thickness)
+    if dims.depth >= need:
+        return None
+    why = (
+        f"меньше нужной {need:g} мм (дно ящика {bottom[1]} мм + задняя стенка {thickness} мм, "
+        f"но не меньше направляющей {guide:g} мм)"
+    )
+    return need, f"Модуль {module.label}: внутренняя глубина {dims.depth} мм {why}."
+
+
+def drawer_parts(
+    out: TemplateOut, module: ModuleSpec, dims: ModuleDims, ws: Workshop, *, number: int, z: int, top: int
+) -> None:
+    """Дно и задняя стенка ящика Tandembox за фасадом, нижний край которого `z`, верхний `top` (мм от низа
+    корпуса), и направляющие ящика на боковинах (`DrawerRunners`, по ним присадка ставит их отверстия).
+    Одна функция для `base_drawers` и пенала. Ящик, который не помещается за свой фасад или по глубине
+    корпуса, — ошибка с цифрами, а не деталь отрицательного размера."""
+    c = ws.construction
+    t, D = c.case_thickness, dims.depth
+    material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
+    thickness = _required_thickness(material, "деталей ящика")
+    shortfall = drawer_depth_shortfall(module, dims, ws)
+    if shortfall:
+        raise OrderError(shortfall[1])
+    inner, bottom, back = _drawer_sizes(module, dims, ws)
+    if min(*bottom, *back) <= 0:
+        raise OrderError(
+            f"Модуль {module.label}: ящик не помещается: размеры деталей ящика должны быть положительными, "
+            f"а при внутренней ширине {inner} мм они {bottom[0]}×{bottom[1]} и {back[0]}×{back[1]} мм."
+        )
+    drawer_z = _calc(module, dims, "высота дна ящика", c.drawers.bottom_height, Z=z, T=t)
+    drawer_top = drawer_z + max(thickness, back[1])
+    if drawer_z < t or drawer_top > top:
+        raise OrderError(
+            f"Модуль {module.label}: ящик не помещается: ящик занимает высоту от {drawer_z} до {drawer_top} мм, "
+            f"а место под него от {t} до {top} мм (фасад ящика {top - z} мм)."
+        )
+    out.drawers.append(DrawerRunners(drawer_z, both_sides(module.label)))
+    out.parts += [
+        make_part(
+            pid=f"{module.label}-{suffix}-{number}",
+            module_label=module.label,
+            name=name,
+            a=Span(sizes[0], axes[0]),
+            b=Span(sizes[1], axes[1]),
+            thickness=thickness,
+            material_id=material.id,
+            textured=bool(material.texture),
+            at=Position(x=(dims.width - sizes[0]) // 2, y=y, z=drawer_z),
+            edges=dict.fromkeys(EDGE_SIDES, _edge_id(ws, material.id)) if c.drawers.edge_parts else None,
+        )
+        for suffix, name, sizes, axes, y in (
+            ("дно-ящ", DRAWER_BOTTOM, bottom, ("x", "y"), D - bottom[1]),
+            ("зад-ящ", DRAWER_BACK, back, ("x", "z"), D - bottom[1] - thickness),
+        )
+    ]
+
+
 def build_base_drawers(
     module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
 ) -> TemplateOut:
@@ -652,25 +787,8 @@ def build_base_drawers(
     if lower_height <= 0:
         raise OrderError(f"Модуль {module.label}: высота фасада ящика должна быть положительной.")
     facade = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
-    drawer_material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
-    drawer_t = _required_thickness(drawer_material, "деталей ящика")
-    inner = _calc(
-        module, dims, "внутренняя ширина ящика", c.drawers.inner_width, W=dims.width, T=c.case_thickness
-    )
-    try:
-        bottom_dims = formulas.evaluate(c.tandembox.bottom, внутр_ширина=inner)
-        back_dims = formulas.evaluate(c.tandembox.back, внутр_ширина=inner)
-    except FormulaError as e:
-        raise OrderError(f"Модуль {module.label}: размеры ящика: {e}.") from e
-    if not isinstance(bottom_dims, tuple) or not isinstance(back_dims, tuple):
-        raise OrderError(f"Модуль {module.label}: формулы деталей ящика должны задавать два размера.")
-    if min(*bottom_dims, *back_dims) <= 0:
-        raise OrderError(
-            f"Модуль {module.label}: размеры деталей ящика должны быть положительными: {bottom_dims}, {back_dims}."
-        )
     z = facades.gap
     for n, h in enumerate((lower_height, lower_height, top), 1):
-        drawer_z = _calc(module, dims, "высота дна ящика", c.drawers.bottom_height, Z=z, T=c.case_thickness)
         out.parts.append(
             make_part(
                 pid=f"{module.label}-фасад-{n}",
@@ -685,32 +803,7 @@ def build_base_drawers(
                 area=True,
             )
         )
-        for suffix, name, sizes, axes, y in (
-            ("дно-ящ", "дно ящика", bottom_dims, ("x", "y"), dims.depth - bottom_dims[1]),
-            (
-                "зад-ящ",
-                "задняя стенка ящика",
-                back_dims,
-                ("x", "z"),
-                dims.depth - bottom_dims[1] - drawer_t,
-            ),
-        ):
-            out.parts.append(
-                make_part(
-                    pid=f"{module.label}-{suffix}-{n}",
-                    module_label=module.label,
-                    name=name,
-                    a=Span(sizes[0], axes[0]),
-                    b=Span(sizes[1], axes[1]),
-                    thickness=drawer_t,
-                    material_id=drawer_material.id,
-                    textured=bool(drawer_material.texture),
-                    at=Position(x=(dims.width - sizes[0]) // 2, y=y, z=drawer_z),
-                    edges=dict.fromkeys(EDGE_SIDES, _edge_id(ws, drawer_material.id))
-                    if c.drawers.edge_parts
-                    else None,
-                )
-            )
+        drawer_parts(out, module, dims, ws, number=n, z=z, top=z + h)
         z += h + facades.gap
     return out
 
@@ -821,6 +914,7 @@ def build_wall_hood(
         lift=bool(module.contents and module.contents.lift),
     )
     body = _material(ws.materials.sheets, materials.body, "Материал корпуса", "листовые")
+    out.joints.extend(joined_to_sides(module.label, f"{module.label}-дно-выт-1"))
     out.parts.append(
         make_part(
             pid=f"{module.label}-дно-выт-1",
@@ -835,9 +929,6 @@ def build_wall_hood(
             edges={c.edging.case.face: _edge_id(ws, body.id)},
         )
     )
-    added = 2 * steps_pick(c.confirmats_by_joint_length, front_depth, "конфирматы_по_длине_соединения")
-    out.hardware[c.furniture.confirmats] += added
-    out.hardware[c.furniture.caps] += added * c.caps.per_unit
     return out
 
 
@@ -869,14 +960,17 @@ def _build_corner(
             module.model_copy(update={"shelves": 1}), dims, materials, ws, no_shelf=False, no_doors=True
         )
     else:
+        # нижний угловой: карусель или одна полка с полкодержателями (замена варианта «экономия», тикет 17)
+        shelf = bool(module.contents and module.contents.shelves)
         out = build_base_door(
-            module.model_copy(update={"shelves": 1}), dims, materials, ws, no_shelf=True, no_doors=True
+            module.model_copy(update={"shelves": 1}), dims, materials, ws, no_shelf=not shelf, no_doors=True
         )
     if upper:
         facade_h = _calc(module, dims, "высота фасада", c.facades.height_upper, H=dims.height, W=dims.width)
     else:
         facade_h = _calc(module, dims, "высота фасада", c.facades.height_lower, H=dims.height, W=dims.width)
-        out.hardware[rules.carousel] += 1
+        if not shelf:
+            out.hardware[rules.carousel] += 1
     body = _material(ws.materials.sheets, rules.filler_material, "Материал заглушки", "листовые")
     facade_id = materials.facades_upper if upper else materials.facades_lower
     facade = _material(ws.materials.facades, facade_id, "Материал фасадов", "фасады")
@@ -908,10 +1002,9 @@ def _build_corner(
             area=True,
         )
     )
-    hinges = steps_pick(c.hinges_by_facade_height, facade_h, "петли_по_высоте_фасада")
-    out.hardware[c.furniture.hinges] += hinges
-    out.hardware[c.furniture.plates] += hinges * c.plates.per_unit
-    out.hardware[c.furniture.screws] += hinges * c.screws_3_5x16.per_hinge + rules.filler_screws
+    # петли со стороны прохода, у боковины: глухая часть справа — петли слева, и наоборот
+    out.doors.append(hinged(module.label, f"{module.label}-фасад", "right" if blind_left else "left"))
+    out.hardware[c.furniture.screws] += rules.filler_screws
     out.hardware[materials.handles] += c.handles.per_unit
     return out
 
@@ -947,23 +1040,50 @@ def build_hood_of_project(
 
 TEMPLATES = {
     "tall_oven": Template(
-        build_tall_oven, "tall", drawers=True, appliances=("oven", "microwave"), both_rows=True
+        build_tall_oven,
+        "tall",
+        drawers=True,
+        appliances=("oven", "microwave"),
+        both_rows=True,
+        title="пенал",
     ),
-    "base_door": Template(_plain(build_base_door), "lower"),
-    "base_corner": Template(build_base_corner, "lower"),
+    "base_door": Template(_plain(build_base_door), "lower", title="нижний модуль"),
+    "base_corner": Template(build_base_corner, "lower", title="нижний угловой модуль"),
     "wall_corner": Template(
-        build_wall_corner, "upper", default_depth=lambda ws: ws.construction.corner_rules.upper_depth
+        build_wall_corner,
+        "upper",
+        default_depth=lambda ws: ws.construction.corner_rules.upper_depth,
+        title="верхний угловой модуль",
     ),
-    "wall_door": Template(_plain(build_wall_door), "upper"),
-    "wall_lift": Template(_plain(build_wall_lift), "upper"),
-    "wall_hood": Template(build_hood_of_project, "upper", appliances=("hood",)),
-    "wall_dryer": Template(_plain(build_wall_dryer), "upper"),
-    "base_sink": Template(_plain(build_base_sink), "lower", appliances=("sink",)),
-    "base_bottle": Template(_plain(build_base_bottle), "lower"),
-    "base_drawers": Template(_plain(build_base_drawers), "lower", drawers=True),
+    "wall_door": Template(_plain(build_wall_door), "upper", title="верхний модуль"),
+    "wall_lift": Template(_plain(build_wall_lift), "upper", title="верхний модуль"),
+    "wall_hood": Template(build_hood_of_project, "upper", appliances=("hood",), title="модуль над вытяжкой"),
+    "wall_dryer": Template(_plain(build_wall_dryer), "upper", title="верхний модуль"),
+    "base_sink": Template(_plain(build_base_sink), "lower", appliances=("sink",), title="модуль под мойку"),
+    "base_bottle": Template(_plain(build_base_bottle), "lower", title="нижний модуль-бутылочница"),
+    "base_drawers": Template(_plain(build_base_drawers), "lower", drawers=True, title="нижний модуль"),
     "dishwasher_panel": Template(
-        _plain(build_dishwasher_panel), "lower", carcass=False, appliances=("dishwasher",)
+        _plain(build_dishwasher_panel),
+        "lower",
+        carcass=False,
+        appliances=("dishwasher",),
+        title="фасад посудомоечной машины",
     ),
+}
+
+# Русские названия видов техники для строки состава КП (ключи — `models.APPLIANCE_KINDS`, сверяет тест).
+APPLIANCE_NAMES = {
+    "sink": "мойка",
+    "hob": "варочная панель",
+    "cooker": "отдельностоящая плита",
+    "oven": "духовой шкаф",
+    "microwave": "микроволновка",
+    "dishwasher": "посудомойка",
+    "washing_machine": "стиральная машина",
+    "coffee_machine": "кофемашина",
+    "wine_cooler": "винный шкаф",
+    "other": "другая техника",
+    "hood": "вытяжка",
 }
 
 # Явная несовместимость вида техники с рядом модуля: вытяжка только вверху, остальное только внизу
@@ -1018,7 +1138,7 @@ class PartsComputation:
 NO_COLOR = "без цвета"
 
 
-def _lower_facades(module: ModuleSpec, row: Row) -> bool:
+def lower_facades(module: ModuleSpec, row: Row) -> bool:
     """Фасады модуля нижние: нижний ряд или шаблон, входящий в оба ряда (пенал)."""
     template = TEMPLATES.get(module.template)
     return row.kind == "lower" or (template is not None and template.both_rows)
@@ -1029,7 +1149,7 @@ def resolve_materials(module: ModuleSpec, row: Row, materials: ProjectMaterials)
     фасада относятся к верхним или нижним фасадам по ряду (пенал — нижние). Одно место для
     расчёта деталей, площади по цветам и закупки."""
     values = materials.model_dump()
-    lower = _lower_facades(module, row)
+    lower = lower_facades(module, row)
     keys = {
         "facades": "facades_lower" if lower else "facades_upper",
         "facade_color": "facades_lower_color" if lower else "facades_upper_color",
@@ -1044,7 +1164,7 @@ def resolve_materials(module: ModuleSpec, row: Row, materials: ProjectMaterials)
 def facade_color(module: ModuleSpec, row: Row, materials: ProjectMaterials) -> str:
     """Цвет фасадов модуля с учётом переопределений; без цвета — «без цвета»."""
     resolved = resolve_materials(module, row, materials)
-    lower = _lower_facades(module, row)
+    lower = lower_facades(module, row)
     return (resolved.facades_lower_color if lower else resolved.facades_upper_color) or NO_COLOR
 
 
@@ -1095,8 +1215,14 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
         edges=_edge_totals(all_parts, ws),
         facade_area=_area_4(facade_area),
         facade_by_color={c: _area_4(a) for c, a in sorted(colored.items())},
-        warnings=warnings,
+        warnings=[*warnings, *plate_warnings(ws, hw)],
     )
+
+
+def unknown_template_error(module: ModuleSpec) -> OrderError:
+    """Ошибка неизвестного шаблона: один текст для расчёта деталей и проверок."""
+    known = ", ".join(sorted(TEMPLATES))
+    return OrderError(f"Модуль {module.label}: неизвестный шаблон «{module.template}» (известные: {known}).")
 
 
 def build_module(
@@ -1105,10 +1231,7 @@ def build_module(
     """Один модуль → результат шаблона: выбор шаблона, габариты, ряд."""
     template = TEMPLATES.get(module.template)
     if template is None:
-        known = ", ".join(sorted(TEMPLATES))
-        raise OrderError(
-            f"Модуль {module.label}: неизвестный шаблон «{module.template}» (известные: {known})."
-        )
+        raise unknown_template_error(module)
     if template.row_kind != "tall" and template.row_kind != row.kind:
         raise OrderError(
             f"Модуль {module.label}: шаблон {module.template} применяется в "
@@ -1161,7 +1284,7 @@ def build_module(
             contents
             and (
                 contents.doors not in (None, 1)
-                or contents.shelves not in (None, 0 if module.template == "base_corner" else 1)
+                or contents.shelves not in ((None, 0, 1) if module.template == "base_corner" else (None, 1))
                 or contents.drawers is not None
                 or contents.lift
                 or contents.inserts
@@ -1169,6 +1292,7 @@ def build_module(
                     [],
                     [ws.construction.corner_rules.carousel] if module.template == "base_corner" else [],
                 )
+                or (contents.shelves == 1 and contents.inserts and module.template == "base_corner")
             )
         )
     ):
@@ -1222,4 +1346,54 @@ def build_module(
         )
     resolved_materials = resolve_materials(module, row, materials)
     dims = module_dims(module, row.kind, ws)
-    return template.build(module, dims, resolved_materials, ws, BuildContext(appliances, row))
+    out = template.build(module, dims, resolved_materials, ws, BuildContext(appliances, row))
+    _check_sound(module, dims, out)
+    _check_hinge_side(module, out)
+    out.parts, drilled = apply_drilling(
+        module.label, out.parts, out.joints, out.doors, ws, shelves=out.shelves, drawers=out.drawers
+    )
+    out.hardware.update(drilled)
+    return out
+
+
+def _check_hinge_side(module: ModuleSpec, out: TemplateOut) -> None:
+    """Сторону петель задают только одной двери на петлях; у углового модуля она следует из места в ряду."""
+    if module.contents is None or module.contents.hinge_side is None:
+        return
+    if module.template in ("base_corner", "wall_corner"):
+        raise OrderError(
+            f"Модуль {module.label}: у углового модуля сторона петель следует из места в ряду, "
+            "поле hinge_side не задаётся."
+        )
+    if len(out.doors) != 1:
+        raise OrderError(
+            f"Модуль {module.label}: сторона петель (hinge_side) задаётся только у модуля с одной дверью на петлях, "
+            f"а дверей на петлях {len(out.doors)}."
+        )
+
+
+def _negative_hardware(hardware: Counter) -> list[str]:
+    """Позиции фурнитуры с количеством меньше нуля, «id количество»."""
+    return sorted(f"{item} {n}" for item, n in hardware.items() if n < 0)
+
+
+def _check_sound(module: ModuleSpec, dims: ModuleDims, out: TemplateOut) -> None:
+    """Шаблон на этих габаритах строит деталь, которой нет: размер не больше нуля, положение за пределами
+    модуля или фурнитуры меньше нуля — ошибка модуля, а не молчаливо неверный вывод. Единственное
+    место проверки для всех шаблонов. Задняя стенка ХДФ накладная: она стоит за корпусом (`y < 0`)."""
+    problems = []
+    for part in out.parts:
+        if min(part.length, part.width, part.thickness) <= 0:
+            problems.append(f"{part.id} {part.length}×{part.width} мм")
+        else:
+            at = part.position
+            if min(at.x, at.z) < 0 or (at.y < 0 and part.name != BACK_PANEL):
+                problems.append(f"{part.id} за пределами модуля (x={at.x}, y={at.y}, z={at.z})")
+    if problems:
+        raise OrderError(
+            f"Модуль {module.label}: при габаритах {dims.width}×{dims.height}×{dims.depth} мм шаблон "
+            f"{module.template} строит деталь неверного размера или положения: {'; '.join(problems)}."
+        )
+    negative = _negative_hardware(out.hardware)
+    if negative:
+        raise OrderError(f"Модуль {module.label}: количество фурнитуры меньше нуля: {', '.join(negative)}.")
