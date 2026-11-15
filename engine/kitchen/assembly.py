@@ -74,7 +74,7 @@ def _steps(
     """Строки по этапам в порядке `сборка`; этап без строк у модуля пропускается."""
     c = ws.construction
     plan, hardware = built.plan, built.hardware
-    facades = [p.id for p in built.parts if p.name == "фасад"]
+    facades = [p.id for p in built.parts if is_facade(p)]
 
     def installed_here(item: str) -> bool:
         return hardware.get(item, 0) > 0 and name_of[item][1] == "цех"
@@ -151,7 +151,7 @@ def build_assembly(project: Project, built: list[ModuleParts], ws: Workshop) -> 
                     "appliances": kinds,
                 }
                 if not template.carcass:
-                    facades = [p.mark for p in parts if p.name == "фасад"]
+                    facades = [p.id for p in module_parts.parts if is_facade(p)]
                     blocks.append(
                         AssemblyModule(
                             title=f"{module.label} — {template.title}, {dims.width} мм",

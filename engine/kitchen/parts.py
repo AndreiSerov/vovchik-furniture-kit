@@ -1230,7 +1230,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
                         module=module.label,
                         template=module.template,
                         parts=out.parts,
-                        hardware=dict(sorted(out.hardware.items())),
+                        hardware=dict(out.hardware),
                         plan=AssemblyPlan(
                             joints=tuple(out.joints),
                             doors=tuple(out.doors),
