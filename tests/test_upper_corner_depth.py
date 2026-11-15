@@ -5,6 +5,7 @@ import copy
 import json
 from pathlib import Path
 
+import pytest
 from kitchen import api
 
 from tests.conftest import BASE_DOOR_PROJECT, REPO
@@ -185,3 +186,13 @@ def test_petrov_gap_is_right_after_the_corner_in_wall_b_upper_row(home):
     quote = api.quote_from_project(FIXTURES / "petrov_project.json", 14, home)
     labels = [m.label for m in quote.modules]
     assert labels[labels.index("Н6") :] == ["Н6", "ПМ1", "В5", "В6"]
+
+
+@pytest.mark.parametrize("extra", [{"depth": 320.5}, {"height": 700.5}, {"width": 600.5}])
+def test_fractional_corner_dims_are_module_build_not_crash(home, extra):
+    # дробный размер углового — находка module_build, а не обрыв проверок; сумму соседнего ряда не считаем
+    walls = corner_walls(664)
+    walls[0]["rows"][0]["modules"][0].update(extra)
+    result = api.check_project(write(home, walls), home)
+    assert ("module_build", "В1") in {(f.code, f.subject) for f in result.errors}
+    assert [f for f in result.findings if f.code == "row_sum" and f.subject == "Б"] == []
