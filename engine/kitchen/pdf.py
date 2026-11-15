@@ -11,6 +11,7 @@ from datetime import date
 from pathlib import Path
 
 from reportlab.lib.pagesizes import A4
+from reportlab.lib.pagesizes import landscape as _landscape
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -19,7 +20,17 @@ from reportlab.pdfgen.canvas import Canvas
 
 from kitchen.result import MOCK_BANNER
 
-__all__ = ["FONT", "FONT_BOLD", "Area", "PdfDocument", "mm", "page_area", "register_fonts", "wrap"]
+__all__ = [
+    "FONT",
+    "FONT_BOLD",
+    "Area",
+    "PdfDocument",
+    "mm",
+    "page_area",
+    "page_size",
+    "register_fonts",
+    "wrap",
+]
 
 FONT = "DejaVuSans"
 FONT_BOLD = "DejaVuSans-Bold"
@@ -38,9 +49,14 @@ class Area:
     h: float
 
 
-def page_area() -> Area:
+def page_size(landscape: bool = False) -> tuple[float, float]:
+    """Размер листа A4, пункты: книжный или альбомный (виды кухни, тикет 41)."""
+    return _landscape(A4) if landscape else A4
+
+
+def page_area(landscape: bool = False) -> Area:
     """Область содержимого страницы A4 над колонтитулом."""
-    width, height = A4
+    width, height = page_size(landscape)
     return Area(_MARGIN, _MARGIN + _FOOTER_H, width - 2 * _MARGIN, height - 2 * _MARGIN - _FOOTER_H)
 
 
@@ -51,10 +67,19 @@ def register_fonts() -> None:
 
 
 class PdfDocument:
-    """Многостраничный PDF A4 (книжный). `version` — версия проекта-источника, `None` — не записана."""
+    """Многостраничный PDF A4 (книжный, с `landscape` — альбомный). `version` — версия проекта-источника,
+    `None` — не записана."""
 
     def __init__(
-        self, path: Path, *, order: str, version: int | None, mock: bool, on: date, title: str = ""
+        self,
+        path: Path,
+        *,
+        order: str,
+        version: int | None,
+        mock: bool,
+        on: date,
+        title: str = "",
+        landscape: bool = False,
     ) -> None:
         register_fonts()
         self.path = Path(path)
@@ -63,6 +88,7 @@ class PdfDocument:
         self.mock = mock
         self.on = on
         self.title = title
+        self.landscape = landscape
         self._pages: list[tuple[Callable[[Canvas, Area], None], str]] = []
 
     def add_page(self, draw: Callable[[Canvas, Area], None], note: str = "") -> None:
@@ -70,14 +96,14 @@ class PdfDocument:
         self._pages.append((draw, note))
 
     def save(self) -> None:
-        width, height = A4
+        width, height = page_size(self.landscape)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
         # invariant: без случайного id и текущего времени в файле, одинаковый вход даёт одинаковый PDF
-        canvas = Canvas(str(tmp), pagesize=A4, invariant=1, pageCompression=0)
+        canvas = Canvas(str(tmp), pagesize=(width, height), invariant=1, pageCompression=0)
         try:
             canvas.setTitle(self.title or self.path.stem)
-            area = page_area()
+            area = page_area(self.landscape)
             total = max(len(self._pages), 1)
             for number, (draw, note) in enumerate(self._pages or [(lambda c, a: None, "")], 1):
                 canvas.setFillColorRGB(0, 0, 0)

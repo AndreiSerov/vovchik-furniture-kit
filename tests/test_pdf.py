@@ -84,3 +84,30 @@ def test_wrap_measures_bold_text_in_the_bold_font():
     lines = wrap(text, True, 10, width)
     assert len(lines) > 1
     assert all(stringWidth(line, FONT_BOLD, 10) <= width for line in lines)
+
+
+def test_landscape_page_keeps_footer_and_watermark(tmp_path):
+    # тикет 41: виды кухни — A4 альбомная с тем же колонтитулом и водяным знаком
+    from kitchen.pdf import page_area
+    from reportlab.lib.pagesizes import A4, landscape
+
+    doc = PdfDocument(
+        tmp_path / "a.pdf",
+        order="2026-047-petrov",
+        version=1,
+        mock=True,
+        on=date(2026, 11, 14),
+        landscape=True,
+    )
+    seen = []
+    doc.add_page(lambda c, area: seen.append(area))
+    doc.save()
+    page = PdfReader(tmp_path / "a.pdf").pages[0]
+    width, height = landscape(A4)
+    assert (round(float(page.mediabox.width)), round(float(page.mediabox.height))) == (
+        round(width),
+        round(height),
+    )
+    assert seen == [page_area(landscape=True)] and seen[0].w > seen[0].h
+    text = page.extract_text()
+    assert text.count(MOCK_BANNER) == 2 and "стр. 1 из 1" in text
