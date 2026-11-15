@@ -676,12 +676,10 @@ def _render_production(r: api.ProductionResult) -> str:
     for output in (r.cutting.output, r.edging.output, *r.purchase.outputs):
         if output:
             lines.append(f"Файл: {output.file} (версия проекта {output.source_version})")
-    for output, name in (
-        (r.drilling.output, "Карта присадки PDF"),
-        (r.assembly.output, "Сборочный лист PDF"),
-    ):
-        if output:
-            lines.append(f"{name}: {output.file} (версия проекта {output.source_version})")
+    if r.assembly.output:
+        lines.append(
+            f"Сборочный лист PDF: {r.assembly.output.file} (версия проекта {r.assembly.output.source_version})"
+        )
     if r.purchase.warnings:
         lines.append("Предупреждения: " + "; ".join(r.purchase.warnings))
     return "\n".join(lines)

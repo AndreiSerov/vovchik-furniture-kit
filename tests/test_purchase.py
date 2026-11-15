@@ -67,7 +67,6 @@ def test_production_writes_all_outputs_of_same_version(home):
         ("edging", 1),
         ("purchase_md", 1),
         ("purchase_json", 1),
-        ("drilling", 1),
         ("assembly", 1),
     }
     assert all(Path(o.file).is_file() for o in outputs)
@@ -103,7 +102,6 @@ def test_failed_production_commit_restores_all_files_and_records(home):
     assert sorted(p.name for p in Path(before[0].file).parent.iterdir()) == [
         "assembly.pdf",
         "cutting-map.pdf",
-        "drilling-map.pdf",
         "edging-map.pdf",
         "purchase.json",
         "purchase.md",

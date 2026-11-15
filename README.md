@@ -39,7 +39,7 @@ kitchen log petrov --kind done|decision|next|note "текст"
 kitchen status petrov                    # печатает и пишет orders/<заказ>/status.md (руками не править)
 ```
 
-Раздел «Устарело» в `status.md` (и поле `stale` в `status --json`) перечисляет выводы, посчитанные из версии проекта старше текущей: вид, файл, версия-источник и команда пересчёта (`kitchen cut`, `edges`, `drilling`, `purchase`, `estimate`; `assembly`; `production` обновляет все документы цеха: раскрой, кромление, закупку, карту присадки и сборочный лист). Смена данных мастерской вывод устаревшим не делает.
+Раздел «Устарело» в `status.md` (и поле `stale` в `status --json`) перечисляет выводы, посчитанные из версии проекта старше текущей: вид, файл, версия-источник и команда пересчёта (`kitchen cut`, `edges`, `drilling`, `purchase`, `estimate`; `assembly`; `production` обновляет все документы цеха: раскрой, кромление, закупку и сборочный лист; карта присадки — командой `drilling`). Смена данных мастерской вывод устаревшим не делает.
 
 До этапа 1 импорт проверяет только обёртку: JSON-объект с полем `order`. Поле `version` в файле игнорируется.
 
@@ -115,7 +115,7 @@ kitchen assembly --project project.json   # черновик из файла б�
 ```sh
 kitchen purchase petrov               # purchase.md и purchase.json в orders/<заказ>/out/
 kitchen purchase petrov --json        # те же позиции и суммы в JSON
-kitchen production petrov             # документы цеха текущей версии: раскрой, кромление, закупка, присадка, сборочный лист
+kitchen production petrov             # документы цеха текущей версии: раскрой, кромление, закупка, сборочный лист
 kitchen production petrov --json      # тот же результат API в JSON
 ```
 

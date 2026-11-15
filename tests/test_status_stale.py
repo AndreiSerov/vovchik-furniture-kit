@@ -42,7 +42,7 @@ def _stale_kinds(home) -> set[str]:
     return {s.kind for s in api.status(ORDER, home).stale}
 
 
-ALL_KINDS = {"cutting", "edging", "purchase_md", "purchase_json", "drilling", "assembly"}
+ALL_KINDS = {"cutting", "edging", "purchase_md", "purchase_json", "assembly"}
 
 
 def test_v2_marks_every_v1_output_with_version_and_command(home):

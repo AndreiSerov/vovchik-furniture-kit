@@ -1915,7 +1915,6 @@ PRODUCTION_KINDS: tuple[OutputKind, ...] = (
     store.EDGING,
     store.PURCHASE_MD,
     store.PURCHASE_JSON,
-    store.DRILLING,
     store.ASSEMBLY,
 )
 
@@ -1926,7 +1925,6 @@ class ProductionResult(Result):
     cutting: CutResult
     edging: EdgingResult
     purchase: PurchaseResult
-    drilling: DrillingResult
     assembly: AssemblyResult
     mock_notice: str | None = None
 
@@ -1939,9 +1937,7 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
     cut = _build_cut(project, home, source, brief, warnings, workshop)
     edging = _edging(parts)
     purchase, purchase_files = _purchase_files(home, _purchase(project, parts, cut, workshop))
-    drilling = _drilling(parts, workshop)
     assembly = _assembly(project, parts, workshop)
-    drilling_output = _output_info(home, source, store.DRILLING, DRILLING_PDF)
     assembly_output = _output_info(home, source, store.ASSEMBLY, ASSEMBLY_PDF)
     cut_output = _output_info(home, source, store.CUTTING, CUTTING_PDF)
     edging_output = _output_info(home, source, store.EDGING, "edging-map.pdf")
@@ -1974,7 +1970,6 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
             ),
         ),
         *purchase_files,
-        (drilling_output, _drilling_writer(drilling, day)),
         (assembly_output, _assembly_writer(assembly, day)),
     ]
     _save_outputs(home, source, files)
@@ -1982,7 +1977,6 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
         cutting=cut.model_copy(update={"output": cut_output}),
         edging=edging.model_copy(update={"output": edging_output}),
         purchase=purchase,
-        drilling=drilling.model_copy(update={"output": drilling_output}),
         assembly=assembly.model_copy(update={"output": assembly_output}),
         mock=parts.mock,
         mock_files=parts.mock_files,

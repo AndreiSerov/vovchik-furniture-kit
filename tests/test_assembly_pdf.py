@@ -189,16 +189,16 @@ def test_cli_project_writes_nothing_and_order_with_project_is_an_error(home):
         assert bad.exit_code != 0 and "либо заказ" in bad.output
 
 
-def test_production_writes_drilling_and_assembly_and_leaves_nothing_stale(home):
+def test_production_writes_assembly_not_drilling_map_and_leaves_nothing_stale(home):
     petrov(home)
     r = api.production_and_save(ORDER, home)
     assert {o.kind for o in api.list_outputs(ORDER, home)} == set(api.PRODUCTION_KINDS)
     assert set(api.PRODUCTION_KINDS) == {
-        "cutting", "edging", "purchase_md", "purchase_json", "drilling", "assembly",
+        "cutting", "edging", "purchase_md", "purchase_json", "assembly",
     }  # fmt: skip
     out = home / "orders" / ORDER / "out"
-    assert (out / "drilling-map.pdf").is_file() and (out / "assembly.pdf").is_file()
-    assert r.drilling.output.kind == "drilling" and r.assembly.output.kind == "assembly"
+    assert (out / "assembly.pdf").is_file() and not (out / "drilling-map.pdf").exists()
+    assert r.assembly.output.kind == "assembly" and not hasattr(r, "drilling")
     project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
     project["ceiling_height"] = 2650
     v2 = home / "v2.json"
@@ -209,10 +209,11 @@ def test_production_writes_drilling_and_assembly_and_leaves_nothing_stale(home):
     assert not api.status(ORDER, home).stale
 
 
-def test_production_cli_prints_drilling_and_assembly_after_purchase(home):
+def test_production_cli_prints_assembly_after_purchase_and_no_drilling_map(home):
     petrov(home)
     text = runner.invoke(app, ["production", "petrov"]).output
-    assert text.index("purchase.json") < text.index("drilling-map.pdf") < text.index("assembly.pdf")
+    assert text.index("purchase.json") < text.index("assembly.pdf")
+    assert "drilling-map.pdf" not in text and "присадки" not in text
 
 
 def test_output_kind_assembly_is_in_the_recompute_registry():
