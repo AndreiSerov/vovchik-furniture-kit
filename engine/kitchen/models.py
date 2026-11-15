@@ -12,6 +12,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StrictStr,
     StringConstraints,
     WithJsonSchema,
     field_validator,
@@ -96,6 +97,13 @@ class Drilling(Section):
     hinges: str = _f("петли")
 
 
+class TripLists(Section):
+    """Что берут на выезд (тикет 40): строки попадают в чек-лист как есть. Пустой список допустим."""
+
+    tools: list[StrictStr] = _f("инструмент")
+    consumables: list[StrictStr] = _f("расходники")
+
+
 class Equipment(Section):
     mock: StrictBool
     saw: Saw = _f("пила")
@@ -103,6 +111,7 @@ class Equipment(Section):
     edging: EdgingMachine = _f("кромка")
     drilling: Drilling = _f("присадка")
     case_assembly: str = _f("сборка_корпуса")
+    trip: TripLists = _f("выезд")  # ДОБАВЛЕНО (МОК): инструмент и расходники чек-листа выезда
 
 
 # --- construction.yaml ------------------------------------------------------

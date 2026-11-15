@@ -194,7 +194,7 @@ def test_production_writes_assembly_not_drilling_map_and_leaves_nothing_stale(ho
     r = api.production_and_save(ORDER, home)
     assert {o.kind for o in api.list_outputs(ORDER, home)} == set(api.PRODUCTION_KINDS)
     assert set(api.PRODUCTION_KINDS) == {
-        "cutting", "edging", "purchase_md", "purchase_json", "assembly",
+        "cutting", "edging", "purchase_md", "purchase_json", "assembly", "trip",
     }  # fmt: skip
     out = home / "orders" / ORDER / "out"
     assert (out / "assembly.pdf").is_file() and not (out / "drilling-map.pdf").exists()
