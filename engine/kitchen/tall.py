@@ -21,6 +21,7 @@ from kitchen.parts import (
     joined_to_sides,
     make_part,
     niche_item,
+    pinned,
 )
 from kitchen.project import Appliance, ModuleSpec, ProjectMaterials
 
@@ -94,6 +95,7 @@ def build_tall_oven(
             )
         )
     shelf = c.shelf
+    out.shelves.append(pinned(module.label, f"{module.label}-полка"))
     out.parts.append(
         make_part(
             pid=f"{module.label}-полка",
@@ -126,7 +128,7 @@ def build_tall_oven(
                 area=True,
             )
         )
-    out.parts += drawer_parts(module, dims, ws, number=1, z=gap, top=bottom_z)
+    drawer_parts(out, module, dims, ws, number=1, z=gap, top=bottom_z)
     hw = c.furniture
     out.doors.append(
         hinged(module.label, f"{module.label}-фасад", _hinge_side(module))

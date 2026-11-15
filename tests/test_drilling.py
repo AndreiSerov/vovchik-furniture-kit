@@ -226,7 +226,7 @@ def test_left_and_right_sides_and_facades_are_mirrored(home, base_door_project):
     assert signature(p["Н1-фасад-Л"]) == signature(p["Н1-фасад-П"], mirror_axis="x")
 
 
-# Все 12 шаблонов: модуль, ряд. Каждый строится, отверстия — только трёх назначений тикета 19.
+# Все 12 шаблонов: модуль, ряд. Каждый строится, отверстия — только назначений тикетов 19 и 20.
 TEMPLATE_MODULES = [
     ({"label": "П1", "template": "tall_oven", "width": 600}, "lower"),
     ({"label": "Н1", "template": "base_door", "width": 600}, "lower"),
@@ -253,11 +253,15 @@ def two_walls(path):
 @pytest.mark.parametrize(
     ("module", "kind"), TEMPLATE_MODULES, ids=[m["template"] for m, _ in TEMPLATE_MODULES]
 )
-def test_every_template_builds_and_drills_only_confirmats_and_hinges(home, base_door_project, module, kind):
+def test_every_template_builds_and_drills_only_known_purposes(home, base_door_project, module, kind):
+    """Тикет 20: и у каждого шаблона отверстий полкодержателей — 5 на полкодержатель, направляющих — 6 на
+    комплект Tandembox (МОК: 3 на направляющую)."""
     result = api.parts_from_project(two_walls(project_with(base_door_project, module, kind=kind)), home)
     found = holes(result)
-    assert {h.purpose for _, h in found} <= {"confirmat", "hinge_cup", "hinge_plate"}
+    assert {h.purpose for _, h in found} <= {"confirmat", "hinge_cup", "hinge_plate", "shelf_pin", "runner"}
     hw = result.hardware
+    assert len([1 for _, h in found if h.purpose == "shelf_pin"]) == hw.get("shelf_pin_5", 0) * 5
+    assert len([1 for _, h in found if h.purpose == "runner"]) == hw.get("tandembox_M_500", 0) * 6
     assert len([1 for _, h in found if h.purpose == "hinge_cup"]) == hw.get("hinge_71B3550", 0)
     assert len([1 for _, h in found if h.purpose == "confirmat" and h.surface == "end"]) == hw.get(
         "confirmat_7x50", 0
@@ -271,7 +275,13 @@ def test_lift_facades_have_no_cups_and_hangers_handles_legs_are_not_drilled(petr
     p = parts_of(petrov)
     for pid in ("В1-фасад", "В5-фасад", "Н6-фасад"):
         assert not p[pid].holes, pid
-    assert {h.purpose for _, h in holes(petrov)} == {"confirmat", "hinge_cup", "hinge_plate"}
+    assert {h.purpose for _, h in holes(petrov)} == {
+        "confirmat",
+        "hinge_cup",
+        "hinge_plate",
+        "shelf_pin",
+        "runner",
+    }
 
 
 def edit_construction(home, old, new):
@@ -341,6 +351,8 @@ def test_drilling_reconciles_holes_with_hardware(home):
         "конфирматы: отверстий в торец": (102, 102),
         "чашки петель": (20, 20),
         "ответные планки: отверстий": (40, 40),
+        "полкодержатели: отверстий": (120, 120),  # тикет 20
+        "направляющие: отверстий": (24, 24),
     }
     assert result.mock is True
 

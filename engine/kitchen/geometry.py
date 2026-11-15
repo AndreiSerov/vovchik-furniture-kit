@@ -1,4 +1,5 @@
-"""Геометрия детали и схема отверстий: оси и грани модуля, положение, отверстие, соединение, дверь на петлях.
+"""Геометрия детали и схема отверстий: оси и грани модуля, положение, отверстие, соединение, дверь на петлях,
+полка на полкодержателях, ящик на направляющих.
 
 Модуль ни от чего в движке не зависит, кроме ошибок и типов мастерской: его читают и шаблоны (`kitchen.parts`),
 и присадка (`kitchen.drilling`), поэтому они не импортируют друг друга по кругу.
@@ -16,6 +17,7 @@ __all__ = [
     "FACES",
     "PURPOSE_RU",
     "Axis",
+    "DrawerRunners",
     "EdgeSide",
     "Face",
     "HingeSide",
@@ -23,6 +25,7 @@ __all__ = [
     "Hole",
     "Joint",
     "Orientation",
+    "PinnedShelf",
     "Position",
     "Purpose",
     "side_of_face",
@@ -33,11 +36,13 @@ Axis = Literal["x", "y", "z"]
 Face = Literal["+x", "-x", "+y", "-y", "+z", "-z"]  # грань в осях модуля: знак и ось
 FACES: tuple[Face, ...] = ("+x", "-x", "+y", "-y", "+z", "-z")
 EdgeSide = Literal["L1", "L2", "W1", "W2"]
-Purpose = Literal["confirmat", "hinge_cup", "hinge_plate"]
+Purpose = Literal["confirmat", "hinge_cup", "hinge_plate", "shelf_pin", "runner"]
 PURPOSE_RU: dict[str, str] = {
     "confirmat": "конфирмат",
     "hinge_cup": "чашка петли",
     "hinge_plate": "ответная планка",
+    "shelf_pin": "полкодержатель",
+    "runner": "направляющая",
 }
 HingeSide = Literal["left", "right"]
 
@@ -113,3 +118,20 @@ class HingedDoor:
     facade: str
     side: HingeSide
     side_part: str
+
+
+@dataclass(frozen=True)
+class PinnedShelf:
+    """Полка `shelf` лежит на полкодержателях в боковинах `sides` (маркировки: левая, правая), тикет 20."""
+
+    shelf: str
+    sides: tuple[str, str]
+
+
+@dataclass(frozen=True)
+class DrawerRunners:
+    """Ящик на направляющих Tandembox: дно ящика на высоте `bottom_z` от низа корпуса, направляющие — на
+    боковинах `sides` (маркировки: левая, правая), тикет 20."""
+
+    bottom_z: int
+    sides: tuple[str, str]

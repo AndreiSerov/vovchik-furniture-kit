@@ -20,11 +20,13 @@ from kitchen.formulas import FormulaError, InexactDivisionError
 from kitchen.geometry import (
     PURPOSE_RU,
     Axis,
+    DrawerRunners,
     HingedDoor,
     HingeSide,
     Hole,
     Joint,
     Orientation,
+    PinnedShelf,
     Position,
     side_of_face,
     steps_pick,
@@ -280,6 +282,8 @@ class TemplateOut:
     warnings: list[str] = field(default_factory=list)
     joints: list[Joint] = field(default_factory=list)
     doors: list[HingedDoor] = field(default_factory=list)
+    shelves: list[PinnedShelf] = field(default_factory=list)  # полки на полкодержателях (тикет 20)
+    drawers: list[DrawerRunners] = field(default_factory=list)  # ящики на направляющих (тикет 20)
 
 
 SIDE_SUFFIX: dict[HingeSide, str] = {"left": "Л", "right": "П"}
@@ -293,6 +297,11 @@ def side_part_id(label: str, side: HingeSide) -> str:
 def joined_to_sides(label: str, end: str) -> list[Joint]:
     """Деталь `end` между боковинами на конфирматах к обеим."""
     return [Joint(side_part_id(label, side), end) for side in SIDE_SUFFIX]
+
+
+def pinned(label: str, shelf: str) -> PinnedShelf:
+    """Полка между боковинами на полкодержателях: ряды отверстий — на обеих боковинах."""
+    return PinnedShelf(shelf, (side_part_id(label, "left"), side_part_id(label, "right")))
 
 
 def hinged(label: str, facade: str, side: HingeSide) -> HingedDoor:
@@ -451,6 +460,9 @@ def build_base_door(
     # полки с отступами от боковин и спереди; i-я полка выше предыдущей на шаг
     shelf = c.shelf
     for n in range(1, n_shelves + 1):
+        out.shelves.append(
+            pinned(module.label, f"{module.label}-полка-{n}" if n_shelves > 1 else f"{module.label}-полка")
+        )
         carcass(
             f"полка-{n}" if n_shelves > 1 else "полка",
             "полка",
@@ -657,10 +669,11 @@ def build_base_bottle(
 
 
 def drawer_parts(
-    module: ModuleSpec, dims: ModuleDims, ws: Workshop, *, number: int, z: int, top: int
-) -> list[Part]:
+    out: TemplateOut, module: ModuleSpec, dims: ModuleDims, ws: Workshop, *, number: int, z: int, top: int
+) -> None:
     """Дно и задняя стенка ящика Tandembox за фасадом, нижний край которого `z`, верхний `top` (мм от низа
-    корпуса). Одна функция для `base_drawers` и пенала. Ящик, который не помещается в корпус или за свой
+    корпуса), и направляющие ящика на боковинах (`DrawerRunners`, по ним присадка ставит их отверстия).
+    Одна функция для `base_drawers` и пенала. Ящик, который не помещается в корпус или за свой
     фасад, — ошибка «ящик не помещается» с цифрами, а не деталь отрицательного размера."""
     c = ws.construction
     t, D = c.case_thickness, dims.depth
@@ -691,7 +704,10 @@ def drawer_parts(
             f"Модуль {module.label}: ящик не помещается: ящик занимает высоту от {drawer_z} до {drawer_top} мм, "
             f"а место под него от {t} до {top} мм (фасад ящика {top - z} мм)."
         )
-    return [
+    out.drawers.append(
+        DrawerRunners(drawer_z, (side_part_id(module.label, "left"), side_part_id(module.label, "right")))
+    )
+    out.parts += [
         make_part(
             pid=f"{module.label}-{suffix}-{number}",
             module_label=module.label,
@@ -753,7 +769,7 @@ def build_base_drawers(
                 area=True,
             )
         )
-        out.parts += drawer_parts(module, dims, ws, number=n, z=z, top=z + h)
+        drawer_parts(out, module, dims, ws, number=n, z=z, top=z + h)
         z += h + facades.gap
     return out
 
@@ -1268,7 +1284,9 @@ def build_module(
     out = template.build(module, dims, resolved_materials, ws, BuildContext(appliances, row))
     _check_sound(module, dims, out)
     _check_hinge_side(module, out)
-    out.parts, drilled = apply_drilling(module.label, out.parts, out.joints, out.doors, ws)
+    out.parts, drilled = apply_drilling(
+        module.label, out.parts, out.joints, out.doors, ws, shelves=out.shelves, drawers=out.drawers
+    )
     out.hardware.update(drilled)
     return out
 

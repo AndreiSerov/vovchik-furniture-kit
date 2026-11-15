@@ -6,6 +6,7 @@
 """
 
 from datetime import date
+from itertools import pairwise
 from pathlib import Path
 from typing import Literal
 
@@ -41,9 +42,14 @@ _SIDE_RU = {
     "+z": "сверху",
     "-z": "снизу",
 }
-_COLORS = {"confirmat": (0.1, 0.3, 0.8), "hinge_cup": (0.8, 0.1, 0.1), "hinge_plate": (0.1, 0.55, 0.2)}
+_COLORS = {
+    "confirmat": (0.1, 0.3, 0.8),
+    "hinge_cup": (0.8, 0.1, 0.1),
+    "hinge_plate": (0.1, 0.55, 0.2),
+    "shelf_pin": (0.55, 0.2, 0.65),
+    "runner": (0.0, 0.55, 0.6),
+}
 _BASE_COLOR = (0.85, 0.35, 0.0)
-_SHORT_CHECKS = ("конфирматы в пласть", "в торец", "чашки", "планки")
 
 Box = tuple[float, float, float, float]  # x0, y0, x1, y1, пункты
 
@@ -173,7 +179,7 @@ def _view_faces(part: Part) -> tuple[Face, Face, Face]:
 
 
 def view_text(part: Part, right: Face, up: Face, view: Face) -> tuple[str, list[str]]:
-    """Строка вида и варианты строки сверления (полный и короткий), из граней отверстий:
+    """Строка вида и варианты строки сверления (полный, короткий и без назначений), из граней отверстий:
     «вид с лица (+y)», «сверлить: с тыльной стороны (-y, обратная) — чашка петли»."""
     full: dict[str, list[str]] = {}
     short: dict[str, list[str]] = {}
@@ -189,6 +195,7 @@ def view_text(part: Part, right: Face, up: Face, view: Face) -> tuple[str, list[
             if PURPOSE_RU[h.purpose] not in names:
                 names.append(PURPOSE_RU[h.purpose])
     drill = ["сверлить: " + "; ".join(f"{k} — {', '.join(v)}" for k, v in g.items()) for g in (full, short)]
+    drill.append("сверлить: " + "; ".join(short))  # назначения — в таблице отверстий
     return f"вид {_SIDE_RU[view]} ({view}), схема: {right}→, {up}↑", drill
 
 
@@ -198,15 +205,55 @@ def _where(h: Hole) -> str:
     return f"торец {h.edge_side} ({h.from_face}), {h.in_thickness} от пласти"
 
 
+_ROW_MIN = 3  # столько отверстий подряд на одной линии таблица пишет одной строкой (тикет 20)
+
+
+def _series(holes: list[Hole]) -> int | None:
+    """Ось расстояний (0 или 1), вдоль которой идут отверстия, если всё остальное у них одинаково, иначе None."""
+    a, rest = holes[0], holes[1:]
+    if any(
+        (h.purpose, _where(h), h.diameter, h.depth) != (a.purpose, _where(a), a.diameter, a.depth)
+        for h in rest
+    ):
+        return None
+    for i in (0, 1):
+        same = all(h.from_base[1 - i] == a.from_base[1 - i] for h in rest)
+        values = [h.from_base[i] for h in holes]
+        if same and all(x < y for x, y in pairwise(values)):
+            return i
+    return None
+
+
+def _span(values: list[int]) -> str:
+    steps = {b - a for a, b in pairwise(values)}
+    if len(steps) == 1:
+        return f"{values[0]}…{values[-1]} шаг {steps.pop()}"
+    return ", ".join(str(v) for v in values)
+
+
 def _rows(part: Part) -> list[str]:
+    """Строки таблицы отверстий: по отверстию на строку; ряд из трёх и больше одинаковых отверстий подряд
+    на одной линии (полкодержатели, направляющая) — одной строкой с номерами «11–15» и расстояниями."""
     assert part.holes and part.base_edges
     first, second = part.base_edges
     rows = [f"№  назначение · где · Ø×глубина · от {_FROM_RU[first]} · от {_FROM_RU[second]}"]
-    for n, h in enumerate(part.holes, 1):
+    holes, n = part.holes, 0
+    while n < len(holes):
+        end = n + 1
+        while end < len(holes) and _series(holes[n : end + 1]) is not None:
+            end += 1
+        h = holes[n]
+        number, base = f"{n + 1}", [str(h.from_base[0]), str(h.from_base[1])]
+        axis = _series(holes[n:end]) if end - n >= _ROW_MIN else None
+        if axis is None:
+            end = n + 1
+        else:
+            number = f"{n + 1}–{end}"
+            base[axis] = _span([x.from_base[axis] for x in holes[n:end]])
         rows.append(
-            f"{n}. {PURPOSE_RU[h.purpose]} · {_where(h)} · Ø{h.diameter}×{h.depth} · "
-            f"{h.from_base[0]} · {h.from_base[1]}"
+            f"{number}. {PURPOSE_RU[h.purpose]} · {_where(h)} · Ø{h.diameter}×{h.depth} · {base[0]} · {base[1]}"
         )
+        n = end
     return rows
 
 
@@ -408,9 +455,7 @@ def _scheme(part: Part, slot: Area) -> SchemeLayout:
 
 def _summary(checks: list[DrillingCheck]) -> list[str]:
     full = "Сверка с фурнитурой: " + "; ".join(f"{c.name} {c.holes} = {c.expected}" for c in checks)
-    short = "Сверка: " + "; ".join(
-        f"{name} {c.holes}={c.expected}" for name, c in zip(_SHORT_CHECKS, checks, strict=False)
-    )
+    short = "Сверка: " + "; ".join(f"{c.short} {c.holes}={c.expected}" for c in checks)
     return [full, short]
 
 

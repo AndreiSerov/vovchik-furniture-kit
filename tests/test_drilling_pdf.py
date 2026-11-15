@@ -177,7 +177,7 @@ def test_view_and_drilling_side_are_named_from_hole_faces(home):
         for h in by_id[pid].holes:
             if h.surface == "face":
                 visible = "видимая" if h.from_face == sc.view else "обратная"
-                assert f"{h.from_face}, {visible}" in text, (pid, h.from_face, text)
+                assert re.search(rf"{re.escape(h.from_face)},? {visible}", text), (pid, h.from_face, text)
             else:
                 assert f"торец {h.edge_side}" in text, (pid, text)
     assert s["Н2-дно"].view == "+z"  # лежачая деталь — вид сверху, перед внизу

@@ -19,10 +19,12 @@ from pydantic import BaseModel
 from kitchen.errors import KitchenError, OrderError
 from kitchen.geometry import (
     PURPOSE_RU,
+    DrawerRunners,
     Face,
     HingedDoor,
     Hole,
     Joint,
+    PinnedShelf,
     Position,
     Purpose,
     side_of_face,
@@ -182,6 +184,92 @@ def _hinges(
     return cups, plates
 
 
+def _inner_face(module: str, side: Part, inside: Part) -> Face:
+    """Пласть боковины, обращённая к детали `inside` (полке, ящику): у левой `+x`, у правой `-x`."""
+    se, ie = part_extent(side), part_extent(inside)
+    if se["x"][1] <= ie["x"][0]:
+        return "+x"
+    if se["x"][0] >= ie["x"][1]:
+        return "-x"
+    raise KitchenError(f"Модуль {module}: деталь {inside.id} не между боковинами, боковина {side.id}.")
+
+
+def _covered(draft: _Draft, side: Part, covers: list[Part]) -> bool:
+    """Отверстию в пласти боковины не место: окружность выходит за боковину или заходит под торец детали,
+    прикреплённой к боковине (дно, крыша, царга, перегородка). Касание допустимо."""
+    d, c, se = draft.diameter, draft.center, part_extent(side)
+    if any(2 * min(c[a] - se[a][0], se[a][1] - c[a]) < d for a in "yz"):
+        return True
+    for part in covers:
+        pe = part_extent(part)
+        dy = max(pe["y"][0] - c["y"], 0, c["y"] - pe["y"][1])
+        dz = max(pe["z"][0] - c["z"], 0, c["z"] - pe["z"][1])
+        if 4 * (dy * dy + dz * dz) < d * d:
+            return True
+    return False
+
+
+def _shelf_pins(module: str, shelf: Part, side: Part, covers: list[Part], ws: Workshop) -> list[_Draft]:
+    """Ряды под полкодержатели на боковине: спереди и сзади по `отверстий_в_ряду` с шагом `шаг`, среднее — на
+    высоте полки (нижняя пласть полки). Ряд, который у дна или крыши выходит за боковину или заходит под деталь
+    корпуса, сдвигается на целые шаги (сначала на меньший), пока не встанет целиком; отверстие на высоте полки
+    остаётся в ряду. Не встаёт и так — ошибка модуля."""
+    rules = ws.construction.drilling.shelf_pin
+    face = _inner_face(module, side, shelf)
+    se, he = part_extent(side), part_extent(shelf)
+    z = he["z"][0]
+    half = rules.holes // 2
+    shifts = sorted(range(-half, half + 1), key=lambda s: (abs(s), s))
+    out = []
+    for y in (se["y"][1] - rules.front_offset, se["y"][0] + rules.back_offset):
+        if not he["y"][0] <= y <= he["y"][1]:
+            raise OrderError(
+                f"Модуль {module}: ряд полкодержателей на боковине {side.id} (y={y}) не под полкой {shelf.id}."
+            )
+
+        def row(shift: int, y: int = y) -> list[_Draft]:
+            return [
+                _Draft(
+                    "shelf_pin",
+                    "face",
+                    face,
+                    rules.diameter,
+                    rules.depth,
+                    {"x": _sign_end(face, se), "y": y, "z": z + k * rules.pitch},
+                )
+                for k in range(shift - half, shift + half + 1)
+            ]
+
+        fitted = next((r for r in map(row, shifts) if not any(_covered(d, side, covers) for d in r)), None)
+        if fitted is None:
+            raise OrderError(
+                f"Модуль {module}: ряд полкодержателей на боковине {side.id} под полку {shelf.id} (высота {z} мм) "
+                "не помещается между деталями корпуса даже со сдвигом."
+            )
+        out += fitted
+    return out
+
+
+def _runners(module: str, drawer: DrawerRunners, side: Part, inside: Part, ws: Workshop) -> list[_Draft]:
+    """Отверстия направляющей Tandembox на внутренней пласти боковины: расстояния от передней кромки — по
+    ключу `отверстия_от_передней_кромки`, высота — дно ящика плюс `над_дном_ящика`."""
+    rules = ws.construction.drilling.runner
+    face = _inner_face(module, side, inside)
+    se = part_extent(side)
+    z = drawer.bottom_z + rules.above_bottom
+    return [
+        _Draft(
+            "runner",
+            "face",
+            face,
+            rules.diameter,
+            rules.depth,
+            {"x": _sign_end(face, se), "y": se["y"][1] - d, "z": z},
+        )
+        for d in rules.from_front
+    ]
+
+
 def _base_edges(part: Part, ws: Workshop) -> tuple[str, str]:
     plane = (part.orientation.length, part.orientation.width)
     first, second = (f for f in ws.construction.drilling.base_edges if f[1] in plane)
@@ -261,12 +349,20 @@ def _check_apart(module: str, part: Part, drafts: list[_Draft], ext: Extent) -> 
 
 
 def apply_drilling(
-    module: str, parts: list[Part], joints: list[Joint], doors: list[HingedDoor], ws: Workshop
+    module: str,
+    parts: list[Part],
+    joints: list[Joint],
+    doors: list[HingedDoor],
+    ws: Workshop,
+    *,
+    shelves: list[PinnedShelf] | None = None,
+    drawers: list[DrawerRunners] | None = None,
 ) -> tuple[list[Part], Counter]:
     """Детали с отверстиями и фурнитура соединений и петель модуля (конфирматы и заглушки, петли, планки,
     саморезы на петли). Позиции фурнитуры появляются, только если в модуле есть соединения или двери на
     петлях. Планок больше одной на петлю присадка не размечает: их отверстий нет, расчёт предупреждает один
-    раз (`plate_warnings`), а сверка карты присадки (`reconcile`) отказывает с этой причиной."""
+    раз (`plate_warnings`), а сверка карты присадки (`reconcile`) отказывает с этой причиной.
+    Полкодержатели и направляющие (тикет 20) считает шаблон; здесь — только их отверстия на боковинах."""
     c = ws.construction
     hw = c.furniture
     by_id = {p.id: p for p in parts}
@@ -300,6 +396,14 @@ def apply_drilling(
         hardware[hw.hinges] += hinges
         hardware[hw.plates] += hinges * c.plates.per_unit
         hardware[hw.screws] += hinges * c.screws_3_5x16.per_hinge
+    for shelf in shelves or []:
+        for pid in shelf.sides:
+            covers = [get(j.end) for j in joints if j.plate == pid]
+            drafts.setdefault(pid, []).extend(_shelf_pins(module, get(shelf.shelf), get(pid), covers, ws))
+    for drawer in drawers or []:
+        left, right = (get(pid) for pid in drawer.sides)
+        for side, other in ((left, right), (right, left)):
+            drafts.setdefault(side.id, []).extend(_runners(module, drawer, side, other, ws))
     out = []
     for part in parts:
         if part.id not in drafts:
@@ -333,19 +437,38 @@ def plate_warnings(ws: Workshop, hardware: dict[str, int]) -> list[str]:
 
 
 class DrillingCheck(BaseModel):
-    """Строка сверки присадки с фурнитурой этапа 1: отверстий в деталях и сколько их должно быть."""
+    """Строка сверки присадки с фурнитурой этапа 1: отверстий в деталях и сколько их должно быть. `short` —
+    короткое имя для строки сверки, когда полная не помещается на карте."""
 
     name: str
+    short: str
     holes: int
     expected: int
     basis: str  # откуда ожидаемое число
 
 
+ROWS_PER_SHELF = 4  # ряд спереди и сзади на каждой из двух боковин (решение мастера, тикет 20)
+RUNNERS_PER_SET = 2  # комплект Tandembox — левая и правая направляющие
+
+
+def _pins_not_marked(ws: Workshop) -> str | None:
+    pins = ws.construction.shelf.pins
+    if pins == ROWS_PER_SHELF:
+        return None
+    return (
+        f"полкодержателей по {pins} на полку (ключ «полка.полкодержателей» construction.yaml), а присадка ставит "
+        f"{ROWS_PER_SHELF} ряда на полку — по ряду спереди и сзади на каждой боковине"
+    )
+
+
 def reconcile(parts: list[Part], hardware: dict[str, int], ws: Workshop) -> list[DrillingCheck]:
-    """Отверстий в пласть = в торец = конфирматов, чашек = петель, отверстий планок = планок × отверстий на планку.
+    """Отверстий в пласть = в торец = конфирматов, чашек = петель, отверстий планок = планок × отверстий на планку,
+    отверстий полкодержателей = полкодержателей × отверстий в ряду (ряд на полкодержатель), отверстий
+    направляющих = комплектов Tandembox × отверстий на комплект (две направляющие).
     Расхождение — ошибка: карта присадки не должна разойтись с закупкой."""
     c = ws.construction
     hw = c.furniture
+    d = c.drilling
 
     def count(purpose: str, surface: str | None = None) -> int:
         return sum(
@@ -355,40 +478,79 @@ def reconcile(parts: list[Part], hardware: dict[str, int], ws: Workshop) -> list
             if h.purpose == purpose and (surface is None or h.surface == surface)
         )
 
-    per_plate = c.drilling.plate.holes
-    checks = [
-        DrillingCheck(
-            name="конфирматы: отверстий в пласть",
-            holes=count("confirmat", "face"),
-            expected=hardware.get(hw.confirmats, 0),
-            basis=f"{hw.confirmats} в фурнитуре",
+    per_plate = d.plate.holes
+    per_row = d.shelf_pin.holes
+    per_set = RUNNERS_PER_SET * len(d.runner.from_front)
+    # сверка и почему она может не сойтись по правилам мастерской (присадка такого не размечает)
+    rows: list[tuple[DrillingCheck, str | None]] = [
+        (
+            DrillingCheck(
+                name="конфирматы: отверстий в пласть",
+                short="конфирматы в пласть",
+                holes=count("confirmat", "face"),
+                expected=hardware.get(hw.confirmats, 0),
+                basis=f"{hw.confirmats} в фурнитуре",
+            ),
+            None,
         ),
-        DrillingCheck(
-            name="конфирматы: отверстий в торец",
-            holes=count("confirmat", "end"),
-            expected=hardware.get(hw.confirmats, 0),
-            basis=f"{hw.confirmats} в фурнитуре",
+        (
+            DrillingCheck(
+                name="конфирматы: отверстий в торец",
+                short="в торец",
+                holes=count("confirmat", "end"),
+                expected=hardware.get(hw.confirmats, 0),
+                basis=f"{hw.confirmats} в фурнитуре",
+            ),
+            None,
         ),
-        DrillingCheck(
-            name="чашки петель",
-            holes=count("hinge_cup"),
-            expected=hardware.get(hw.hinges, 0),
-            basis=f"{hw.hinges} в фурнитуре",
+        (
+            DrillingCheck(
+                name="чашки петель",
+                short="чашки",
+                holes=count("hinge_cup"),
+                expected=hardware.get(hw.hinges, 0),
+                basis=f"{hw.hinges} в фурнитуре",
+            ),
+            None,
         ),
-        DrillingCheck(
-            name="ответные планки: отверстий",
-            holes=count("hinge_plate"),
-            expected=hardware.get(hw.plates, 0) * per_plate,
-            basis=f"{hw.plates} в фурнитуре × {per_plate} на планку",
+        (
+            DrillingCheck(
+                name="ответные планки: отверстий",
+                short="планки",
+                holes=count("hinge_plate"),
+                expected=hardware.get(hw.plates, 0) * per_plate,
+                basis=f"{hw.plates} в фурнитуре × {per_plate} на планку",
+            ),
+            _plates_not_marked(ws),
+        ),
+        (
+            DrillingCheck(
+                name="полкодержатели: отверстий",
+                short="полкодержатели",
+                holes=count("shelf_pin"),
+                expected=hardware.get(hw.shelf_pins, 0) * per_row,
+                basis=f"{hw.shelf_pins} в фурнитуре × {per_row} в ряду",
+            ),
+            _pins_not_marked(ws),
+        ),
+        (
+            DrillingCheck(
+                name="направляющие: отверстий",
+                short="направляющие",
+                holes=count("runner"),
+                expected=hardware.get(c.drawers.hardware, 0) * per_set,
+                basis=f"{c.drawers.hardware} в фурнитуре × {per_set} на комплект",
+            ),
+            None,
         ),
     ]
-    wrong = [
-        f"{ch.name} — {ch.holes}, а нужно {ch.expected} ({ch.basis})"
-        for ch in checks
-        if ch.holes != ch.expected
-    ]
+    wrong = [ch for ch, _ in rows if ch.holes != ch.expected]
     if wrong:
-        reason = _plates_not_marked(ws)
-        cause = f" Причина: {reason}." if reason and checks[3].holes != checks[3].expected else ""
-        raise OrderError("Присадка не сходится с фурнитурой: " + "; ".join(wrong) + "." + cause)
-    return checks
+        causes = [f" Причина: {why}." for ch, why in rows if why and ch in wrong]
+        raise OrderError(
+            "Присадка не сходится с фурнитурой: "
+            + "; ".join(f"{ch.name} — {ch.holes}, а нужно {ch.expected} ({ch.basis})" for ch in wrong)
+            + "."
+            + "".join(causes)
+        )
+    return [ch for ch, _ in rows]

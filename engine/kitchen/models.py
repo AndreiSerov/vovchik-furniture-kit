@@ -450,13 +450,52 @@ class PlateDrilling(Section):
     depth: PosInt = _f("глубина")
 
 
+class ShelfPinDrilling(Section):
+    """Ряд отверстий под полкодержатели (тикет 20): на каждой боковине спереди и сзади, среднее — на высоте
+    полки. Нечётное число отверстий: по столько же шагов выше и ниже полки."""
+
+    holes: PosInt = _f("отверстий_в_ряду")
+    pitch: PosInt = _f("шаг")
+    front_offset: PosInt = _f("отступ_от_передней_кромки")
+    back_offset: PosInt = _f("отступ_от_задней_кромки")
+    diameter: PosInt = _f("диаметр")
+    depth: PosInt = _f("глубина")
+
+    @field_validator("holes")
+    @classmethod
+    def _odd(cls, v: int) -> int:
+        if v % 2 == 0:
+            raise ValueError("ожидалось нечётное число: среднее отверстие ряда — на высоте полки")
+        return v
+
+
+class RunnerDrilling(Section):
+    """Отверстия направляющей Tandembox на боковине (тикет 20): расстояния от передней кромки боковины,
+    высота — над дном ящика."""
+
+    from_front: list[PosInt] = _f("отверстия_от_передней_кромки")
+    above_bottom: NonNegInt = _f("над_дном_ящика")
+    diameter: PosInt = _f("диаметр")
+    depth: PosInt = _f("глубина")
+
+    @field_validator("from_front")
+    @classmethod
+    def _increasing(cls, v: list[int]) -> list[int]:
+        if not v or any(a >= b for a, b in pairwise(v)):
+            raise ValueError("ожидался непустой список расстояний по возрастанию")
+        return v
+
+
 class DrillingRules(Section):
-    """ДОБАВЛЕНО (МОК), тикет 19: базовые кромки деталей и отверстия конфирматов, чашек и ответных планок."""
+    """ДОБАВЛЕНО (МОК), тикеты 19 и 20: базовые кромки деталей и отверстия конфирматов, чашек, ответных планок,
+    полкодержателей и направляющих."""
 
     base_edges: Annotated[tuple[str, ...], BeforeValidator(parse_base_edges)] = _f("базовые_кромки")
     confirmat: ConfirmatDrilling = _f("конфирмат")
     hinge: HingeDrilling = _f("петля")
     plate: PlateDrilling = _f("ответная_планка")
+    shelf_pin: ShelfPinDrilling = _f("полкодержатель")
+    runner: RunnerDrilling = _f("направляющая")
 
 
 class LinearItem(Section):
