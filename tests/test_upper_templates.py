@@ -5,7 +5,7 @@ import json
 import pytest
 from kitchen import api
 
-from tests.conftest import FIELDS_NOT_IN_GOLDEN, load_golden
+from tests.conftest import golden_dump, load_golden
 
 
 def upper_project(path, template, width=600, contents=None):
@@ -90,7 +90,7 @@ def test_upper_manual_golden(home, base_door_project, template, width, contents)
     upper_project(base_door_project, template, width, contents)
     result = api.parts_from_project(base_door_project, home)
     expected = load_golden(f"{template}_{width}")
-    assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
+    assert golden_dump(result) == expected
 
 
 def test_hood_rejects_too_narrow_front_rail(home, base_door_project):

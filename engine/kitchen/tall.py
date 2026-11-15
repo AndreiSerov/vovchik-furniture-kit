@@ -11,14 +11,17 @@ from kitchen.parts import (
     TemplateOut,
     _calc,
     _edge_id,
+    _hinge_side,
     _material,
     _required_thickness,
     build_base_door,
     built_niche,
     drawer_parts,
+    hinged,
+    joined_to_sides,
     make_part,
     niche_item,
-    steps_pick,
+    pinned,
 )
 from kitchen.project import Appliance, ModuleSpec, ProjectMaterials
 
@@ -76,6 +79,7 @@ def build_tall_oven(
         ("перег-1", "перегородка ниши", oven_top),
         ("перег-2", "перегородка ниши", microwave_top),
     ):
+        out.joints.extend(joined_to_sides(module.label, f"{module.label}-{pid}"))
         out.parts.append(
             make_part(
                 pid=f"{module.label}-{pid}",
@@ -91,6 +95,7 @@ def build_tall_oven(
             )
         )
     shelf = c.shelf
+    out.shelves.append(pinned(module.label, f"{module.label}-полка"))
     out.parts.append(
         make_part(
             pid=f"{module.label}-полка",
@@ -123,17 +128,14 @@ def build_tall_oven(
                 area=True,
             )
         )
-    out.parts += drawer_parts(module, dims, ws, number=1, z=gap, top=bottom_z)
+    drawer_parts(out, module, dims, ws, number=1, z=gap, top=bottom_z)
     hw = c.furniture
-    joints = 6 * steps_pick(c.confirmats_by_joint_length, D, "конфирматы_по_длине_соединения")
-    hinges = steps_pick(c.hinges_by_facade_height, door_h, "петли_по_высоте_фасада")
-    out.hardware[hw.confirmats] += joints
-    out.hardware[hw.caps] += joints * c.caps.per_unit
+    out.doors.append(
+        hinged(module.label, f"{module.label}-фасад", _hinge_side(module))
+    )  # петли и планки — `drilling`
     out.hardware[hw.shelf_pins] += shelf.pins
     out.hardware[hw.legs] += c.legs.up_to_800 if W <= c.legs.threshold else c.legs.over_800
-    out.hardware[hw.hinges] += hinges
-    out.hardware[hw.plates] += hinges * c.plates.per_unit
-    out.hardware[hw.screws] += hinges * c.screws_3_5x16.per_hinge + c.screws_3_5x16.per_drawer
+    out.hardware[hw.screws] += c.screws_3_5x16.per_drawer
     out.hardware[materials.handles] += 2 * c.handles.per_unit
     out.hardware[c.drawers.hardware] += 1
     return out

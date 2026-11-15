@@ -4,7 +4,7 @@ import json
 
 from kitchen import api
 
-from tests.conftest import FIELDS_NOT_IN_GOLDEN, load_golden
+from tests.conftest import golden_dump, load_golden
 
 
 def corner_project(path, template, width, kind, contents=None):
@@ -78,7 +78,7 @@ def test_corner_manual_golden(home, base_door_project):
         corner_project(base_door_project, template, width, kind)
         result = api.parts_from_project(base_door_project, home)
         expected = load_golden(f"{template}_{width}")
-        assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == expected
+        assert golden_dump(result) == expected
 
 
 def test_corner_uses_specified_filler_material(home, base_door_project):
@@ -157,9 +157,7 @@ def test_base_corner_with_shelf_manual_golden(home, base_door_project):
     corner_project(base_door_project, "base_corner", 1050, "lower", {"shelves": 1, "inserts": []})
     result = api.parts_from_project(base_door_project, home)
     assert "corner_carousel" not in result.hardware and result.hardware["shelf_pin_5"] == 4
-    assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == load_golden(
-        "base_corner_1050_shelf"
-    )
+    assert golden_dump(result) == load_golden("base_corner_1050_shelf")
 
 
 def test_base_corner_with_zero_shelves_keeps_carousel(home, base_door_project):

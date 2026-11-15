@@ -38,14 +38,25 @@ def project(home, walls, top="top_38_marble"):
 
 
 def straight(total):
-    """Нижний ряд из модулей по 600 и остатка; по стенам не длиннее 4000."""
+    """Нижний ряд из модулей по 600 и остатка; стены поровну, не длиннее 4000.
+
+    Модули не уже 200 мм и нечётной ширины только с одной дверью (не шире 500): мелкий модуль
+    даёт ошибку пересечения отверстий присадки (тикет 19), нечётный двухдверный — ошибку деления фасадов.
+    """
     walls, n = [], 0
-    while total > 0:
-        part = min(total, 4000)
-        total -= part
+    count = -(-total // 4000)
+    sizes = [total // count + (1 if i < total % count else 0) for i in range(count)]
+    for part in sizes:
         modules = []
         while part > 0:
-            width = min(part, 600) if part - 600 <= 0 or part - 600 >= 300 else part - 300
+            if part > 900:
+                width = 600
+            elif part > 600:
+                width = 400
+            elif part > 500 and part % 2:
+                width = part - 300
+            else:
+                width = part
             n += 1
             modules.append(base(f"Н{n}", width))
             part -= width

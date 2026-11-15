@@ -397,6 +397,119 @@ class CornerRules(Section):
     filler_edges: StrictBool = _f("кромить_заглушку")
 
 
+# Базовая кромка детали словом -> грань в осях модуля (x вдоль стены, y от стены в комнату, z вверх).
+BASE_EDGE_FACES = {
+    "нижняя": "-z",
+    "верхняя": "+z",
+    "передняя": "+y",
+    "задняя": "-y",
+    "левая": "-x",
+    "правая": "+x",
+}
+
+
+def parse_base_edges(value: object) -> tuple[str, ...]:
+    """`[нижняя, передняя, левая]` -> грани `("-z", "+y", "-x")`: по одной кромке на каждую ось модуля, в порядке
+    приоритета. Деталь берёт первые две, чьи оси лежат в её плоскости, поэтому у любой детали их ровно две."""
+    if isinstance(value, tuple):
+        return value
+    words = value if isinstance(value, list) else None
+    faces = [BASE_EDGE_FACES.get(w) if isinstance(w, str) else None for w in words or []]
+    if not faces or None in faces or len(faces) != 3 or len({f[1] for f in faces}) != 3:  # type: ignore[index]
+        accepted = ", ".join(BASE_EDGE_FACES)
+        raise ValueError(
+            "ожидалось три кромки, по одной на ось: нижняя или верхняя, передняя или задняя, левая или правая "
+            f"(допустимы: {accepted})"
+        )
+    return tuple(faces)  # type: ignore[arg-type]
+
+
+class ConfirmatDrilling(Section):
+    """Конфирмат: сквозное отверстие в пласти одной детали и отверстие в торце парной, оси совпадают."""
+
+    front_offset: PosInt = _f("отступ_от_лицевой_кромки")
+    back_offset: PosInt = _f("отступ_от_задней_кромки")
+    face_diameter: PosInt = _f("диаметр_в_пласть")
+    end_diameter: PosInt = _f("диаметр_в_торец")
+    end_depth: PosInt = _f("глубина_в_торец")
+
+
+class HingeDrilling(Section):
+    """Чашка петли на фасаде: отступ центра от кромки фасада со стороны петель и от торцов."""
+
+    cup_diameter: PosInt = _f("диаметр_чашки")
+    cup_depth: PosInt = _f("глубина_чашки")
+    edge_offset: PosInt = _f("отступ_от_кромки_фасада")
+    end_offset: PosInt = _f("отступ_от_торца")
+
+
+class PlateDrilling(Section):
+    """Ответная планка петли на боковине: отверстия по вертикали на высоте чашки."""
+
+    holes: PosInt = _f("отверстий")
+    pitch: PosInt = _f("шаг")
+    front_offset: PosInt = _f("отступ_от_передней_кромки")
+    diameter: PosInt = _f("диаметр")
+    depth: PosInt = _f("глубина")
+
+
+class ShelfPinDrilling(Section):
+    """Ряд отверстий под полкодержатели (тикет 20): на каждой боковине спереди и сзади, отступы — от передней и
+    задней кромок полки. Нечётное число отверстий: по столько же шагов выше и ниже отверстия под полку, центр
+    которого на `центр_ниже_полки` ниже нижней пласти полки (верх штыря — низ полки), в десятых долях мм."""
+
+    holes: PosInt = _f("отверстий_в_ряду")
+    pitch: PosInt = _f("шаг")
+    front_offset: PosInt = _f("отступ_от_передней_кромки_полки")
+    back_offset: PosInt = _f("отступ_от_задней_кромки_полки")
+    below_shelf: NonNegNum = _f("центр_ниже_полки")
+    diameter: PosInt = _f("диаметр")
+    depth: PosInt = _f("глубина")
+
+    @field_validator("holes")
+    @classmethod
+    def _odd(cls, v: int) -> int:
+        if v % 2 == 0:
+            raise ValueError("ожидалось нечётное число: ряд симметричен относительно отверстия под полку")
+        return v
+
+    @field_validator("below_shelf")
+    @classmethod
+    def _tenths(cls, v: float) -> float:
+        if Decimal(str(v)) != Decimal(str(v)).quantize(Decimal("0.1")):
+            raise ValueError("ожидалось число мм с точностью до десятых (например 2.5)")
+        return v
+
+
+class RunnerDrilling(Section):
+    """Отверстия направляющей Tandembox на боковине (тикет 20): расстояния от передней кромки боковины,
+    высота — над дном ящика."""
+
+    from_front: list[PosInt] = _f("отверстия_от_передней_кромки")
+    above_bottom: NonNegInt = _f("над_дном_ящика")
+    diameter: PosInt = _f("диаметр")
+    depth: PosInt = _f("глубина")
+
+    @field_validator("from_front")
+    @classmethod
+    def _increasing(cls, v: list[int]) -> list[int]:
+        if not v or any(a >= b for a, b in pairwise(v)):
+            raise ValueError("ожидался непустой список расстояний по возрастанию")
+        return v
+
+
+class DrillingRules(Section):
+    """ДОБАВЛЕНО (МОК), тикеты 19 и 20: базовые кромки деталей и отверстия конфирматов, чашек, ответных планок,
+    полкодержателей и направляющих."""
+
+    base_edges: Annotated[tuple[str, ...], BeforeValidator(parse_base_edges)] = _f("базовые_кромки")
+    confirmat: ConfirmatDrilling = _f("конфирмат")
+    hinge: HingeDrilling = _f("петля")
+    plate: PlateDrilling = _f("ответная_планка")
+    shelf_pin: ShelfPinDrilling = _f("полкодержатель")
+    runner: RunnerDrilling = _f("направляющая")
+
+
 class LinearItem(Section):
     """Погонная позиция из `hardware.yaml`, которая продаётся штуками фиксированной длины."""
 
@@ -454,6 +567,7 @@ class Construction(Section):
     common: CommonRules = _f("общие_позиции")  # ДОБАВЛЕНО (МОК): цоколь, шина, LED, столешница
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
+    drilling: DrillingRules = _f("присадка")  # ДОБАВЛЕНО (МОК): правила присадки (тикет 19)
 
     @model_validator(mode="after")
     def _steps_sorted(self) -> "Construction":

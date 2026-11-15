@@ -263,6 +263,7 @@ OutputKind = Literal[
     "estimate_json",
     "quote_pdf",
     "quote_json",
+    "drilling",
 ]  # виды выводов; этапы 2-4 добавляют свои
 CUTTING: OutputKind = "cutting"
 EDGING: OutputKind = "edging"
@@ -272,6 +273,7 @@ ESTIMATE_MD: OutputKind = "estimate_md"
 ESTIMATE_JSON: OutputKind = "estimate_json"
 QUOTE_PDF: OutputKind = "quote_pdf"
 QUOTE_JSON: OutputKind = "quote_json"
+DRILLING: OutputKind = "drilling"
 
 
 class Recompute(NamedTuple):
@@ -293,6 +295,7 @@ OUTPUT_RECOMPUTE: dict[OutputKind, Recompute] = {
     ESTIMATE_JSON: Recompute("смета (json)", "estimate"),
     QUOTE_PDF: Recompute("КП (pdf)", "quote", "--days <рабочих дней>"),
     QUOTE_JSON: Recompute("КП (json)", "quote", "--days <рабочих дней>"),
+    DRILLING: Recompute("карта присадки", "drilling"),
 }
 
 

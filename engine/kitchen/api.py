@@ -22,12 +22,14 @@ from kitchen.checks import check_project as run_checks
 from kitchen.common import CommonItem, CountertopSize, compute_common, size_countertop
 from kitchen.cutting import MaterialCut, cut_parts, kerf_warnings
 from kitchen.cutting_pdf import write_cutting_map
+from kitchen.drilling import DrillingCheck, reconcile
+from kitchen.drilling_pdf import PageLayout, map_layout, write_drilling_map
 from kitchen.economy import EconomyLine, EconomyVariant, apply_rule
 from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
-from kitchen.parts import EdgeTotals, ModuleParts, Part, compute_parts
+from kitchen.parts import PURPOSE_RU, EdgeTotals, ModuleParts, Part, compute_parts
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
 from kitchen.quote import DAYS_ERROR, QuoteBody, build_quote, check_days, money, parse_days, percent, plural
@@ -37,12 +39,15 @@ from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
 __all__ = [
     "DAYS_ERROR",
+    "HOLE_PURPOSES",
     "OUTPUT_RECOMPUTE",
     "BriefSaveResult",
     "BriefShowResult",
     "CheckResult",
     "CommonItem",
     "DiffResult",
+    "DrillingCheck",
+    "DrillingResult",
     "EconomyLine",
     "EconomyVariant",
     "EdgeTotals",
@@ -60,6 +65,7 @@ __all__ = [
     "OrderInfo",
     "OrderResult",
     "OutputInfo",
+    "PageLayout",
     "PartsResult",
     "PartsSource",
     "ProductionResult",
@@ -79,6 +85,10 @@ __all__ = [
     "cut_from_order",
     "cut_from_project",
     "diff_project",
+    "drilling_and_save",
+    "drilling_from_order",
+    "drilling_from_project",
+    "drilling_map_layout",
     "economy_parts_from_project",
     "edges_and_save",
     "edges_from_order",
@@ -1260,6 +1270,78 @@ def edges_and_save(order: str, home: Path | None = None, on: date | None = None)
             path,
             result.parts,
             result.edges,
+            order=result.source.order,
+            version=result.source.version,
+            mock=result.mock,
+            on=on or store.today(),
+        ),
+    )
+    return result.model_copy(update={"output": output})
+
+
+# --- присадка -----------------------------------------------------------------
+
+
+HOLE_PURPOSES = PURPOSE_RU  # назначение отверстия -> по-русски, для текста CLI
+
+
+class DrillingResult(Result):
+    """Карта присадки: детали с отверстиями (по модулям проекта) и сверка с фурнитурой этапа 1."""
+
+    source: PartsSource
+    parts: list[Part]
+    checks: list[DrillingCheck]
+    warnings: list[str]
+    output: OutputInfo | None = None
+
+
+def _drilling(parts: PartsResult, workshop: Workshop) -> DrillingResult:
+    drilled = [p for m in parts.modules for p in m.parts if p.holes]
+    return DrillingResult(
+        source=parts.source,
+        parts=drilled,
+        checks=reconcile(drilled, parts.hardware, workshop),
+        warnings=parts.warnings,
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+    )
+
+
+def drilling_from_order(order: str, home: Path | None = None) -> DrillingResult:
+    """Присадка текущей версии проекта заказа, без записи файлов."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
+    workshop = load_workshop(home)
+    return _drilling(_build_parts(project, home, source, latest, warnings, workshop), workshop)
+
+
+def drilling_from_project(path: Path, home: Path | None = None) -> DrillingResult:
+    """`kitchen drilling --project <файл>`: присадка проекта из файла, файлов не пишет."""
+    home = home or resolve_home()
+    return _drilling(parts_from_project(path, home), load_workshop(home))
+
+
+DRILLING_PDF = "drilling-map.pdf"
+
+
+def drilling_map_layout(result: DrillingResult) -> list[PageLayout]:
+    """Раскладка страниц карты присадки (строки, контуры, базовые кромки, цепочки) — ровно то, что рисует PDF."""
+    return map_layout(result.parts, result.checks)
+
+
+def drilling_and_save(order: str, home: Path | None = None, on: date | None = None) -> DrillingResult:
+    """`kitchen drilling <заказ>`: присадка текущей версии, PDF карты и регистрация вывода (как у раскроя)."""
+    home = home or resolve_home()
+    result = drilling_from_order(order, home)
+    output = _save_output(
+        home,
+        result.source,
+        store.DRILLING,
+        DRILLING_PDF,
+        lambda path: write_drilling_map(
+            path,
+            result.parts,
+            result.checks,
             order=result.source.order,
             version=result.source.version,
             mock=result.mock,

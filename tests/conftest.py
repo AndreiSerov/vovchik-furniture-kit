@@ -24,6 +24,19 @@ FIELDS_NOT_IN_GOLDEN = {
     "common",
     "facade_area_by_color",
 }
+# Поля детали, которых нет в эталонах: отверстия присадки (тикет 19) дополняют деталь, эталоны их не знают.
+PART_FIELDS_NOT_IN_GOLDEN = {"holes", "base_edges"}
+
+
+def golden_dump(result) -> dict:
+    """Результат `parts` в виде эталона: без служебных полей и без отверстий присадки у деталей."""
+    data = result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True)
+    for module in data["modules"]:
+        for part in module["parts"]:
+            for key in PART_FIELDS_NOT_IN_GOLDEN:
+                part.pop(key, None)
+    return data
+
 
 # Минимальный проект (тикет 05): один нижний модуль base_door W600.
 BASE_DOOR_PROJECT = {
