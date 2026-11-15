@@ -79,6 +79,7 @@ __all__ = [
     "WorkshopCheck",
     "brief_save",
     "brief_show",
+    "check_order",
     "check_project",
     "check_workshop",
     "cut_and_save",
@@ -1919,9 +1920,11 @@ class CheckResult(Result):
     """Находки проверок проекта: ошибки отклоняют импорт, предупреждения идут в журнал."""
 
     order: str
+    source: PartsSource  # версия проекта заказа или файл, как у `parts`
     findings: list[Finding]
     brief_id: int | None = None  # какой бриф использован (последний сохранённый заказа)
     brief_saved_at: str | None = None
+    brief_note: str | None = None  # бриф новее брифа версии: совет переимпортировать (только у заказа)
 
     @property
     def errors(self) -> list[Finding]:
@@ -1932,26 +1935,39 @@ class CheckResult(Result):
         return [f for f in self.findings if f.level == "warning"]
 
 
-def check_project(path: Path, home: Path | None = None) -> CheckResult:
-    """`проверки проекта` из файла без БД: все находки сразу."""
-    home = home or resolve_home()
-    project = parse_project(_read_json(Path(path), "Файл проекта"))
-    workshop = load_workshop(home)
-    latest = None
-    if store.db_path(home).exists():
-        with store.connect(home) as conn:
-            try:
-                latest = _latest_brief(conn, store.find_order(conn, project.order)["id"])
-            except OrderError:  # заказа ещё нет: проект проверяют как черновик
-                latest = None
+def _check_result(
+    project: Project, source: PartsSource, brief: sqlite3.Row | None, note: str | None, workshop: Workshop
+) -> CheckResult:
+    """Находки проверок: одна функция для файла и для заказа; импорт зовёт те же `run_checks`."""
     return CheckResult(
         order=project.order,
-        findings=run_checks(project, workshop, json.loads(latest["data"]) if latest else None),
-        brief_id=latest["id"] if latest else None,
-        brief_saved_at=latest["created_at"] if latest else None,
+        source=source.model_copy(
+            update={
+                "brief_id": brief["id"] if brief else None,
+                "brief_saved_at": brief["created_at"] if brief else None,
+            }
+        ),
+        findings=run_checks(project, workshop, json.loads(brief["data"]) if brief else None),
+        brief_id=brief["id"] if brief else None,
+        brief_saved_at=brief["created_at"] if brief else None,
+        brief_note=note,
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,
     )
+
+
+def check_project(path: Path, home: Path | None = None) -> CheckResult:
+    """`проверки проекта` из файла без БД: все находки сразу."""
+    home = home or resolve_home()
+    project, source = _project_file(path)
+    return _check_result(project, source, _brief_of_project(home, project.order), None, load_workshop(home))
+
+
+def check_order(order: str, home: Path | None = None) -> CheckResult:
+    """`kitchen check <заказ>`: находки проверок текущей версии проекта с последним брифом заказа."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
+    return _check_result(project, source, latest, warnings[0] if warnings else None, load_workshop(home))
 
 
 # --- быстрая вилка ------------------------------------------------------------

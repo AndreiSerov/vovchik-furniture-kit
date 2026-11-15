@@ -30,7 +30,7 @@ JsonOpt = Annotated[bool, typer.Option("--json", help="Печатать резу
 R = TypeVar("R", bound=Result)
 
 
-def emit(result: R, render: Callable[[R], str], as_json: bool, ok: bool = True) -> None:
+def emit(result: R, render: Callable[[R], str], as_json: bool, ok: bool = True, code: int = 1) -> None:
     """Печатает результат; при моке добавляет плашку первой и последней строкой текста."""
     if as_json:
         typer.echo(result.model_dump_json(indent=2))
@@ -38,14 +38,14 @@ def emit(result: R, render: Callable[[R], str], as_json: bool, ok: bool = True) 
         text = render(result)
         typer.echo(f"{MOCK_BANNER}\n\n{text}\n\n{MOCK_BANNER}" if result.mock else text)
     if not ok:
-        raise typer.Exit(1)
+        raise typer.Exit(code)
 
 
-def fail(err: KitchenError) -> NoReturn:
+def fail(err: KitchenError, code: int = 1) -> NoReturn:
     text = "\n".join(err.problems)
     # Принцип 4: цифры в тексте ошибки могли быть посчитаны из мок-мастерской, плашка нужна и здесь.
     typer.echo(f"{MOCK_BANNER}\n\n{text}\n\n{MOCK_BANNER}" if api.is_mock() else text, err=True)
-    raise typer.Exit(1)
+    raise typer.Exit(code)
 
 
 def _render_check(r: api.WorkshopCheck) -> str:
@@ -726,3 +726,41 @@ def quick_estimate(
     except KitchenError as e:
         fail(e)
     emit(result, _render_estimate, json)
+
+
+def _render_check_result(r: api.CheckResult) -> str:
+    errors = r.errors
+    summary = (
+        f"Проверки: {_plural(len(errors), ('ошибка', 'ошибки', 'ошибок'))}, "
+        f"{_plural(len(r.warnings), ('предупреждение', 'предупреждения', 'предупреждений'))}"
+    )
+    lines = [f"Проверки проекта {r.order}:", _render_source(r.source), summary]
+    if r.findings:
+        lines += [f"  [ОШИБКА] {f.message}" for f in errors]
+        lines += [f"  [предупреждение] {f.message}" for f in r.warnings]
+    else:
+        lines.append("Замечаний нет.")
+    if r.brief_note:
+        lines.append(r.brief_note)
+    return "\n".join(lines)
+
+
+@app.command("check")
+def check(
+    order: Annotated[
+        str | None,
+        typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project."),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Проверки проекта без расчёта выводов. Код выхода: 0 — ошибок нет, 1 — есть ошибка, 2 — команда не выполнилась."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError("Укажите либо заказ (kitchen check petrov), либо файл: --project project.json.")
+        result = api.check_order(order) if order is not None else api.check_project(project)
+    except KitchenError as e:
+        fail(e, code=2)
+    emit(result, _render_check_result, json, ok=not result.errors)
