@@ -10,6 +10,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -53,6 +54,7 @@ __all__ = [
     "Orientation",
     "Part",
     "PartsComputation",
+    "PartsGap",
     "Position",
     "Span",
     "Template",
@@ -1176,11 +1178,23 @@ _ROW_RU = {"lower": "нижнем ряду", "upper": "верхнем ряду",
 # --- расчёт деталей проекта ----------------------------------------------------
 
 
+class PartsGap(BaseModel):
+    """Пустое место ряда в результате `parts`: деталей у него нет."""
+
+    label: str
+    wall: str
+    row: Literal["lower", "upper"]
+    width: int
+    appliance: str | None = None  # техника, привязанная к месту, по-русски
+    under_countertop: bool = False
+
+
 @dataclass
 class PartsComputation:
     """Итог расчёта по всему проекту."""
 
     modules: list[ModuleParts]
+    gaps: list[PartsGap]
     hardware: dict[str, int]
     edges: dict[str, EdgeTotals]
     facade_area: float
@@ -1228,6 +1242,7 @@ def _area_4(area: Decimal) -> float:
 def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     """Детали по модулям, фурнитура итогом, метраж кромки, площадь фасадов."""
     modules: list[ModuleParts] = []
+    gaps: list[PartsGap] = []
     hw: Counter = Counter()
     seen: dict[str, str] = {}
     warnings: list[str] = []
@@ -1236,7 +1251,17 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
         for row in wall.rows:
             for entry in row.modules:
                 if is_gap(entry):
-                    gap_width(entry)  # дробная ширина — ошибка, как у модуля
+                    kinds = [gap_name(a.type, 0) for a in project.appliances if a.module == entry.label]
+                    gaps.append(
+                        PartsGap(
+                            label=entry.label,
+                            wall=wall.label,
+                            row=row.kind,
+                            width=gap_width(entry),  # дробная ширина — ошибка, как у модуля
+                            appliance=", ".join(kinds) or None,
+                            under_countertop=entry.under_countertop,
+                        )
+                    )
                     continue
                 module = entry
                 if module.template in ("base_corner", "wall_corner") and module.corner:
@@ -1282,6 +1307,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     facade_area = sum((Decimal(str(p.area_m2)) for p in all_parts if is_facade(p)), Decimal(0))
     return PartsComputation(
         modules=modules,
+        gaps=gaps,
         hardware=dict(sorted(hw.items())),
         edges=_edge_totals(all_parts, ws),
         facade_area=_area_4(facade_area),

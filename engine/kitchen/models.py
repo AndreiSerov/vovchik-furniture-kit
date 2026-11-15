@@ -362,6 +362,13 @@ class Tandembox(Section):
 Steps = list[tuple[NonNegNum, NonNegInt]]
 
 
+class GapRules(Section):
+    """Пустое место ряда: зазор к ширине техники и виды техники, которые в нём могут стоять."""
+
+    clearance: NonNegInt = _f("зазор")
+    appliances: list[str] = _f("техника")
+
+
 class TallRules(Section):
     oven: str = _f("духовка")
     microwave: str = _f("свч")
@@ -573,6 +580,7 @@ class Construction(Section):
     corner_rules: CornerRules = _f("угловые_модули")
     # ДОБАВЛЕНО (МОК): виды техники, которые лежат на столешнице (ширину корпуса с нишей не сравнивать)
     countertop_appliances: list[str] = _f("техника_в_столешницу")
+    gap: GapRules = _f("пустое_место")  # ДОБАВЛЕНО (МОК): зазор и виды техники в пустом месте (тикет 32)
     common: CommonRules = _f("общие_позиции")  # ДОБАВЛЕНО (МОК): цоколь, шина, LED, столешница
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")

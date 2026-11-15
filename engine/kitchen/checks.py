@@ -17,6 +17,7 @@ from kitchen.common import row_layouts
 from kitchen.errors import KitchenError, WorkshopError
 from kitchen.models import SheetMaterial, Workshop
 from kitchen.parts import (
+    APPLIANCE_NAMES,
     APPLIANCE_ROWS,
     BACK_PANEL,
     TEMPLATES,
@@ -28,13 +29,14 @@ from kitchen.parts import (
     build_module,
     built_niche,
     drawer_depth_shortfall,
+    gap_name,
     gap_width,
     module_dims,
     niche_item,
     part_too_small_message,
     unknown_template_error,
 )
-from kitchen.project import ModuleSpec, Project, is_gap
+from kitchen.project import Gap, ModuleSpec, Project, is_gap
 
 __all__ = ["Finding", "along_texture", "check_project", "part_fit_findings"]
 
@@ -221,12 +223,73 @@ def _inner_width(dims: ModuleDims, ws: Workshop) -> int:
     )
 
 
+def _gap_appliance(
+    appliance, gap: Gap, row_kind: str, paired: BriefAppliance | None, ws: Workshop
+) -> list[Finding]:
+    """Техника в пустом месте: только нижний ряд, только отдельностоящие виды из `construction.yaml`, ширина
+    места не меньше ширины техники (бриф, иначе проект) плюс зазор. Нишу пустое место не строит."""
+    rules = ws.construction.gap
+    if row_kind != "lower":
+        return [
+            Finding(
+                code="gap_upper_appliance",
+                level="error",
+                subject=gap.label,
+                message=f"Место {gap.label} в верхнем ряду: технику ставят только в пустое место нижнего ряда",
+            )
+        ]
+    if appliance.type not in rules.appliances:
+        allowed = ", ".join(gap_name(kind, 0) for kind in rules.appliances)
+        named = APPLIANCE_NAMES.get(appliance.type, appliance.type)
+        return [
+            Finding(
+                code="gap_appliance",
+                level="error",
+                subject=gap.label,
+                message=(
+                    f"В пустом месте {gap.label} может стоять только отдельностоящая техника ({allowed}), "
+                    f"а привязан «{named}»"
+                ),
+            )
+        ]
+    found: list[Finding] = []
+    from_brief = paired is not None and paired.width is not None
+    width = paired.width if from_brief else appliance.width
+    need = _num(width + rules.clearance)
+    if gap.width < need:
+        found.append(
+            Finding(
+                code="gap_too_small",
+                level="error",
+                subject=gap.label,
+                message=(
+                    f"Место {gap.label}: {_num(gap.width)} мм, а {gap_name(appliance.type, 1)} "
+                    f"по {'брифу' if from_brief else 'проекту'} нужно {need} мм "
+                    f"({_num(width)} + зазор {rules.clearance})"
+                ),
+                value=need,
+                limit=_num(gap.width),
+            )
+        )
+    if appliance.type == "fridge" and paired is not None and paired.built_in:
+        found.append(
+            Finding(
+                code="gap_built_in",
+                level="warning",
+                subject=gap.label,
+                message=f"Холодильник в брифе встраиваемый, а в проекте стоит в пустом месте {gap.label}",
+            )
+        )
+    return found
+
+
 def _niches(
     project: Project,
     ws: Workshop,
     dims: dict[str, tuple[ModuleSpec, ModuleDims]],
     brief: list[BriefAppliance] | None,
     failed: set[str],
+    gaps: dict[str, tuple[Gap, str]],
 ) -> list[Finding]:
     """Требования из брифа (размеры встраивания, иначе типовая ниша каталога) против ниши,
     которую строит модуль. Размеры корпуса прибора с нишей не сравниваются."""
@@ -251,6 +314,9 @@ def _niches(
             for w in b.warnings
         ]
     for a in project.appliances:
+        if a.module in gaps and a.module not in dims:
+            found += _gap_appliance(a, *gaps[a.module], paired[id(a)], ws)
+            continue
         if a.module not in dims:
             if a.module in failed:  # модуль не рассчитался: причина уже названа находкой `module_build`
                 continue
@@ -552,7 +618,8 @@ def check_project(project: Project, ws: Workshop, brief: dict | None = None) -> 
     )
     dims, built = _build(project, ws, found)
     failed = {f.subject for f in found if f.code == "module_build"}
-    found += _niches(project, ws, dims, None if brief is None else brief_appliances(brief), failed)
+    gaps = {e.label: (e, row.kind) for row, e in _entries(project) if is_gap(e)}
+    found += _niches(project, ws, dims, None if brief is None else brief_appliances(brief), failed, gaps)
     found += _sheet_fit(built, ws)
     found += _no_back(built)
     return found
