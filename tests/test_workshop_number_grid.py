@@ -72,10 +72,15 @@ COMPUTES = (api.parts_from_project, api.cut_from_project, api.estimate_from_proj
 
 
 @pytest.fixture(scope="module")
-def baseline():
-    """Отрицательные числа у Петрова на настоящей мастерской (положение задней стенки ХДФ): так задумано."""
+def baseline(tmp_path_factory):
+    """Отрицательные числа у Петрова на настоящей мастерской (положение задней стенки ХДФ): так задумано.
+
+    Своя мастерская во временной папке: базовая линия не зависит от orders/ репозитория.
+    """
+    home = tmp_path_factory.mktemp("grid-baseline")
+    shutil.copytree(REPO / "workshop", home / "workshop")
     petrov = FIXTURES / "petrov_project.json"
-    return {c.__name__: set(negatives(json.loads(c(petrov, REPO).model_dump_json()))) for c in COMPUTES}
+    return {c.__name__: set(negatives(json.loads(c(petrov, home).model_dump_json()))) for c in COMPUTES}
 
 
 def with_value(data, path, value):
