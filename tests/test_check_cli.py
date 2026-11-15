@@ -5,6 +5,7 @@ import os
 import sqlite3
 from pathlib import Path
 
+import pytest
 from kitchen import api
 from kitchen.cli import app
 from kitchen.result import MOCK_BANNER
@@ -253,3 +254,13 @@ def test_real_project_without_findings(home):
     r = runner.invoke(app, ["check", "--project", str(write(home, project))])
     assert r.exit_code == 0, r.output
     assert "Проверки: 0 ошибок, 0 предупреждений" in r.output and "Замечаний нет." in r.output
+
+
+@pytest.mark.parametrize(("value", "expected"), [(2, 2), (0, None), (True, None), ("2", None)])
+def test_project_file_source_version_is_int_ge_1_only(home, value, expected):
+    data = {**json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8")), "version": value}
+    path = home / "p.json"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    r = CliRunner().invoke(app, ["parts", "--project", str(path), "--json"])
+    assert r.exit_code == 0, r.output
+    assert json.loads(r.output)["source"]["version"] == expected
