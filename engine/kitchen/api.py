@@ -47,11 +47,13 @@ from kitchen.purchase import PurchaseShop, build_purchase
 from kitchen.quote import DAYS_ERROR, QuoteBody, build_quote, check_days, money, parse_days, percent, plural
 from kitchen.quote_pdf import write_quote
 from kitchen.result import MOCK_BANNER, Result
+from kitchen.scene3d import Scene3D, build_scene3d
 from kitchen.trip import NO_BRIEF_WARNING, TripHeader, TripSection, build_header, build_trip
 from kitchen.trip_pdf import TripPageLayout, write_trip
 from kitchen.trip_pdf import layout as trip_page_layout
 from kitchen.views import ViewPage, ViewScene, build_scene
 from kitchen.views import layout as views_page_layout
+from kitchen.views_html import write_html
 from kitchen.views_pdf import write_views
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
@@ -2325,10 +2327,12 @@ class ViewsResult(Result):
     findings: list[Finding]  # находки проверок проекта, как у `kitchen check`
     placement_findings: list[Finding]  # предупреждения расстановки: `tall_heights`
     scene: ViewScene
+    scene3d: Scene3D  # та же сцена, что встроена в HTML (тикет 42)
     walls: int
     pages: int
     warnings: list[str]
-    output: OutputInfo | None = None
+    output: OutputInfo | None = None  # PDF видов
+    output_html: OutputInfo | None = None  # HTML 3D
 
     @property
     def errors(self) -> list[Finding]:
@@ -2340,6 +2344,7 @@ class ViewsResult(Result):
 
 
 VIEWS_PDF = "kitchen-views.pdf"
+VIEWS_HTML = "kitchen-3d.html"
 
 
 def _views(
@@ -2370,6 +2375,7 @@ def _views(
         findings=findings,
         placement_findings=placed.findings,
         scene=scene,
+        scene3d=build_scene3d(project, placed, scene, module_parts, workshop),
         walls=len(scene.walls),
         pages=len(pages),
         warnings=[*part_warnings, *warnings],
@@ -2398,25 +2404,43 @@ def views_layout(result: ViewsResult) -> list[ViewPage]:
 
 
 def views_and_save(order: str, home: Path | None = None, on: date | None = None) -> ViewsResult:
-    """`kitchen 3d <заказ>`: виды текущей версии, PDF и регистрация вывода."""
+    """`kitchen 3d <заказ>`: виды текущей версии — PDF и HTML 3D, оба регистрируются как выводы одной версии."""
     home = home or resolve_home()
     result = views_from_order(order, home)
     pages = views_layout(result)
-    output = _save_output(
+    date_ = on or store.today()
+    pdf = _output_info(home, result.source, store.VIEWS, VIEWS_PDF)
+    html = _output_info(home, result.source, store.VIEWS_HTML, VIEWS_HTML)
+    _save_outputs(
         home,
         result.source,
-        store.VIEWS,
-        VIEWS_PDF,
-        lambda path: write_views(
-            path,
-            pages,
-            order=result.source.order,
-            version=result.source.version,
-            mock=result.mock,
-            on=on or store.today(),
-        ),
+        [
+            (
+                pdf,
+                lambda path: write_views(
+                    path,
+                    pages,
+                    order=result.source.order,
+                    version=result.source.version,
+                    mock=result.mock,
+                    on=date_,
+                ),
+            ),
+            (
+                html,
+                lambda path: write_html(
+                    path,
+                    result.scene3d,
+                    order=result.source.order,
+                    version=result.source.version,
+                    on=date_,
+                    mock=result.mock,
+                    errors=len(result.errors),
+                ),
+            ),
+        ],
     )
-    return result.model_copy(update={"output": output})
+    return result.model_copy(update={"output": pdf, "output_html": html})
 
 
 # --- быстрая вилка ------------------------------------------------------------
