@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from kitchen.errors import OrderError
 from kitchen.models import EconomyChange, EconomyRule, EconomyWhere, Workshop
 from kitchen.parts import build_module
-from kitchen.project import Contents, ModuleSpec, Project
+from kitchen.project import Contents, ModuleSpec, Project, is_gap
 
 __all__ = ["Applied", "EconomyLine", "EconomyVariant", "apply_rule"]
 
@@ -88,6 +88,8 @@ def apply_rule(project: Project, rule: EconomyRule, ws: Workshop) -> Applied:
     for wall in copy.walls:
         for row in wall.rows:
             for index, module in enumerate(row.modules):
+                if is_gap(module):
+                    continue
                 case = next((c for c in rule.cases if _matches(module, c.where)), None)
                 if case is None:
                     continue

@@ -131,7 +131,7 @@ def build_assembly(project: Project, built: list[ModuleParts], ws: Workshop) -> 
     blocks = []
     for wall in project.walls:
         for row in wall.rows:
-            for module in row.modules:
+            for module in row.cabinets:
                 template = TEMPLATES[module.template]
                 module_parts = by_label[module.label]
                 dims = module_dims(module, row.kind, ws)

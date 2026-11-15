@@ -3,16 +3,16 @@
 Ключи английские (GLOSSARY.md); неизвестные ключи отклоняются.
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, StrictInt, Tag, ValidationError
 from pydantic.json_schema import SkipJsonSchema
 
 from kitchen.errors import OrderError
 from kitchen.models import Num, PosNum
 from kitchen.workshop import translate
 
-__all__ = ["ModuleSpec", "Project", "ProjectMaterials", "Row", "Wall", "parse_project"]
+__all__ = ["Gap", "ModuleSpec", "Project", "ProjectMaterials", "Row", "Wall", "is_gap", "parse_project"]
 
 
 class Section(BaseModel):
@@ -67,10 +67,41 @@ class ModuleSpec(Section):
     corner: Corner | None = None
 
 
+class Gap(Section):
+    """Пустое место ряда: участок заданной ширины без деталей (под отдельностоящую технику или над окном).
+    Запись того же списка `modules`; признак — `gap: true`, шаблона нет."""
+
+    label: str
+    gap: Literal[True]
+    width: PosNum
+    under_countertop: bool = False  # место под общей столешницей: входит в её длину, но не в цоколь
+
+
+def is_gap(entry: "ModuleSpec | Gap") -> bool:
+    """Запись ряда — пустое место, а не модуль."""
+    return isinstance(entry, Gap)
+
+
+def _entry_kind(value: object) -> str:
+    if isinstance(value, dict):
+        return "gap" if "gap" in value else "module"
+    return "gap" if isinstance(value, Gap) else "module"
+
+
+RowEntry = Annotated[
+    Annotated[ModuleSpec, Tag("module")] | Annotated[Gap, Tag("gap")], Discriminator(_entry_kind)
+]
+
+
 class Row(Section):
     kind: Literal["lower", "upper"]
-    modules: list[ModuleSpec] = Field(default_factory=list)
+    modules: list[RowEntry] = Field(default_factory=list)  # модули и пустые места по порядку вдоль стены
     materials: MaterialOverrides | None = None
+
+    @property
+    def cabinets(self) -> list[ModuleSpec]:
+        """Только модули ряда, без пустых мест: то, что превращается в детали."""
+        return [m for m in self.modules if not isinstance(m, Gap)]
 
 
 class Wall(Section):

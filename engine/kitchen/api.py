@@ -31,7 +31,7 @@ from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError, ProjectFileError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
-from kitchen.parts import PURPOSE_RU, EdgeTotals, ModuleParts, Part, compute_parts
+from kitchen.parts import APPLIANCE_NAMES, PURPOSE_RU, EdgeTotals, ModuleParts, Part, PartsGap, compute_parts
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
 from kitchen.quote import DAYS_ERROR, QuoteBody, build_quote, check_days, money, parse_days, percent, plural
@@ -616,6 +616,7 @@ class DiffResult(Result):
 
 
 def _modules(data: dict) -> dict[str, tuple[dict, str, str, int]]:
+    """Записи рядов (модули и пустые места) по меткам: запись, стена, вид ряда, место среди всех записей ряда."""
     modules = {}
     for wall in data.get("walls", []):
         for row in wall.get("rows", []):
@@ -627,6 +628,7 @@ def _modules(data: dict) -> dict[str, tuple[dict, str, str, int]]:
     return modules
 
 
+_ROWS_RU = {"lower": "нижний", "upper": "верхний"}
 _DIFF_NAMES = {
     "template": "шаблон",
     "width": "ширина",
@@ -647,6 +649,7 @@ _DIFF_NAMES = {
     "without_back": "без задней стенки",
     "corner": "угол",
     "adjacent_wall": "соседняя стена",
+    "under_countertop": "под столешницей",
 }
 
 
@@ -680,6 +683,16 @@ def _changes(before: dict, after: dict, prefix: str = "") -> list[str]:
     return changes
 
 
+def _appliances_of(data: dict) -> dict[str, str]:
+    """Техника проекта по меткам модулей и мест: «холодильник, плита» или пусто."""
+    found: dict[str, list[str]] = {}
+    for item in data.get("appliances", []):
+        found.setdefault(item["module"], []).append(
+            APPLIANCE_NAMES.get(item["type"], item["type"]) if isinstance(item["type"], str) else "?"
+        )
+    return {label: ", ".join(sorted(names)) for label, names in found.items()}
+
+
 def diff_project(order: str, from_version: int, to_version: int, home: Path | None = None) -> DiffResult:
     """Сравнить сохранённые версии проекта по меткам модулей."""
     with _open_order(order, home) as o:
@@ -692,28 +705,44 @@ def diff_project(order: str, from_version: int, to_version: int, home: Path | No
                 raise OrderError(f"У заказа {o.ref} нет версии {version} проекта.")
             data = json.loads(row["data"])
             try:
-                projects.append(_modules(data))
+                projects.append((_modules(data), _appliances_of(data)))
             except (TypeError, KeyError, ValueError, AttributeError) as e:
                 raise OrderError(
                     f"Версия {version} не соответствует текущей схеме проекта: "
                     "невозможно определить модули, стены или ряды."
                 ) from e
-        before, after = projects
+        (before, before_kit), (after, after_kit) = projects
         changes = []
         for label in sorted(before.keys() | after.keys()):
             if label not in before:
-                changes.append(f"{label}: добавлен модуль")
+                new, new_wall, new_row, new_pos = after[label]
+                if new.get("gap"):
+                    where = f"{new_wall}, {_ROWS_RU[new_row]}, {new_pos + 1}"
+                    changes.append(f"{label}: добавлено пустое место {_value(new['width'])} мм ({where})")
+                else:
+                    changes.append(f"{label}: добавлен модуль")
             elif label not in after:
-                changes.append(f"{label}: удалён модуль")
+                changes.append(
+                    f"{label}: удалено пустое место"
+                    if before[label][0].get("gap")
+                    else f"{label}: удалён модуль"
+                )
             else:
                 old, old_wall, old_row, old_pos = before[label]
                 new, new_wall, new_row, new_pos = after[label]
-                changes.extend(f"{label}: {line}" for line in _changes(old, new))
+                if bool(old.get("gap")) != bool(new.get("gap")):
+                    now = "пустое место" if new.get("gap") else "модуль"
+                    changes.append(f"{label}: {'модуль' if new.get('gap') else 'пустое место'} → {now}")
+                else:
+                    changes.extend(f"{label}: {line}" for line in _changes(old, new))
+                    if new.get("gap") and before_kit.get(label) != after_kit.get(label):
+                        changes.append(
+                            f"{label}: техника {_value(before_kit.get(label))} → {_value(after_kit.get(label))}"
+                        )
                 if (old_wall, old_row, old_pos) != (new_wall, new_row, new_pos):
-                    rows = {"lower": "нижний", "upper": "верхний"}
                     changes.append(
-                        f"{label}: положение {old_wall}, {rows[old_row]}, {old_pos + 1} → "
-                        f"{new_wall}, {rows[new_row]}, {new_pos + 1}"
+                        f"{label}: положение {old_wall}, {_ROWS_RU[old_row]}, {old_pos + 1} → "
+                        f"{new_wall}, {_ROWS_RU[new_row]}, {new_pos + 1}"
                     )
         return DiffResult(
             order=o.ref, from_version=from_version, to_version=to_version, changes=changes, **_mock(o.home)
@@ -979,6 +1008,7 @@ class PartsResult(Result):
     order: str  # поле order проекта
     source: PartsSource
     modules: list[ModuleParts]
+    gaps: list[PartsGap]  # пустые места рядов: деталей у них нет
     hardware: dict[str, int]
     edges: dict[str, EdgeTotals]
     facade_area: float  # м², округлено до 4 знаков
@@ -995,7 +1025,7 @@ def _project_hash(project: Project) -> str:
         for row in wall["rows"]:
             for module in row["modules"]:
                 # `contents: {}` и отсутствующий `contents` — один проект
-                if module["contents"] and not any(module["contents"].values()):
+                if module.get("contents") and not any(module["contents"].values()):
                     module["contents"] = None
     return hashlib.sha256(_canonical(normalized).encode()).hexdigest()
 
@@ -1036,6 +1066,7 @@ def _build_parts(
         order=project.order,
         source=source,
         modules=computed.modules,
+        gaps=computed.gaps,
         hardware=computed.hardware,
         edges=computed.edges,
         facade_area=computed.facade_area,

@@ -10,6 +10,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -32,7 +33,7 @@ from kitchen.geometry import (
     steps_pick,
 )
 from kitchen.models import ApplianceItem, EdgeRule, Num, Workshop
-from kitchen.project import Appliance, ModuleSpec, Project, ProjectMaterials, Row
+from kitchen.project import Appliance, Gap, ModuleSpec, Project, ProjectMaterials, Row, is_gap
 
 __all__ = [
     "APPLIANCE_NAMES",
@@ -40,6 +41,7 @@ __all__ = [
     "BACK_PANEL",
     "DRAWER_BACK",
     "DRAWER_BOTTOM",
+    "GAP_NAMES",
     "PURPOSE_RU",
     "TEMPLATES",
     "AssemblyPlan",
@@ -52,6 +54,7 @@ __all__ = [
     "Orientation",
     "Part",
     "PartsComputation",
+    "PartsGap",
     "Position",
     "Span",
     "Template",
@@ -210,6 +213,11 @@ def _whole(value: Num, what: str) -> int:
     if float(value).is_integer():
         return int(value)
     raise OrderError(f"{what} — {value}, а ожидалось целое число миллиметров.")
+
+
+def gap_width(gap: Gap) -> int:
+    """Ширина пустого места в целых миллиметрах, как у модулей."""
+    return _whole(gap.width, f"Ширина пустого места {gap.label}")
 
 
 def module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
@@ -1114,7 +1122,24 @@ APPLIANCE_NAMES = {
     "wine_cooler": "винный шкаф",
     "other": "другая техника",
     "hood": "вытяжка",
+    "fridge": "холодильник",
 }
+
+# Формы названия техники для пустого места: (именительный, дательный, винительный). Что не названо — как в
+# `APPLIANCE_NAMES` во всех падежах. Ключи — виды из `construction.yaml` (`пустое_место.техника`).
+GAP_NAMES = {
+    "fridge": ("холодильник", "холодильнику", "холодильник"),
+    "dishwasher": ("посудомойка", "посудомойке", "посудомойку"),
+    "cooker": ("плита", "плите", "плиту"),
+    "washing_machine": ("стиральная машина", "стиральной машине", "стиральную машину"),
+}
+
+
+def gap_name(appliance_type: str, case: int) -> str:
+    """Название техники в пустом месте: `case` 0 — именительный, 1 — дательный, 2 — винительный."""
+    forms = GAP_NAMES.get(appliance_type)
+    return forms[case] if forms else APPLIANCE_NAMES.get(appliance_type, appliance_type)
+
 
 # Явная несовместимость вида техники с рядом модуля: вытяжка только вверху, остальное только внизу
 # (духовка ещё и в пенале). Что не названо (СВЧ, холодильник…), не ограничено.
@@ -1153,11 +1178,23 @@ _ROW_RU = {"lower": "нижнем ряду", "upper": "верхнем ряду",
 # --- расчёт деталей проекта ----------------------------------------------------
 
 
+class PartsGap(BaseModel):
+    """Пустое место ряда в результате `parts`: деталей у него нет."""
+
+    label: str
+    wall: str
+    row: Literal["lower", "upper"]
+    width: int
+    appliance: str | None = None  # техника, привязанная к месту, по-русски
+    under_countertop: bool = False
+
+
 @dataclass
 class PartsComputation:
     """Итог расчёта по всему проекту."""
 
     modules: list[ModuleParts]
+    gaps: list[PartsGap]
     hardware: dict[str, int]
     edges: dict[str, EdgeTotals]
     facade_area: float
@@ -1205,13 +1242,28 @@ def _area_4(area: Decimal) -> float:
 def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     """Детали по модулям, фурнитура итогом, метраж кромки, площадь фасадов."""
     modules: list[ModuleParts] = []
+    gaps: list[PartsGap] = []
     hw: Counter = Counter()
     seen: dict[str, str] = {}
     warnings: list[str] = []
     colored: dict[str, Decimal] = {}
     for wall in project.walls:
         for row in wall.rows:
-            for module in row.modules:
+            for entry in row.modules:
+                if is_gap(entry):
+                    kinds = [gap_name(a.type, 0) for a in project.appliances if a.module == entry.label]
+                    gaps.append(
+                        PartsGap(
+                            label=entry.label,
+                            wall=wall.label,
+                            row=row.kind,
+                            width=gap_width(entry),  # дробная ширина — ошибка, как у модуля
+                            appliance=", ".join(kinds) or None,
+                            under_countertop=entry.under_countertop,
+                        )
+                    )
+                    continue
+                module = entry
                 if module.template in ("base_corner", "wall_corner") and module.corner:
                     adjacent = module.corner.adjacent_wall
                     if adjacent == wall.label or adjacent not in {w.label for w in project.walls}:
@@ -1255,6 +1307,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     facade_area = sum((Decimal(str(p.area_m2)) for p in all_parts if is_facade(p)), Decimal(0))
     return PartsComputation(
         modules=modules,
+        gaps=gaps,
         hardware=dict(sorted(hw.items())),
         edges=_edge_totals(all_parts, ws),
         facade_area=_area_4(facade_area),

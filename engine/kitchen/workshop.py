@@ -151,9 +151,21 @@ _BOUNDS = {
 }
 
 
+def _untagged(loc: tuple) -> tuple:
+    """Убирает из `loc` тег размеченного объединения записи ряда (`modules[0].module`, `modules[0].gap`):
+    в файле такого ключа нет."""
+    return tuple(
+        part
+        for i, part in enumerate(loc)
+        if not (
+            i >= 2 and part in ("module", "gap") and isinstance(loc[i - 1], int) and loc[i - 2] == "modules"
+        )
+    )
+
+
 def _path(loc: tuple) -> str:
     out = ""
-    for part in loc:
+    for part in _untagged(loc):
         out += f"[{part}]" if isinstance(part, int) else (f".{part}" if out else str(part))
     return out
 
@@ -200,6 +212,11 @@ def _cross_refs(w: Workshop) -> list[str]:
     hw_ids = {i.id for i in w.hardware.items}
     probs = []
     kinds = APPLIANCE_KINDS
+    probs += [
+        f"construction.yaml: пустое_место.техника: неизвестный вид «{kind}» (допустимы виды: {', '.join(sorted(kinds))})."
+        for kind in w.construction.gap.appliances
+        if kind not in kinds
+    ]
     probs += [
         f"construction.yaml: техника_в_столешницу: неизвестный вид «{kind}» (допустимы виды: {', '.join(sorted(kinds))})."
         for kind in w.construction.countertop_appliances

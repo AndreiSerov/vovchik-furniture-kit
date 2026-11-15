@@ -178,7 +178,9 @@ def diff(
         result = api.diff_project(order, version(from_version), version(to_version))
     except KitchenError as e:
         fail(e)
-    emit(result, lambda r: "\n".join(r.changes) if r.changes else "Изменений модулей нет.", json)
+    emit(
+        result, lambda r: "\n".join(r.changes) if r.changes else "Изменений модулей и пустых мест нет.", json
+    )
 
 
 @app.command("log")
@@ -244,6 +246,10 @@ def _render_parts(r: api.PartsResult) -> str:
             lines.append(
                 f"    {p.id} — {p.name} {p.length}×{p.width}×{p.thickness} мм, {p.material}, {grain}{tail}"
             )
+    for g in r.gaps:
+        what = f" ({g.appliance})" if g.appliance else ""
+        tail = ", деталей нет" if g.appliance else ""
+        lines.append(f"  {g.label} — пустое место {g.width} мм{what}{tail}")
     hw = ", ".join(f"{pid} ×{n}" for pid, n in r.hardware.items())
     lines.append(f"Фурнитура: {hw}")
     for edge_id, e in r.edges.items():
