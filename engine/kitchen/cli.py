@@ -436,11 +436,30 @@ def _render_order_estimate(r: api.EstimateResult) -> str:
         f"Итого до округления: {r.price_before_rounding:.2f} ₽",
         f"Цена: {r.price} ₽ (округление: {r.rounding}); маржа {r.margin:.2f} ₽",
     ]
+    if r.economy:
+        lines += _render_economy(r.economy)
     for output in r.outputs:
         lines.append(f"Файл: {output.file} (версия проекта {output.source_version})")
     if r.warnings:
         lines.append("Предупреждения: " + "; ".join(r.warnings))
     return "\n".join(lines)
+
+
+def _render_economy(e: api.EconomyVariant) -> list[str]:
+    lines = ["Экономия:", f"  Цена как в проекте: {e.price_as_is} ₽"]
+    lines += [
+        f"  {line.name} (модули {', '.join(line.modules)}): цена с заменой {line.price} ₽, разница {line.saving} ₽"
+        for line in e.replacements
+    ]
+    lines += [
+        f"  Не предложено, не удешевляет: {line.name} (модули {', '.join(line.modules)}), разница {line.saving} ₽"
+        for line in e.not_offered
+    ]
+    lines += [f"  Не строится: {problem}" for problem in e.problems]
+    lines.append(f"  Цена «экономии» со всеми заменами: {e.price} ₽, разница {e.saving} ₽")
+    if e.replacements:
+        lines.append("  Сумма разниц по строкам может не совпасть с итогом: целые листы, округление.")
+    return lines
 
 
 @app.command("estimate")
@@ -452,6 +471,12 @@ def estimate(
     project: Annotated[
         Path | None, typer.Option("--project", help="Файл project.json (без БД, файлы не пишутся).")
     ] = None,
+    economy: Annotated[
+        bool,
+        typer.Option(
+            "--economy", help="Добавить вариант «экономия»: замены из economy.yaml и разница в цене."
+        ),
+    ] = False,
     json: JsonOpt = False,
 ) -> None:
     """Смета: себестоимость из закупки, труд по операциям, цена. Заказ — ещё и estimate.md, estimate.json."""
@@ -460,7 +485,11 @@ def estimate(
             raise InputError(
                 "Укажите либо заказ (kitchen estimate petrov), либо файл: --project project.json."
             )
-        result = api.estimate_and_save(order) if order is not None else api.estimate_from_project(project)
+        result = (
+            api.estimate_and_save(order, economy=economy)
+            if order is not None
+            else api.estimate_from_project(project, economy=economy)
+        )
     except KitchenError as e:
         fail(e)
     emit(result, _render_order_estimate, json)

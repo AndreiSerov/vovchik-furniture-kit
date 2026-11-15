@@ -887,14 +887,17 @@ def _build_corner(
             module.model_copy(update={"shelves": 1}), dims, materials, ws, no_shelf=False, no_doors=True
         )
     else:
+        # нижний угловой: карусель или одна полка с полкодержателями (замена варианта «экономия», тикет 17)
+        shelf = bool(module.contents and module.contents.shelves)
         out = build_base_door(
-            module.model_copy(update={"shelves": 1}), dims, materials, ws, no_shelf=True, no_doors=True
+            module.model_copy(update={"shelves": 1}), dims, materials, ws, no_shelf=not shelf, no_doors=True
         )
     if upper:
         facade_h = _calc(module, dims, "высота фасада", c.facades.height_upper, H=dims.height, W=dims.width)
     else:
         facade_h = _calc(module, dims, "высота фасада", c.facades.height_lower, H=dims.height, W=dims.width)
-        out.hardware[rules.carousel] += 1
+        if not shelf:
+            out.hardware[rules.carousel] += 1
     body = _material(ws.materials.sheets, rules.filler_material, "Материал заглушки", "листовые")
     facade_id = materials.facades_upper if upper else materials.facades_lower
     facade = _material(ws.materials.facades, facade_id, "Материал фасадов", "фасады")
@@ -1182,7 +1185,7 @@ def build_module(
             contents
             and (
                 contents.doors not in (None, 1)
-                or contents.shelves not in (None, 0 if module.template == "base_corner" else 1)
+                or contents.shelves not in ((None, 0, 1) if module.template == "base_corner" else (None, 1))
                 or contents.drawers is not None
                 or contents.lift
                 or contents.inserts
@@ -1190,6 +1193,7 @@ def build_module(
                     [],
                     [ws.construction.corner_rules.carousel] if module.template == "base_corner" else [],
                 )
+                or (contents.shelves == 1 and contents.inserts and module.template == "base_corner")
             )
         )
     ):

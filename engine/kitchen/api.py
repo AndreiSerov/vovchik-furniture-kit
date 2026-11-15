@@ -22,10 +22,11 @@ from kitchen.checks import check_project as run_checks
 from kitchen.common import CommonItem, CountertopCut, compute_common, plan_countertop
 from kitchen.cutting import MaterialCut, cut_parts, kerf_warnings
 from kitchen.cutting_pdf import write_cutting_map
+from kitchen.economy import EconomyLine, EconomyVariant, apply_rule
 from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
-from kitchen.models import Appliances, Hardware, Labor, Materials, Workshop
+from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
 from kitchen.parts import EdgeTotals, ModuleParts, Part, compute_parts
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
@@ -39,6 +40,8 @@ __all__ = [
     "CheckResult",
     "CommonItem",
     "DiffResult",
+    "EconomyLine",
+    "EconomyVariant",
     "EdgeTotals",
     "EdgingResult",
     "EstimateLabor",
@@ -72,6 +75,7 @@ __all__ = [
     "cut_from_order",
     "cut_from_project",
     "diff_project",
+    "economy_parts_from_project",
     "edges_and_save",
     "edges_from_order",
     "edges_from_project",
@@ -114,6 +118,7 @@ _COUNTED = {
     "hardware.yaml": (Hardware, ("items",)),
     "appliances.yaml": (Appliances, ("items",)),
     "labor.yaml": (Labor, ("norms_min",)),
+    "economy.yaml": (Economy, ("rules",)),
 }
 
 
@@ -1366,6 +1371,8 @@ class EstimateResult(Result):
     warnings: list[str]
     mock_notice: str | None = None
     outputs: list[OutputInfo] = Field(default_factory=list)
+    # вариант «экономия» (`--economy`); без него ключа в выводе нет
+    economy: EconomyVariant | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 def _estimate(project: Project, parts: PartsResult, cut: CutResult, workshop: Workshop) -> EstimateResult:
@@ -1384,21 +1391,82 @@ def _estimate(project: Project, parts: PartsResult, cut: CutResult, workshop: Wo
     )
 
 
-def estimate_from_order(order: str, home: Path | None = None) -> EstimateResult:
+def _priced(project: Project, home: Path, source: PartsSource, workshop: Workshop) -> EstimateResult:
+    """Смета копии проекта тем же путём, что и смета проекта: детали -> раскрой -> закупка -> смета."""
+    return _estimate(
+        project,
+        _build_parts(project, home, source, None, [], workshop),
+        _build_cut(project, home, source, None, [], workshop),
+        workshop,
+    )
+
+
+def _economy(
+    project: Project, home: Path, source: PartsSource, workshop: Workshop, price_as_is: int
+) -> tuple[EconomyVariant, Project]:
+    """Вариант «экономия»: цена с каждой заменой отдельно (разница на правило) и со всеми предложенными сразу.
+    Замена с разницей не больше нуля не предлагается. Копия проекта нигде не сохраняется."""
+    offered: list[EconomyLine] = []
+    not_offered: list[EconomyLine] = []
+    problems: list[str] = []
+    for rule in workshop.economy.rules:
+        applied = apply_rule(project, rule, workshop)
+        problems += applied.problems
+        if not applied.modules:
+            continue
+        price = _priced(applied.project, home, source, workshop).price
+        line = EconomyLine(
+            id=rule.id,
+            name=rule.name,
+            client_text=rule.client_text,
+            modules=applied.modules,
+            price=price,
+            saving=price_as_is - price,
+        )
+        (offered if line.saving > 0 else not_offered).append(line)
+    chosen = {line.id for line in offered}
+    together = project
+    for rule in workshop.economy.rules:
+        if rule.id in chosen:
+            applied = apply_rule(together, rule, workshop)
+            together = applied.project
+            problems += [p for p in applied.problems if p not in problems]
+    price = _priced(together, home, source, workshop).price if offered else price_as_is
+    variant = EconomyVariant(
+        price_as_is=price_as_is,
+        price=price,
+        saving=price_as_is - price,
+        replacements=offered,
+        not_offered=not_offered,
+        problems=problems,
+    )
+    return variant, together
+
+
+def _with_economy(
+    result: EstimateResult, project: Project, home: Path, workshop: Workshop, economy: bool
+) -> EstimateResult:
+    if not economy:
+        return result
+    variant, _ = _economy(project, home, result.source, workshop, result.price)
+    return result.model_copy(update={"economy": variant})
+
+
+def estimate_from_order(order: str, home: Path | None = None, economy: bool = False) -> EstimateResult:
+    """Смета текущей версии проекта; `economy` добавляет вариант «экономия» (копия, версия не меняется)."""
     home = home or resolve_home()
     project, source, brief, warnings = _order_project(order, home)
     workshop = load_workshop(home)
-    return _estimate(
+    result = _estimate(
         project,
         _build_parts(project, home, source, brief, warnings, workshop),
         _build_cut(project, home, source, brief, warnings, workshop),
         workshop,
     )
+    return _with_economy(result, project, home, workshop, economy)
 
 
-def estimate_from_project(path: Path, home: Path | None = None) -> EstimateResult:
-    """`kitchen estimate --project <файл>`: смета проекта из файла, без файлов выводов и записи в БД."""
-    home = home or resolve_home()
+def _project_file(path: Path) -> tuple[Project, PartsSource]:
     data = _read_json(Path(path), "Файл проекта")
     project = parse_project(data)
     source = PartsSource(
@@ -1408,14 +1476,62 @@ def estimate_from_project(path: Path, home: Path | None = None) -> EstimateResul
         content_hash=_project_hash(project),
         path=str(path),
     )
+    return project, source
+
+
+def estimate_from_project(path: Path, home: Path | None = None, economy: bool = False) -> EstimateResult:
+    """`kitchen estimate --project <файл>`: смета проекта из файла, без файлов выводов и записи в БД."""
+    home = home or resolve_home()
+    project, source = _project_file(path)
     workshop = load_workshop(home)
     brief = _brief_of_project(home, project.order)
-    return _estimate(
+    result = _estimate(
         project,
         _build_parts(project, home, source, brief, [], workshop),
         _build_cut(project, home, source, brief, [], workshop),
         workshop,
     )
+    return _with_economy(result, project, home, workshop, economy)
+
+
+def economy_parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
+    """Детали копии проекта из файла со всеми предложенными заменами «экономии»: то, из чего считана цена
+    «экономии». Ничего не пишет."""
+    home = home or resolve_home()
+    project, source = _project_file(path)
+    workshop = load_workshop(home)
+    _, together = _economy(project, home, source, workshop, _priced(project, home, source, workshop).price)
+    return _build_parts(together, home, source, None, [], workshop)
+
+
+def _economy_markdown(economy: EconomyVariant) -> list[str]:
+    lines = ["## Экономия", "", f"Цена как в проекте: {economy.price_as_is} ₽", ""]
+    if economy.replacements:
+        lines += [
+            f"- {line.name} (модули {', '.join(line.modules)}): цена с этой заменой {line.price} ₽, "
+            f"разница {line.saving} ₽. {line.client_text}"
+            for line in economy.replacements
+        ]
+        lines += [
+            "",
+            f"**Цена «экономии» со всеми заменами: {economy.price} ₽, разница {economy.saving} ₽**",
+            "",
+            "Сумма разниц по строкам может не совпасть с итогом: листы закупаются целыми, цена округляется.",
+            "",
+        ]
+    else:
+        lines += [f"Подходящих замен нет: цена «экономии» {economy.price} ₽, разница {economy.saving} ₽.", ""]
+    if economy.not_offered:
+        lines += ["### Не предложено", ""]
+        lines += [
+            f"- {line.name} (модули {', '.join(line.modules)}): не удешевляет, не предложена; "
+            f"цена с этой заменой {line.price} ₽, разница {line.saving} ₽"
+            for line in economy.not_offered
+        ]
+        lines.append("")
+    if economy.problems:
+        lines += ["### Замена не строится", "", *(f"- {problem}" for problem in economy.problems), ""]
+    return lines
 
 
 def _estimate_markdown(result: EstimateResult) -> str:
@@ -1453,6 +1569,8 @@ def _estimate_markdown(result: EstimateResult) -> str:
         f"**Цена: {result.price} ₽** (округление: {result.rounding})",
         "",
     ]
+    if result.economy:
+        lines += _economy_markdown(result.economy)
     return "\n".join(lines)
 
 
@@ -1470,9 +1588,9 @@ def _estimate_files(
     ]
 
 
-def estimate_and_save(order: str, home: Path | None = None) -> EstimateResult:
+def estimate_and_save(order: str, home: Path | None = None, economy: bool = False) -> EstimateResult:
     home = home or resolve_home()
-    result, files = _estimate_files(home, estimate_from_order(order, home))
+    result, files = _estimate_files(home, estimate_from_order(order, home, economy))
     _save_outputs(home, result.source, files)
     return result
 
