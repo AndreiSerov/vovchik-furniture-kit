@@ -32,6 +32,7 @@ def golden_dump(result) -> dict:
     """Результат `parts` в виде эталона: без служебных полей и без отверстий присадки у деталей."""
     data = result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True)
     for module in data["modules"]:
+        module.pop("hardware", None)  # фурнитура по модулям (тикет 22): эталоны знают только итог проекта
         for part in module["parts"]:
             for key in PART_FIELDS_NOT_IN_GOLDEN:
                 part.pop(key, None)

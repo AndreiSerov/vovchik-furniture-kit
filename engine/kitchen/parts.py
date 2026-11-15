@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from kitchen import formulas
 from kitchen.drilling import apply_drilling, plate_warnings
@@ -42,6 +42,7 @@ __all__ = [
     "DRAWER_BOTTOM",
     "PURPOSE_RU",
     "TEMPLATES",
+    "AssemblyPlan",
     "EdgeTotals",
     "HingedDoor",
     "Hole",
@@ -106,12 +107,27 @@ class EdgeTotals(BaseModel):
     purchase_m: float
 
 
+@dataclass(frozen=True)
+class AssemblyPlan:
+    """Что шаблон знает о сборке модуля, но не пишет в детали: соединения на конфирматах, двери на петлях,
+    полки на полкодержателях, ящики на направляющих, саморезы задней стенки. Из него сборочный лист
+    (тикет 22) собирает шаги; в JSON `kitchen parts` не входит."""
+
+    joints: tuple[Joint, ...] = ()
+    doors: tuple[HingedDoor, ...] = ()
+    shelves: tuple[PinnedShelf, ...] = ()
+    drawers: tuple[DrawerRunners, ...] = ()
+    back_screws: int = 0
+
+
 class ModuleParts(BaseModel):
-    """Детали одного модуля."""
+    """Детали одного модуля и вся его фурнитура («цех» и «объект»): сумма по модулям — `PartsResult.hardware`."""
 
     module: str
     template: str
     parts: list[Part]
+    hardware: dict[str, int] = Field(default_factory=dict)
+    plan: AssemblyPlan = Field(default_factory=AssemblyPlan, exclude=True)
 
 
 @dataclass(frozen=True)
@@ -288,6 +304,9 @@ class TemplateOut:
     doors: list[HingedDoor] = field(default_factory=list)
     shelves: list[PinnedShelf] = field(default_factory=list)  # полки на полкодержателях (тикет 20)
     drawers: list[DrawerRunners] = field(default_factory=list)  # ящики на направляющих (тикет 20)
+    back_screws: int = (
+        0  # саморезы задней стенки (тикет 22): в `hardware` они уже посчитаны вместе с остальными
+    )
 
 
 SIDE_SUFFIX: dict[HingeSide, str] = {"left": "Л", "right": "П"}
@@ -546,6 +565,7 @@ def build_base_door(
         perimeter = 2 * (back_h + back_w)
         screws += _ceil_div(perimeter, bp.fastening_pitch)  # саморезы на ХДФ: периметр / шаг
     out.hardware[hw.screws] += screws
+    out.back_screws = screws
     if n_doors:
         out.hardware[materials.handles] += n_doors * c.handles.per_unit
     return out
@@ -1195,7 +1215,21 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
                             f"Маркировка «{part.id}» не уникальна: уже есть у детали модуля {seen[part.id]}."
                         )
                     seen[part.id] = module.label
-                modules.append(ModuleParts(module=module.label, template=module.template, parts=out.parts))
+                modules.append(
+                    ModuleParts(
+                        module=module.label,
+                        template=module.template,
+                        parts=out.parts,
+                        hardware=dict(sorted(out.hardware.items())),
+                        plan=AssemblyPlan(
+                            joints=tuple(out.joints),
+                            doors=tuple(out.doors),
+                            shelves=tuple(out.shelves),
+                            drawers=tuple(out.drawers),
+                            back_screws=out.back_screws,
+                        ),
+                    )
+                )
                 color = facade_color(module, row, project.materials)
                 for part in out.parts:
                     if part.area_m2 is not None:

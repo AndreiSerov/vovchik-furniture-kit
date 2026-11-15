@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from kitchen import brief as brief_check
 from kitchen import store
+from kitchen.assembly import AssemblyModule, build_assembly
 from kitchen.checks import Finding, duplicate_labels
 from kitchen.checks import check_project as run_checks
 from kitchen.common import CommonItem, CountertopSize, compute_common, size_countertop
@@ -41,6 +42,8 @@ __all__ = [
     "DAYS_ERROR",
     "HOLE_PURPOSES",
     "OUTPUT_RECOMPUTE",
+    "AssemblyModule",
+    "AssemblyResult",
     "BriefSaveResult",
     "BriefShowResult",
     "CheckResult",
@@ -77,6 +80,8 @@ __all__ = [
     "ValidationContext",
     "ValidationResult",
     "WorkshopCheck",
+    "assembly_from_order",
+    "assembly_from_project",
     "brief_save",
     "brief_show",
     "check_project",
@@ -1349,6 +1354,45 @@ def drilling_and_save(order: str, home: Path | None = None, on: date | None = No
         ),
     )
     return result.model_copy(update={"output": output})
+
+
+# --- сборочный лист -----------------------------------------------------------
+
+
+class AssemblyResult(Result):
+    """Сборочный лист: по модулям детали, фурнитура «цех» и шаги сборки; версия-источник."""
+
+    source: PartsSource
+    output: OutputInfo | None = None
+    warnings: list[str]
+    modules: list[AssemblyModule]
+
+
+def _assembly(project: Project, parts: PartsResult, workshop: Workshop) -> AssemblyResult:
+    return AssemblyResult(
+        source=parts.source,
+        warnings=parts.warnings,
+        modules=build_assembly(project, parts.modules, workshop),
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+    )
+
+
+def assembly_from_order(order: str, home: Path | None = None) -> AssemblyResult:
+    """Сборочный лист текущей версии проекта заказа, без записи файлов."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
+    workshop = load_workshop(home)
+    return _assembly(project, _build_parts(project, home, source, latest, warnings, workshop), workshop)
+
+
+def assembly_from_project(path: Path, home: Path | None = None) -> AssemblyResult:
+    """`kitchen assembly --project <файл>`: сборочный лист проекта из файла, файлов не пишет."""
+    home = home or resolve_home()
+    project, source = _project_file(path)
+    workshop = load_workshop(home)
+    parts = _build_parts(project, home, source, _brief_of_project(home, project.order), [], workshop)
+    return _assembly(project, parts, workshop)
 
 
 class PurchaseResult(Result):
