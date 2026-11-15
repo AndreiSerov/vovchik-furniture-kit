@@ -116,6 +116,11 @@
               "template": "wall_door",
               "width": 450,
               "shelves": 1
+            },
+            {
+              "label": "ПМ1",
+              "gap": true,
+              "width": 261
             }
           ]
         }

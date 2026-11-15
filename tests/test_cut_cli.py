@@ -22,7 +22,7 @@ def test_cut_order_contract(home):
     lines = t.output.strip().splitlines()
     assert lines[0] == MOCK_BANNER and lines[-1] == MOCK_BANNER
     assert "версия 1" in t.output and "ldsp_16_white" in t.output and "Лист 1" in t.output
-    assert "78.1%" in t.output and "Н1-бок-Л" in t.output and "Рез 1" in t.output
+    assert "74.3%" in t.output and "Н1-бок-Л" in t.output and "Рез 1" in t.output
     assert "Столешница" in t.output and "общая длина 3400 мм" in t.output
     assert "cutting-map.pdf" in t.output and (home / "orders/2026-047-petrov/out/cutting-map.pdf").exists()
 

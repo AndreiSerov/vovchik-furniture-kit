@@ -237,7 +237,7 @@ def petrov(home):
 
 
 def test_petrov_cut_numbers_and_source(petrov):
-    """Эталон по моку, ПРОВЕРИТЬ МАСТЕРУ (DECISIONS.md): ЛДСП 71 деталь 18.111 м² — 4 листа (нижняя граница по
+    """Эталон по моку, ПРОВЕРИТЬ МАСТЕРУ (DECISIONS.md): ЛДСП 71 деталь 17.2312 м² — 4 листа (нижняя граница по
     площади 3.12), ХДФ 11 деталей 5.2302 м² — 2 листа (один лист 5.796 м² не вмещает их гильотинно)."""
     result = api.cut_from_order(ORDER, petrov)
     assert (result.source.kind, result.source.order, result.source.version) == ("order", ORDER, 1)
@@ -245,10 +245,10 @@ def test_petrov_cut_numbers_and_source(petrov):
     by = materials(result)
     assert list(by) == ["ldsp_16_white", "hdf_3_white"]
     ldsp, hdf = by["ldsp_16_white"], by["hdf_3_white"]
-    assert (ldsp.sheet_count, ldsp.parts_count, ldsp.parts_area_m2) == (4, 71, 18.111)
+    assert (ldsp.sheet_count, ldsp.parts_count, ldsp.parts_area_m2) == (4, 71, 17.2312)
     assert (hdf.sheet_count, hdf.parts_count, hdf.parts_area_m2) == (2, 11, 5.2302)
-    assert ldsp.utilization == pytest.approx(18.111 / (4 * 2.8 * 2.07), abs=1e-4)
-    assert ldsp.waste_m2 == pytest.approx(4 * 2.8 * 2.07 - 18.111, abs=1e-3)
+    assert ldsp.utilization == pytest.approx(17.2312 / (4 * 2.8 * 2.07), abs=1e-4)
+    assert ldsp.waste_m2 == pytest.approx(4 * 2.8 * 2.07 - 17.2312, abs=1e-3)
     parts = [p for m in api.parts_from_order(ORDER, petrov).modules for p in m.parts]
     expected = {p.id for p in parts if p.material != "mdf_enamel_matt"}
     assert {pl.part for m in result.materials for s in m.sheets for pl in s.placements} == expected

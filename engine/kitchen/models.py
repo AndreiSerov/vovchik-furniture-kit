@@ -395,11 +395,9 @@ class UpperRules(Section):
 
 class CornerRules(Section):
     lower_offset: Annotated[Int, Field(ge=0)] = _f("смещение_нижнего")
-    upper_offset: Annotated[Int, Field(ge=0)] = _f("смещение_верхнего")
     wall_tolerance: Annotated[Int, Field(ge=0)] = _f("допуск_стены")
     base_facade_width: Annotated[Int, Field(gt=0)] = _f("ширина_фасада_нижнего")
     upper_filler_width: Annotated[Int, Field(gt=0)] = _f("ширина_заглушки_верхнего")
-    upper_depth: Annotated[Int, Field(gt=0)] = _f("глубина_верхнего")
     carousel: str = _f("карусель")
     filler_screws: Annotated[Int, Field(ge=0)] = _f("саморезов_заглушки")
     filler_material: str = _f("материал_заглушки")

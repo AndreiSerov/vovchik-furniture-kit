@@ -21,11 +21,11 @@ def find(proj, label):
     raise KeyError(label)
 
 
-def test_wall_corner_default_depth_comes_from_module_dims(home):
-    # Глубина верхнего углового — 600 (ключ мастерской), а не 320 верхнего ряда; одна для расчёта и проверок.
+def test_wall_corner_depth_is_upper_depth(home):
+    # Верхний угловой — той же глубины, что обычные верхние (тикет 50): нет отдельного ключа мастерской.
     ws = workshop.load_workshop(home)
     row, module = find(petrov_project(), "В4")
-    assert parts.module_dims(module, row.kind, ws).depth == 600
+    assert parts.module_dims(module, row.kind, ws).depth == 320
     row, module = find(petrov_project(), "В2")
     assert parts.module_dims(module, row.kind, ws).depth == 320
 

@@ -71,6 +71,7 @@ __all__ = [
     "resolve_materials",
     "steps_pick",
     "unknown_template_error",
+    "upper_corner_offset",
 ]
 
 EDGE_SIDES = ("L1", "L2", "W1", "W2")
@@ -229,7 +230,6 @@ def module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
         if row_kind == "lower"
         else ws.construction.upper
     )
-    default_depth = template.default_depth(ws) if template and template.default_depth else base.depth
     return ModuleDims(
         width=_whole(module.width, f"Ширина модуля {module.label}"),
         height=(
@@ -238,9 +238,7 @@ def module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
             else base.height
         ),
         depth=(
-            _whole(module.depth, f"Глубина модуля {module.label}")
-            if module.depth is not None
-            else default_depth
+            _whole(module.depth, f"Глубина модуля {module.label}") if module.depth is not None else base.depth
         ),
     )
 
@@ -634,7 +632,6 @@ class Template:
     drawers: bool = False  # ящики на направляющих: проверяется внутренняя глубина
     appliances: tuple[str, ...] = ()  # виды техники, под которые шаблон строит нишу
     both_rows: bool = False  # модуль записан в одном ряду стены и занимает оба (пенал)
-    default_depth: Callable[[Workshop], int] | None = None  # глубина по умолчанию вместо глубины ряда
     title: str = field(kw_only=True)  # русское название для строки состава КП: «нижний модуль», «пенал»
     pull_out_front: bool = field(default=False, kw_only=True)  # фасад выдвижной, а не дверь (бутылочница)
 
@@ -1088,7 +1085,6 @@ TEMPLATES = {
     "wall_corner": Template(
         build_wall_corner,
         "upper",
-        default_depth=lambda ws: ws.construction.corner_rules.upper_depth,
         title="верхний угловой модуль",
     ),
     "wall_door": Template(_plain(build_wall_door), "upper", title="верхний модуль"),
@@ -1226,6 +1222,18 @@ def resolve_materials(module: ModuleSpec, row: Row, materials: ProjectMaterials)
             for key, value in override.model_dump(exclude_none=True).items():
                 values[keys.get(key, key)] = value
     return ProjectMaterials.model_validate(values)
+
+
+def upper_corner_offset(module: ModuleSpec, row: Row, materials: ProjectMaterials, ws: Workshop) -> int:
+    """Смещение верхнего ряда соседней стены от верхнего углового модуля (решение мастера, тикет 50):
+    глубина верхних плюс толщина фасада углового, без зазора. Одно правило для суммы ряда и раскладки."""
+    facade = _material(
+        ws.materials.facades,
+        resolve_materials(module, row, materials).facades_upper,
+        "Материал фасадов",
+        "фасады",
+    )
+    return ws.construction.upper.depth + _required_thickness(facade, "смещения верхнего ряда")
 
 
 def facade_color(module: ModuleSpec, row: Row, materials: ProjectMaterials) -> str:
