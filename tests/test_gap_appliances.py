@@ -242,3 +242,27 @@ def test_built_in_dishwasher_in_gap_is_not_gap_built_in(home):
 def test_empty_brief_fridge_is_not_a_brief_appliance(home):
     save_brief(home, {"location": ""})
     assert "appliance_not_in_brief" in codes(home, fridge_project(home, 620))
+
+
+def test_gap_width_source_named_for_brief_and_project_mix(home):
+    save_brief(home)  # у Сергея посудомойка 450 в брифе, стиральной машины нет
+    [f] = gap_findings(home, two_appliances_project(home, 600))
+    assert f.message == (
+        "Место ПМ1: 600 мм, а посудомойке и стиральной машине по брифу и проекту нужно 1030 мм (450 + 560 + зазор 20)"
+    )
+
+
+def test_wrong_kind_in_gap_is_not_counted_in_width_sum(home):
+    path = two_appliances_project(home, 600)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["appliances"] = [
+        {"type": "oven", "width": 600, "module": "ПМ1"},
+        {"type": "fridge", "width": 600, "module": "ПМ1"},
+    ]
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    found = {f.code: f for f in gap_findings(home, path)}
+    assert set(found) == {"gap_appliance", "gap_too_small"}
+    assert (
+        found["gap_too_small"].message
+        == "Место ПМ1: 600 мм, а холодильнику по проекту нужно 620 мм (600 + зазор 20)"
+    )

@@ -260,3 +260,14 @@ def test_schema_error_names_the_key_as_written_in_the_file(home):
         api.check_project(write(home, walls), home)
     assert "«walls[0].rows[0].modules[0].width»" in str(e.value)
     assert "«walls[0].rows[1].modules[0].width»" in str(e.value)
+
+
+def test_schema_error_keeps_module_key_outside_row_entries(home):
+    walls = [{"label": "A", "length": 600, "rows": [lower(base("Н1"))]}]
+    with pytest.raises(OrderError) as e:
+        api.check_project(write(home, walls, appliances=[{"type": "oven", "width": 600}]), home)
+    assert "«appliances[0].module»" in str(e.value)
+
+
+def test_cut_json_has_no_gaps_mm(home):
+    assert '"gaps_mm"' not in api.cut_from_project(write(home, wall_3700()), home).model_dump_json()
