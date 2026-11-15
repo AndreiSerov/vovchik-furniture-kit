@@ -11,8 +11,10 @@ TESTS = ROOT / "tests"
 ENGINE = ROOT / "engine" / "kitchen"
 
 # ADR 0002: тесты логики идут через kitchen.api, CLI — контрактными тестами.
-# `kitchen.skill_lint` — отдельный инструмент проверки скиллов (`python -m`), не логика заказов.
-PUBLIC = {"kitchen.api", "kitchen.cli", "kitchen.errors", "kitchen.result", "kitchen.skill_lint"}
+PUBLIC = {"kitchen.api", "kitchen.cli", "kitchen.errors", "kitchen.result"}
+
+# Отдельные инструменты (`python -m`), не логика заказов: тесты вызывают их напрямую.
+TOOLS = {"kitchen.skill_lint"}
 
 # Храповик: тесты, которые уже ходят во внутренние модули. Список только сокращается.
 # Новый тест берёт данные через kitchen.api; если без внутреннего модуля никак — запиши
@@ -51,7 +53,7 @@ def kitchen_imports(path: Path) -> set[str]:
 def test_tests_reach_logic_through_the_api():
     problems = []
     for path in sorted(TESTS.glob("test_*.py")):
-        extra = kitchen_imports(path) - PUBLIC - LEGACY_INTERNAL_IMPORTS.get(path.name, set())
+        extra = kitchen_imports(path) - PUBLIC - TOOLS - LEGACY_INTERNAL_IMPORTS.get(path.name, set())
         if extra:
             problems.append(f"{path.name}: {sorted(extra)}")
     assert not problems, "ADR 0002: тесты логики идут через kitchen.api.\n" + "\n".join(problems)

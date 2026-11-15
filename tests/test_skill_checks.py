@@ -1,9 +1,10 @@
 """Тикет 26: статические проверки скиллов (спека 6.6, ADR 0003).
 
 Правила живут в `kitchen.skill_lint`; `scripts/check` запускает их на настоящих скиллах.
-Здесь те же правила работают на скиллах-нарушителях из `fixtures/skills_bad/`.
+Здесь те же правила работают на скиллах-нарушителях из `fixtures/skills_lint/`.
 """
 
+import re
 import subprocess
 import sys
 
@@ -14,7 +15,7 @@ from kitchen.cli import app
 
 from tests.conftest import REPO
 
-BAD = REPO / "tests" / "fixtures" / "skills_bad"
+BAD = REPO / "tests" / "fixtures" / "skills_lint"
 
 VIOLATIONS = {
     "extra_frontmatter": [
@@ -30,8 +31,13 @@ VIOLATIONS = {
     "group_without_subcommand": ["kitchen-bad: строка 8: `kitchen brief` — группа, нужна подкоманда"],
     "formula": ["kitchen-bad: строка 8: арифметика с переменной «W - 4» (формулы — только в движке)"],
     "formula_mm": [
-        "kitchen-bad: строка 8: размер в мм «720 мм» (формулы — только в движке)",
         "kitchen-bad: строка 8: размер «ширина×высота» «596x716» (формулы — только в движке)",
+        "kitchen-bad: строка 8: размер в мм «720 мм» (формулы — только в движке)",
+    ],
+    "formula_arithmetic": [
+        "kitchen-bad: строка 6: арифметика над числами «600 + 18» (формулы — только в движке)",
+        "kitchen-bad: строка 6: арифметика с переменной «W - 4» (формулы — только в движке)",
+        "kitchen-bad: строка 6: присваивание формулы «H = a * b» (формулы — только в движке)",
     ],
     "trigger_duplicate": ["triggers.json: фраза 2: дубль фразы 1 «  составь  БРИФ» (скилл kitchen-bad)"],
     "trigger_unknown_skill": ["triggers.json: фраза 2: неизвестный скилл «kitchen-nope»"],
@@ -64,7 +70,7 @@ def test_empty_trigger_set_passes(case):
 
 def test_real_skills_pass_without_exceptions():
     assert skill_lint.lint() == []
-    assert [p.name for p in skill_lint.skill_dirs(skill_lint.DEFAULT_ROOT)] == ["kitchen-brief"]
+    assert (skill_lint.DEFAULT_ROOT / "kitchen-brief" / "SKILL.md").is_file()
 
 
 def test_command_added_to_the_cli_counts_as_existing(tmp_path):
@@ -113,5 +119,6 @@ def test_command_line_fails_on_a_violator_and_passes_on_real_skills():
     assert run_lint().returncode == 0
 
 
-def test_scripts_check_runs_the_skill_lint():
-    assert "kitchen.skill_lint" in (REPO / "scripts" / "check").read_text(encoding="utf-8")
+def test_scripts_check_runs_the_skill_lint_on_an_active_line():
+    text = (REPO / "scripts" / "check").read_text(encoding="utf-8")
+    assert re.search(r"^uv run python -m kitchen\.skill_lint\s*$", text, re.MULTILINE)
