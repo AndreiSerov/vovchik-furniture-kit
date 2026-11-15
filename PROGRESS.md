@@ -2,7 +2,7 @@
 
 Источник правды о статусе задач (ADR 0004). В начале сессии читать вместе с `DECISIONS.md` и продолжать с первого незакрытого тикета. Тикет закрывается в том же коммите, что и работа над ним.
 
-Открытые тикеты MVP ждут проверки готовности (`docs/agents/workflow.md`, «Review rounds»): вопросы мастеру, черновики Вывода и проверки приёмки — `docs/reviews/2026-11-15/readiness/`. Отложенные находки ревью (`docs/reviews/2026-11-15/deferred.md`) разбирает тикет уборки своего этапа.
+Открытые тикеты MVP прошли проверку готовности (`docs/agents/workflow.md`, «Review rounds») и готовы к сборке по порядку этого файла; отчёты ревьюеров — `docs/reviews/2026-11-15/readiness/`, решения агента по поручению мастера — `docs/reviews/2026-11-15/agent-decisions.md`. Отложенные находки ревью (`docs/reviews/2026-11-15/deferred.md`) разбирает тикет уборки своего этапа.
 
 ## Этап 0. Основа
 
@@ -49,8 +49,8 @@
 - [x] 19 — Присадка: конфирматы и петли (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [x] 20 — Присадка: направляющие и полкодержатели (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [ ] 22 — Сборочный лист (4.4) ([спека](docs/specs/stage-4-drilling-assembly.md))
-- [ ] 40 — Чек-лист выезда (4.4) ([спека](docs/specs/stage-4-drilling-assembly.md))
-- [ ] 46 — Уборка этапа 4 ([спека](docs/specs/stage-4-drilling-assembly.md))
+
+Чек-лист выезда (40) и уборка этапа 4 (46) ждут схему брифа (30) и стоят в этапе 6 после неё.
 
 ## Этап 5. Проект и 3D
 
@@ -66,10 +66,12 @@
 
 - [x] 26 — Статические проверки скиллов (6.6) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 36 — Команда `kitchen check` (6.1) ([спека](docs/specs/stage-6-skills.md))
+- [ ] 30 — Схема брифа и правила `check_brief.py` (6.5) ([спека](docs/specs/stage-6-skills.md))
+- [ ] 40 — Чек-лист выезда (4.4, этап 4) ([спека](docs/specs/stage-4-drilling-assembly.md))
+- [ ] 46 — Уборка этапа 4 ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [ ] 27 — Скилл `kitchen-project` (6.1, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 28 — Скилл `kitchen-production` (6.2, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 29 — Скилл `kitchen-estimate` (6.3, 6.4) ([спека](docs/specs/stage-6-skills.md))
-- [ ] 30 — Схема брифа и правила `check_brief.py` (6.5) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 43 — `kitchen-brief`: голос мастера и одна вилка (6.5, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 44 — Быстрый опрос и эвалы `kitchen-brief` (6.5) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 49 — Следующий шаг в `status` (6.4) ([спека](docs/specs/stage-6-skills.md))
