@@ -15,6 +15,7 @@ from kitchen.parts import (
     DRAWER_BOTTOM,
     TEMPLATES,
     ModuleParts,
+    is_facade,
     module_dims,
     resolve_materials,
 )
