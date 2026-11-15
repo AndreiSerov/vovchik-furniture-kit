@@ -232,6 +232,20 @@ def _span(values: list[Mm]) -> str:
     return ", ".join(str(v) for v in values)
 
 
+def _distance(part: Part, h: Hole, i: int) -> str:
+    """Расстояние от i-й базовой кромки. Чашка петли ближе к противоположной вертикальной кромке (правый фасад:
+    22 от правой, а не 275 от левой) пишется от неё — решение мастера; в модели `from_base` не меняется."""
+    value = h.from_base[i]
+    face = part.base_edges[i] if part.base_edges else ""
+    o = part.orientation
+    if h.purpose == "hinge_cup" and face[1:] == "x" and "x" in (o.length, o.width):
+        size = part.length if o.length == "x" else part.width
+        if size - value < value:
+            opposite = ("+" if face[0] == "-" else "-") + "x"
+            return f"{to_mm(Decimal(str(size)) - Decimal(str(value)))} от {_FROM_RU[opposite]} кромки"
+    return str(value)
+
+
 def _rows(part: Part) -> list[str]:
     """Строки таблицы отверстий: по отверстию на строку; ряд из трёх и больше одинаковых отверстий подряд
     на одной линии (полкодержатели, направляющая) — одной строкой с номерами «11–15» и расстояниями. Ряд
@@ -245,7 +259,7 @@ def _rows(part: Part) -> list[str]:
         while end < len(holes) and _series(holes[n : end + 1]) is not None:
             end += 1
         h = holes[n]
-        number, base = f"{n + 1}", [str(h.from_base[0]), str(h.from_base[1])]
+        number, base = f"{n + 1}", [_distance(part, h, i) for i in (0, 1)]
         axis = _series(holes[n:end]) if end - n >= _ROW_MIN else None
         if axis is None:
             end = n + 1

@@ -332,3 +332,16 @@ def test_end_hole_segment_into_front_and_back_edge_is_vertical_and_inward(home):
     for h in marks:
         assert abs(h.x2 - h.x) < 1e-6 and abs(h.y2 - h.y) > 1  # отрезок вертикальный
         assert y0 - 0.01 <= h.y2 <= y1 + 0.01  # и уходит внутрь контура
+
+
+def test_cups_of_right_hinged_facade_are_written_from_the_nearer_edge(home):
+    """Чашки правого фасада стоят в 22 мм от правой кромки; в таблице так и написано (число 275 от левой —
+    в модели). Чашки левого фасада — просто «22» от левой, строки не раздуваются."""
+    _, pages = petrov_layout(home)
+    sch = schemes(pages)
+    right = [t.text for t in sch["В2-фасад-П"].texts if re.match(r"\d+\. чашка петли", t.text)]
+    left = [t.text for t in sch["В2-фасад-Л"].texts if re.match(r"\d+\. чашка петли", t.text)]
+    assert len(right) == len(left) == 2
+    assert all(t.endswith("· 22 от правой кромки") for t in right), right
+    assert not any("275" in t for t in right)
+    assert all(t.endswith("· 22") and "от правой" not in t for t in left), left

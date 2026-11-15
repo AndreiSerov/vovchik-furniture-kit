@@ -26,6 +26,7 @@ LEGACY_INTERNAL_IMPORTS = {
     "test_checks_brief.py": {"kitchen.brief", "kitchen.models"},
     "test_cut_pdf.py": {"kitchen.cutting", "kitchen.cutting_pdf", "kitchen.pdf"},
     "test_cut_pdf_dense.py": {"kitchen.cutting", "kitchen.cutting_pdf", "kitchen.pdf"},
+    "test_drilling_pins_runners.py": {"kitchen.drilling", "kitchen.geometry", "kitchen.workshop"},
     "test_cutting.py": {"kitchen.cutting", "kitchen.parts", "kitchen.project", "kitchen.workshop"},
     "test_input_guards_project.py": {"kitchen.parts"},
     "test_orders_api.py": {"kitchen.store"},
