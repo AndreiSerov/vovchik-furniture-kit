@@ -42,7 +42,7 @@
 
 ## Этап 4. Присадка и сборка
 
-- [ ] 19 — Присадка: конфирматы и петли (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
+- [x] 19 — Присадка: конфирматы и петли (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [ ] 20 — Присадка: направляющие и полкодержатели (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [ ] 21 — Наклейки 70×37 (4.3) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [ ] 22 — Сборочный лист и чек-лист выезда (4.4) ([спека](docs/specs/stage-4-drilling-assembly.md))

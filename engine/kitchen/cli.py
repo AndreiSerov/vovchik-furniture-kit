@@ -321,6 +321,48 @@ def edges(
     emit(result, _render_edges, json)
 
 
+def _render_drilling(r: api.DrillingResult) -> str:
+    lines = ["Карта присадки:", _render_source(r.source)]
+    for p in r.parts:
+        holes = p.holes or []
+        kinds = ", ".join(
+            f"{api.HOLE_PURPOSES[k]} {n}"
+            for k in api.HOLE_PURPOSES
+            if (n := sum(1 for h in holes if h.purpose == k))
+        )
+        lines.append(f"  {p.id} {p.length}×{p.width} мм — отверстий {len(holes)}: {kinds}")
+    lines.append("Сверка с фурнитурой:")
+    for c in r.checks:
+        lines.append(f"  {c.name} {c.holes} = {c.expected} ({c.basis})")
+    if r.output:
+        lines.append(f"Карта присадки PDF: {r.output.file} (версия проекта {r.output.source_version})")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("drilling")
+def drilling(
+    order: Annotated[
+        str | None, typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project.")
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Присадка: отверстия под конфирматы и петли, сверка с фурнитурой; для заказа также PDF карты."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError(
+                "Укажите либо заказ (kitchen drilling petrov), либо файл: --project project.json."
+            )
+        result = api.drilling_and_save(order) if order is not None else api.drilling_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_drilling, json)
+
+
 def _render_cut(r: api.CutResult) -> str:
     lines = [
         f"Раскрой проекта {r.order}:",
