@@ -122,13 +122,6 @@ def _steps(
     return [line for stage in stages for line in lines.get(stage, [])]
 
 
-def _appliance(appliance) -> str | None:
-    """Прибор словами брифа; «другая техника» слов не имеет: пишется модель прибора, если есть."""
-    if appliance.type == "other":
-        return appliance.model or None
-    return APPLIANCE_NAMES[appliance.type]
-
-
 def build_assembly(project: Project, built: list[ModuleParts], ws: Workshop) -> list[AssemblyModule]:
     """Блоки модулей в порядке стен и рядов (как состав КП); пенал записан один раз, в своём ряду."""
     by_label = {m.module: m for m in built}
@@ -150,12 +143,12 @@ def build_assembly(project: Project, built: list[ModuleParts], ws: Workshop) -> 
                     )
                     for p in module_parts.parts
                 ]
-                kinds = [_appliance(a) for a in project.appliances if a.module == module.label]
+                kinds = [APPLIANCE_NAMES[a.type] for a in project.appliances if a.module == module.label]
                 common = {
                     "label": module.label,
                     "carcass": template.carcass,
                     "parts": parts,
-                    "appliances": [k for k in kinds if k],
+                    "appliances": kinds,
                 }
                 if not template.carcass:
                     facades = [p.mark for p in parts if p.name == "фасад"]

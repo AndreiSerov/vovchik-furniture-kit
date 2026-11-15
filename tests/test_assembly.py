@@ -262,3 +262,30 @@ def test_drawer_and_hinge_steps_name_catalog_items_and_parts(home):
     )  # без задней стенки строки нет
     for module in result.modules:
         assert all(not s.startswith(("Ручки", "Опоры")) for s in module.steps)
+
+
+def test_other_appliance_is_named_in_assembly_sheet(home):
+    project = json.loads(json.dumps(BASE_DOOR_PROJECT))
+    project["appliances"] = [{"type": "other", "width": 500, "module": "Н1"}]
+    (block,) = api.assembly_from_project(write_project(home, project), home).modules
+    assert block.appliances == ["другая техника"]
+
+
+def mark_workshop(home, item):
+    edit(home, "hardware.yaml", f"{{id: {item}, ставится: объект,", f"{{id: {item}, ставится: цех,")
+
+
+def test_legs_and_handles_marked_workshop_get_steps_only_where_the_module_has_them(home):
+    petrov(home)
+    mark_workshop(home, "leg_100")
+    mark_workshop(home, "handle_profile")
+    result = api.assembly_from_order(ORDER, home)
+    n1 = module_of(result, "Н1")
+    legs = next(h for h in n1.hardware if h.id == "leg_100")
+    assert f"Опоры {legs.name} — {legs.quantity} шт" in n1.steps
+    for m in result.modules:
+        assert not any(" — 0 шт" in s for s in m.steps), m.label
+        has_legs = any(h.id == "leg_100" for h in m.hardware)
+        assert has_legs == any(s.startswith("Опоры") for s in m.steps), m.label
+        has_handles = any(h.id == "handle_profile" for h in m.hardware)
+        assert has_handles == any(s.startswith("Ручки") for s in m.steps), m.label

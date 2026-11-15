@@ -229,3 +229,33 @@ def test_bad_workshop_stage_list_blocks_the_command(home):
     )
     with pytest.raises(KitchenError):
         api.assembly_and_save(ORDER, home)
+
+
+SECTION_HEADS = ("Детали (", "Фурнитура:", "Порядок сборки:")
+
+
+def test_section_heading_is_never_the_last_line_of_a_page(home):
+    petrov(home)
+    result = api.assembly_from_order(ORDER, home)
+    block = result.modules[0]
+    for n in range(40, 120):
+        long = block.model_copy(update={"parts": (block.parts * 10)[:n]})
+        pages = api.assembly_layout(result.model_copy(update={"modules": [long]}))
+        for page in pages[:-1]:
+            assert not page.lines[-1].text.startswith(SECTION_HEADS), (n, page.lines[-1].text)
+
+
+def test_carcass_module_without_workshop_hardware_says_none(home):
+    petrov(home)
+    result = api.assembly_from_order(ORDER, home)
+    bare = result.modules[0].model_copy(update={"hardware": []})
+    pages = api.assembly_layout(result.model_copy(update={"modules": [bare]}))
+    assert "Фурнитура: нет" in [line.text for line in pages[0].lines]
+
+
+def test_wrapped_step_continues_with_hanging_indent(home):
+    petrov(home)
+    pages = api.assembly_layout(api.assembly_from_order(ORDER, home))
+    lines = [line for page in pages for line in page.lines]
+    i = next(i for i, ln in enumerate(lines) if ln.text.startswith("5. Направляющие") and "Н1-" in ln.text)
+    assert lines[i + 1].text.startswith("Н1-дно-ящ-3") and lines[i + 1].x > lines[i].x
