@@ -64,6 +64,12 @@ def test_tests_reach_logic_through_the_api():
     assert not problems, "ADR 0002: тесты логики идут через kitchen.api.\n" + "\n".join(problems)
 
 
+def test_every_legacy_import_exception_is_explained_in_decisions():
+    decisions = (ROOT / "DECISIONS.md").read_text(encoding="utf-8")
+    missing = [name for name in LEGACY_INTERNAL_IMPORTS if name not in decisions]
+    assert not missing, f"ADR 0002: исключение без причины в DECISIONS.md: {missing}"
+
+
 def test_legacy_list_only_shrinks():
     stale = []
     for name, allowed in LEGACY_INTERNAL_IMPORTS.items():

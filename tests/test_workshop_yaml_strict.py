@@ -44,3 +44,14 @@ def test_ten_thousand_levels_is_a_russian_load_error_not_recursion(home):
     edit(home, "labor.yaml", "  выезд: 90", f"  выезд: {deep}")
     errors = errors_of(home)
     assert any("labor.yaml" in e and "вложенн" in e for e in errors), errors
+
+
+def test_deeper_anchor_with_merge_and_override_reused_by_alias_is_not_a_duplicate(home):
+    path = home / "workshop" / "labor.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8")
+        + "образец:\n  внутри: &A\n    <<: {выезд: 1}\n    выезд: 2\nподмес:\n  <<: *A\nссылка: *A\n",
+        encoding="utf-8",
+    )
+    errors = api.check_workshop(home).errors
+    assert not any("повтор" in e for e in errors), errors

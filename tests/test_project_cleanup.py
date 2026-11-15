@@ -54,6 +54,25 @@ def test_missing_min_part_size_key_is_a_load_error(home):
     assert any("construction.yaml" in e and "мин_размер_детали" in e for e in result.errors)
 
 
+def set_min_part(home, value):
+    path = home / "workshop" / "construction.yaml"
+    text = path.read_text(encoding="utf-8")
+    assert "мин_размер_детали: 30" in text
+    path.write_text(text.replace("мин_размер_детали: 30", f"мин_размер_детали: {value}"), encoding="utf-8")
+
+
+def test_part_equal_to_min_size_is_not_too_small(home):
+    set_min_part(home, 40)
+    result = api.check_project(FIXTURES / "petrov_project.json", home)
+    assert too_small(result) == []
+
+
+def test_part_one_mm_below_min_size_is_too_small(home):
+    set_min_part(home, 41)
+    found = too_small(api.check_project(FIXTURES / "petrov_project.json", home))
+    assert "В1-дно-выт-1 568×40 мм: меньше 41 мм — проверьте размеры модуля" in [f.message for f in found]
+
+
 # --- нормализация меток ---------------------------------------------------------------------
 
 
