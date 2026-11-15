@@ -17,4 +17,4 @@ Edit files as `docs/agents/agreements.md` says under Editing files: Edit for a t
 
 Turn every acceptance check the ticket lists into a test before handing back. Finish with the commit hash, the result of `scripts/check`, and anything marked `manual` that you could not run.
 
-When a review comes back, fix every finding in the message, blocking or not, in one commit, and turn each reproduction the reviewer gave into a test first.
+When a review comes back, fix every finding in the message in one commit, and turn each reproduction the reviewer gave into a test first. Keep the commit to those findings: improvements you notice along the way go in your report for the end-of-stage list.
