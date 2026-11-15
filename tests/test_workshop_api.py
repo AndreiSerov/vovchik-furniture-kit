@@ -11,6 +11,7 @@ ALL_FILES = {
     "pricing",
     "appliances",
     "economy",
+    "master",
 }
 
 
@@ -103,7 +104,7 @@ def test_broken_yaml_syntax(home):
 def test_check_workshop_summary(home):
     r = api.check_workshop(home)
     assert r.valid is True and r.mock is True
-    assert len(r.mock_files) == 8
+    assert len(r.mock_files) == 9
     s = {f.file: f for f in r.files}
     assert s["materials.yaml"].counts == {"листовые": 3, "кромка": 2, "столешницы": 1, "фасады": 1}
     assert s["hardware.yaml"].counts == {"позиции": 19}

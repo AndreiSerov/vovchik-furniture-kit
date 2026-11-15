@@ -21,6 +21,7 @@ from kitchen.models import ApplianceItem, EdgeRule, Num, Workshop
 from kitchen.project import Appliance, ModuleSpec, Project, ProjectMaterials, Row
 
 __all__ = [
+    "APPLIANCE_NAMES",
     "APPLIANCE_ROWS",
     "BACK_PANEL",
     "DRAWER_BACK",
@@ -42,6 +43,7 @@ __all__ = [
     "drawer_depth_shortfall",
     "drawer_parts",
     "facade_color",
+    "lower_facades",
     "module_dims",
     "niche_item",
     "resolve_materials",
@@ -556,6 +558,7 @@ class Template:
     appliances: tuple[str, ...] = ()  # виды техники, под которые шаблон строит нишу
     both_rows: bool = False  # модуль записан в одном ряду стены и занимает оба (пенал)
     default_depth: Callable[[Workshop], int] | None = None  # глубина по умолчанию вместо глубины ряда
+    title: str = field(kw_only=True)  # русское название для строки состава КП: «нижний модуль», «пенал»
 
 
 def _plain(build: Callable[[ModuleSpec, ModuleDims, ProjectMaterials, Workshop], TemplateOut]):
@@ -996,23 +999,50 @@ def build_hood_of_project(
 
 TEMPLATES = {
     "tall_oven": Template(
-        build_tall_oven, "tall", drawers=True, appliances=("oven", "microwave"), both_rows=True
+        build_tall_oven,
+        "tall",
+        drawers=True,
+        appliances=("oven", "microwave"),
+        both_rows=True,
+        title="пенал",
     ),
-    "base_door": Template(_plain(build_base_door), "lower"),
-    "base_corner": Template(build_base_corner, "lower"),
+    "base_door": Template(_plain(build_base_door), "lower", title="нижний модуль"),
+    "base_corner": Template(build_base_corner, "lower", title="нижний угловой модуль"),
     "wall_corner": Template(
-        build_wall_corner, "upper", default_depth=lambda ws: ws.construction.corner_rules.upper_depth
+        build_wall_corner,
+        "upper",
+        default_depth=lambda ws: ws.construction.corner_rules.upper_depth,
+        title="верхний угловой модуль",
     ),
-    "wall_door": Template(_plain(build_wall_door), "upper"),
-    "wall_lift": Template(_plain(build_wall_lift), "upper"),
-    "wall_hood": Template(build_hood_of_project, "upper", appliances=("hood",)),
-    "wall_dryer": Template(_plain(build_wall_dryer), "upper"),
-    "base_sink": Template(_plain(build_base_sink), "lower", appliances=("sink",)),
-    "base_bottle": Template(_plain(build_base_bottle), "lower"),
-    "base_drawers": Template(_plain(build_base_drawers), "lower", drawers=True),
+    "wall_door": Template(_plain(build_wall_door), "upper", title="верхний модуль"),
+    "wall_lift": Template(_plain(build_wall_lift), "upper", title="верхний модуль"),
+    "wall_hood": Template(build_hood_of_project, "upper", appliances=("hood",), title="модуль над вытяжкой"),
+    "wall_dryer": Template(_plain(build_wall_dryer), "upper", title="верхний модуль"),
+    "base_sink": Template(_plain(build_base_sink), "lower", appliances=("sink",), title="модуль под мойку"),
+    "base_bottle": Template(_plain(build_base_bottle), "lower", title="нижний модуль-бутылочница"),
+    "base_drawers": Template(_plain(build_base_drawers), "lower", drawers=True, title="нижний модуль"),
     "dishwasher_panel": Template(
-        _plain(build_dishwasher_panel), "lower", carcass=False, appliances=("dishwasher",)
+        _plain(build_dishwasher_panel),
+        "lower",
+        carcass=False,
+        appliances=("dishwasher",),
+        title="фасад посудомоечной машины",
     ),
+}
+
+# Русские названия видов техники для строки состава КП (ключи — `models.APPLIANCE_KINDS`, сверяет тест).
+APPLIANCE_NAMES = {
+    "sink": "мойка",
+    "hob": "варочная панель",
+    "cooker": "отдельностоящая плита",
+    "oven": "духовой шкаф",
+    "microwave": "микроволновка",
+    "dishwasher": "посудомойка",
+    "washing_machine": "стиральная машина",
+    "coffee_machine": "кофемашина",
+    "wine_cooler": "винный шкаф",
+    "other": "другая техника",
+    "hood": "вытяжка",
 }
 
 # Явная несовместимость вида техники с рядом модуля: вытяжка только вверху, остальное только внизу
@@ -1067,7 +1097,7 @@ class PartsComputation:
 NO_COLOR = "без цвета"
 
 
-def _lower_facades(module: ModuleSpec, row: Row) -> bool:
+def lower_facades(module: ModuleSpec, row: Row) -> bool:
     """Фасады модуля нижние: нижний ряд или шаблон, входящий в оба ряда (пенал)."""
     template = TEMPLATES.get(module.template)
     return row.kind == "lower" or (template is not None and template.both_rows)
@@ -1078,7 +1108,7 @@ def resolve_materials(module: ModuleSpec, row: Row, materials: ProjectMaterials)
     фасада относятся к верхним или нижним фасадам по ряду (пенал — нижние). Одно место для
     расчёта деталей, площади по цветам и закупки."""
     values = materials.model_dump()
-    lower = _lower_facades(module, row)
+    lower = lower_facades(module, row)
     keys = {
         "facades": "facades_lower" if lower else "facades_upper",
         "facade_color": "facades_lower_color" if lower else "facades_upper_color",
@@ -1093,7 +1123,7 @@ def resolve_materials(module: ModuleSpec, row: Row, materials: ProjectMaterials)
 def facade_color(module: ModuleSpec, row: Row, materials: ProjectMaterials) -> str:
     """Цвет фасадов модуля с учётом переопределений; без цвета — «без цвета»."""
     resolved = resolve_materials(module, row, materials)
-    lower = _lower_facades(module, row)
+    lower = lower_facades(module, row)
     return (resolved.facades_lower_color if lower else resolved.facades_upper_color) or NO_COLOR
 
 

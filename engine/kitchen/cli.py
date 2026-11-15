@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Annotated, NoReturn, TypeVar
 
 import typer
+from typer.core import TyperCommand
 
 from kitchen import api
 from kitchen.errors import InputError, KitchenError
@@ -493,6 +494,77 @@ def estimate(
     except KitchenError as e:
         fail(e)
     emit(result, _render_order_estimate, json)
+
+
+def _render_quote(r: api.QuoteResult) -> str:
+    lines = [
+        "КП:",
+        _render_source(r.source),
+        f"Итого: {api.money(r.price)}",
+        f"Предоплата ({api.percent(r.prepayment_share)}): {api.money(r.prepayment)}",
+        f"Остаток: {api.money(r.balance)}",
+        f"Срок изготовления и монтажа: {api.plural(r.days, 'рабочий день', 'рабочих дня', 'рабочих дней')}",
+    ]
+    if r.economy:
+        e = r.economy
+        lines.append(
+            f"Экономия: цена как в проекте {api.money(e.price_as_is)}, цена «экономии» {api.money(e.price)}, "
+            f"разница {api.money(e.saving)}"
+        )
+    lines += [f"Файл: {output.file} (версия проекта {output.source_version})" for output in r.outputs]
+    return "\n".join(lines)
+
+
+class _QuoteCommand(TyperCommand):
+    """`--days` без значения падает в разборе опций раньше нашей проверки: ошибка тоже по-русски."""
+
+    def parse_args(self, ctx, args):
+        given = list(args)  # разбор съедает список: проверять после ошибки нечего
+        try:
+            return super().parse_args(ctx, args)
+        except Exception as e:  # UsageError живёт во внутреннем модуле typer: берём по тексту
+            if "--days" in str(e) or "--days=" in given:  # «--days= 35»: пустое значение и лишний аргумент
+                fail(InputError(api.DAYS_ERROR))
+            raise
+
+
+@app.command("quote", cls=_QuoteCommand)
+def quote(
+    order: Annotated[
+        str | None,
+        typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project."),
+    ] = None,
+    days: Annotated[
+        str | None,
+        typer.Option(
+            "--days",
+            metavar="N",
+            help="Срок изготовления и монтажа в рабочих днях: целое от 1 до 365 (обязательно).",
+        ),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, файлы не пишутся).")
+    ] = None,
+    economy: Annotated[
+        bool, typer.Option("--economy", help="Добавить вариант «экономия»: две цены и список замен.")
+    ] = False,
+    json: JsonOpt = False,
+) -> None:
+    """КП клиенту: состав, итог, предоплата, срок, без себестоимости и наценки. Заказ — ещё quote.pdf и quote.json."""
+    try:
+        term = api.parse_days(days)
+        if (order is None) == (project is None):
+            raise InputError(
+                "Укажите либо заказ (kitchen quote petrov --days 35), либо файл: --project project.json."
+            )
+        result = (
+            api.quote_and_save(order, term, economy=economy)
+            if order is not None
+            else api.quote_from_project(project, term, economy=economy)
+        )
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_quote, json)
 
 
 def _render_production(r: api.ProductionResult) -> str:

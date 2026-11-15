@@ -6,7 +6,7 @@ import typing
 from pathlib import Path
 
 from kitchen import models
-from kitchen.parts import TEMPLATES
+from kitchen.parts import APPLIANCE_NAMES, TEMPLATES
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTS = ROOT / "tests"
@@ -147,3 +147,26 @@ def test_every_numeric_model_field_has_a_bound():
     """Число мастерской без ge/gt в типе — молчаливо принятое отрицательное значение."""
     unbounded = set(_unbounded_fields(models.Workshop, set()))
     assert unbounded <= BOUNDED_BY_VALIDATOR, sorted(unbounded - BOUNDED_BY_VALIDATOR)
+
+
+def test_every_template_has_a_russian_title():
+    """Тикет 18: строка состава КП берёт название шаблона из реестра, у каждого шаблона оно русское."""
+    for name, template in TEMPLATES.items():
+        assert re.search("[а-яё]", template.title, re.IGNORECASE), name
+
+
+def test_every_appliance_kind_has_a_russian_name():
+    assert set(APPLIANCE_NAMES) == set(models.APPLIANCE_KINDS)
+
+
+def test_cli_reaches_logic_only_through_the_api():
+    """ADR 0002: CLI — тонкая обёртка над kitchen.api."""
+    assert kitchen_imports(ENGINE / "cli.py") <= PUBLIC
+
+
+def test_appliance_names_match_the_brief_wording():
+    """Названия техники в КП — слова брифа; скилл переносим и не импортируется, поэтому сверка по тексту."""
+    source = (ROOT / "skills" / "kitchen-brief" / "scripts" / "check_brief.py").read_text(encoding="utf-8")
+    block = re.search(r"^APPLIANCE_NAMES = \{(.*?)^\}", source, re.DOTALL | re.MULTILINE).group(1)
+    brief = dict(re.findall(r'"(\w+)": "([^"]+)"', block))
+    assert brief and {k: APPLIANCE_NAMES[k] for k in brief} == brief

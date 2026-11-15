@@ -23,6 +23,7 @@ FILES = (
     "pricing.yaml",
     "appliances.yaml",
     "economy.yaml",
+    "master.yaml",
 )
 BAD = (-1, 0)
 

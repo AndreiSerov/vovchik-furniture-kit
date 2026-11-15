@@ -148,7 +148,7 @@ def test_module_with_negative_hardware_is_a_module_build_error(home, monkeypatch
         out.hardware = Counter({"shelf_pin_5": -4})
         return out
 
-    monkeypatch.setitem(TEMPLATES, "base_door", Template(build, "lower"))
+    monkeypatch.setitem(TEMPLATES, "base_door", Template(build, "lower", title="нижний модуль"))
     path = write(home, lower({"label": "Н1", "template": "base_door", "width": 600}), 600)
     assert codes(api.check_project(path, home)) == ["module_build"]
     with pytest.raises(KitchenError, match="shelf_pin_5"):

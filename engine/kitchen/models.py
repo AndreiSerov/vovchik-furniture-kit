@@ -12,6 +12,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StringConstraints,
     WithJsonSchema,
     field_validator,
     model_validator,
@@ -555,6 +556,10 @@ class HardwareItem(Section):
     pack: PosInt = _f("упаковка")
     price: NonNegNum = _f("цена")
     shop: str = _f("магазин")
+    client_name: str | None = Field(default=None, alias="для_клиента", min_length=1)
+    client_name_many: str | None = Field(
+        default=None, alias="для_клиента_мн", min_length=1
+    )  # «выдвижными вёдрами»
 
 
 class Hardware(Section):
@@ -630,7 +635,9 @@ class Pricing(Section):
     consumables_share: NonNegNum = _f("расходники_от_материалов")
     materials_delivery: NonNegNum = _f("доставка_материалов")
     price_rounding: Annotated[RoundingRule, BeforeValidator(parse_rounding)] = _f("округление_цены")
-    prepayment: NonNegNum = _f("предоплата")
+    prepayment: Annotated[Num, Field(ge=0, le=1)] = _f(
+        "предоплата"
+    )  # доля итога КП; больше 1 — отрицательный остаток
     quick_estimate_per_m: tuple[Num, Num] = _f("быстрая_оценка_за_пог_м")
 
     @field_validator("quick_estimate_per_m")
@@ -716,6 +723,26 @@ class Economy(Section):
         return self
 
 
+# --- master.yaml ------------------------------------------------------------
+
+
+Text = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1)
+]  # пустая и из одних пробелов — ошибка
+
+
+class Master(Section):
+    """Реквизиты мастера для КП."""
+
+    mock: StrictBool
+    name: Text = Field(alias="имя")
+    phone: Text = Field(alias="телефон")
+    city: Text = Field(alias="город")
+    status: Literal["самозанятый", "ИП"] = _f("статус")
+    inn: str = Field(alias="инн", pattern=r"^[0-9]{12}$")
+    offer_days: PosInt = _f("срок_действия_предложения_дней")
+
+
 class Workshop(BaseModel):
     """Мастерская целиком. Заполняется загрузчиком, не из YAML напрямую."""
 
@@ -727,6 +754,7 @@ class Workshop(BaseModel):
     pricing: Pricing
     appliances: Appliances
     economy: Economy
+    master: Master
     mock_files: list[str]
 
     @property

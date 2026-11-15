@@ -36,7 +36,7 @@
 - [x] 34 — Хотфикс: проект и шаблоны отклоняют неверный ввод ([спека](docs/specs/hotfix-input-guards.md))
 - [x] 35 — Столешница по общей длине ([спека](docs/specs/hotfix-input-guards.md))
 - [x] 17 — Вариант «экономия» (3.3) ([спека](docs/specs/stage-3-estimate.md))
-- [ ] 18 — КП (3.4) ([спека](docs/specs/stage-3-estimate.md))
+- [x] 18 — КП (3.4) ([спека](docs/specs/stage-3-estimate.md))
 
 **ВЕХА 2** — остановиться, показать результаты, дождаться подтверждения.
 

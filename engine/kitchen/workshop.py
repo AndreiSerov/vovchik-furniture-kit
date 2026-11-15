@@ -18,6 +18,7 @@ from kitchen.models import (
     Equipment,
     Hardware,
     Labor,
+    Master,
     Materials,
     Pricing,
     Workshop,
@@ -32,6 +33,7 @@ FILES: tuple[str, ...] = (
     "pricing.yaml",
     "appliances.yaml",
     "economy.yaml",
+    "master.yaml",
 )
 
 NOT_FOUND = (
@@ -130,6 +132,8 @@ _EXPECT = {
     "finite_number": "ожидалось конечное число (не inf и не nan)",
     "model_type": "ожидался раздел с вложенными ключами",
     "dict_type": "ожидался раздел с вложенными ключами",
+    "literal_error": "значение не из допустимых (см. подсказку в шапке файла)",
+    "string_pattern_mismatch": "значение не того формата (см. подсказку в шапке файла)",
 }
 
 
@@ -315,7 +319,7 @@ def _economy_refs(w: Workshop, hw_ids: set[str]) -> list[str]:
     return probs
 
 
-M = TypeVar("M", Equipment, Construction, Materials, Hardware, Labor, Pricing, Appliances, Economy)
+M = TypeVar("M", Equipment, Construction, Materials, Hardware, Labor, Pricing, Appliances, Economy, Master)
 
 
 @dataclass
@@ -352,6 +356,7 @@ def load(home: Path) -> Loaded:
     pricing = parse("pricing.yaml", Pricing)
     appliances = parse("appliances.yaml", Appliances)
     economy = parse("economy.yaml", Economy)
+    master = parse("master.yaml", Master)
 
     # Файл, который не прочитался или не прошёл проверку, считаем моком, пока он явно не `mock: false`.
     mock_files = [
@@ -371,6 +376,7 @@ def load(home: Path) -> Loaded:
         and pricing
         and appliances
         and economy
+        and master
     ):
         workshop = Workshop(
             equipment=equipment,
@@ -381,6 +387,7 @@ def load(home: Path) -> Loaded:
             pricing=pricing,
             appliances=appliances,
             economy=economy,
+            master=master,
             mock_files=mock_files,
         )
         problems = _cross_refs(workshop)
