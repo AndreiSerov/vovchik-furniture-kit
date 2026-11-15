@@ -560,8 +560,8 @@
             "unknown"
           ],
           "value_labels": {
-            "even": "ровные",
-            "uneven": "неровные",
+            "even": "ровный",
+            "uneven": "неровный",
             "unknown": "не знаю"
           },
           "required": false,

@@ -418,7 +418,10 @@ def fridge_place(brief: dict, s: dict) -> list[Finding]:
     fridge = get(brief, "appliances.fridge")
     if is_empty(fridge) or not isinstance(fridge, dict) or sub(fridge, "wall") == "none":
         return []
-    if not is_empty(sub(fridge, "wall")) and not is_empty(sub(fridge, "side")):
+    names = {w.get("name") for w in get(brief, "room.walls") or [] if isinstance(w, dict)}
+    wall = sub(fridge, "wall")
+    known_wall = not is_empty(wall) and (not names or wall in names)
+    if known_wall and not is_empty(sub(fridge, "side")):
         return []
     return [
         Finding(

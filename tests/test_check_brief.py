@@ -487,8 +487,9 @@ def test_new_enum_label_texts_match_ticket():
         "not_needed": "не нужен",
         "unknown": "не знаю",
     }
-    for k in ("walls_evenness", "floor_evenness"):
-        assert labels[k] == {"even": "ровные", "uneven": "неровные", "unknown": "не знаю"}
+    assert labels["walls_evenness"] == {"even": "ровные", "uneven": "неровные", "unknown": "не знаю"}
+    # решение мастера 2026-11-15: «пол: ровный», не «ровные»
+    assert labels["floor_evenness"] == {"even": "ровный", "uneven": "неровный", "unknown": "не знаю"}
     assert labels["sink_mount"] == {
         "overlay": "накладная",
         "inset": "врезная",
@@ -502,3 +503,12 @@ def test_new_enum_label_texts_match_ticket():
         "ceramic": "керамика",
         "unknown": "не знаю",
     }
+
+
+def test_fridge_place_asked_when_wall_is_not_in_room_walls():
+    # решение мастера 2026-11-15: стена не из room.walls — спросить, где холодильник
+    assert "fridge_place" in rules(run(with_fridge(sergey(), wall="Z", side="left")))
+
+
+def test_fridge_place_silent_when_wall_is_in_room_walls():
+    assert "fridge_place" not in rules(run(with_fridge(sergey(), wall="B", side="right")))
