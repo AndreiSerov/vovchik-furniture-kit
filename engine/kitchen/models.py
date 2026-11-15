@@ -72,7 +72,8 @@ def _f(alias: str):
 class Saw(Section):
     type: str = _f("тип")
     max_cut_length: PosInt = _f("макс_длина_реза")
-    kerf: NonNegNum = _f("пропил")  # решение мастера: дробный учитывается вверх до целого мм (`kerf_mm`)
+    # решение мастера: дробный учитывается вверх до целого мм (`kerf_mm`); строка «3.2» в кавычках — не число
+    kerf: NonNegNum = Field(alias="пропил", strict=True)
 
     @property
     def kerf_mm(self) -> int:

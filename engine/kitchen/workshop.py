@@ -66,19 +66,22 @@ class DuplicateKeyError(yaml.YAMLError):
 
 
 class _StrictLoader(yaml.SafeLoader):
-    def construct_mapping(self, node, deep=False):
-        if isinstance(node, yaml.MappingNode):
-            seen = set()
-            for key_node, _ in node.value:
-                if key_node.tag == "tag:yaml.org,2002:merge":  # `<<:` подмешивает и может быть переопределён
-                    continue
-                key = self.construct_object(key_node, deep=True)
-                if not isinstance(key, Hashable):  # нехешируемый ключ отклонит базовый разбор
-                    continue
-                if key in seen:
-                    raise DuplicateKeyError(key, key_node.start_mark)
-                seen.add(key)
-        return super().construct_mapping(node, deep)
+    def compose_mapping_node(self, anchor):
+        """Повторы ключей ищем при композиции: каждый словарь проверяется сам, по своим ключам, один раз.
+        Подмешанный `<<` словарь — отдельный узел, его повторы ловятся при его композиции; законное
+        перекрытие подмешанного ключа своим повтором не считается."""
+        node = super().compose_mapping_node(anchor)
+        seen = set()
+        for key_node, _ in node.value:
+            if key_node.tag == "tag:yaml.org,2002:merge" or not isinstance(key_node, yaml.ScalarNode):
+                continue
+            key = self.construct_object(key_node, deep=True)
+            if not isinstance(key, Hashable):
+                continue
+            if key in seen:
+                raise DuplicateKeyError(key, key_node.start_mark)
+            seen.add(key)
+        return node
 
 
 def _syntax_problem(name: str, e: yaml.YAMLError) -> str:
@@ -105,6 +108,9 @@ def read_raw(home: Path) -> tuple[dict[str, dict], list[str]]:
             continue
         except yaml.YAMLError as e:
             problems.append(_syntax_problem(name, e))
+            continue
+        except RecursionError:
+            problems.append(f"{name}: слишком глубокая вложенность разделов; упростите файл.")
             continue
         if not isinstance(data, dict):
             problems.append(f"{name}: ожидался набор «ключ: значение» в корне файла.")
