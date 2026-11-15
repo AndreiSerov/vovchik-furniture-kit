@@ -400,3 +400,18 @@ def test_two_plates_per_hinge_warn_once_and_map_names_the_cause(home):
     assert len([w for w in parts.warnings if "ответных планок не размечены" in w]) == 1
     with pytest.raises(OrderError, match="Причина: .*планки по 2 на петлю.*не размечает"):
         api.drilling_from_project(PETROV, home)
+
+
+# Повторное ревью тикета 19: сквозное против глухого и чашка вне фасада — ошибки модуля.
+def test_through_confirmat_and_plate_hole_on_one_axis_clash(home, base_door_project):
+    edit_construction(home, "отступ_от_лицевой_кромки: 50", "отступ_от_лицевой_кромки: 37")
+    edit_construction(home, "отступ_от_торца: 100", "отступ_от_торца: 22")
+    path = project_with(base_door_project, {"label": "Н1", "template": "base_door", "width": 450})
+    with pytest.raises(OrderError, match="Н1-бок-Л.*пересекается"):
+        api.parts_from_project(path, home)
+
+
+def test_cup_outside_facade_is_a_module_error(home, base_door_project):
+    edit_construction(home, "отступ_от_кромки_фасада: 22", "отступ_от_кромки_фасада: 10")
+    with pytest.raises(OrderError, match="чашка петли.*выходит за деталь"):
+        api.parts_from_project(base_door_project, home)

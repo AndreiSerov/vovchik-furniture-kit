@@ -239,3 +239,19 @@ def test_part_with_too_many_holes_is_an_error_not_a_cut_table(home):
     crowded = side.model_copy(update={"holes": side.holes * 6})  # 84 строки таблицы
     with pytest.raises(KitchenError, match="П1-бок-Л.*не помещается"):
         api.drilling_map_layout(result.model_copy(update={"parts": [crowded]}))
+
+
+# Повторное ревью тикета 19: отметки отверстий на схеме стоят на числах цепочки (не зеркально).
+def test_hole_marks_sit_at_their_distances_from_base_edges(home):
+    result, pages = petrov_layout(home)
+    by_id = {p.id: p for p in result.parts}
+    for s in (sc for page in pages for sc in page.schemes):
+        part = by_id[s.part]
+        x0, y0, x1, y1 = s.outline
+        for h, m in zip(part.holes, s.holes, strict=True):
+            for i, face in enumerate(part.base_edges):
+                if face[1] == s.right[1]:
+                    d = abs(m.x - (x1 if face[0] == s.right[0] else x0))
+                else:
+                    d = abs(m.y - (y1 if face[0] == s.up[0] else y0))
+                assert d == pytest.approx(h.from_base[i] * s.scale), (s.part, face, h.from_base)
