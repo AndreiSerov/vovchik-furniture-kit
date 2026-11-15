@@ -13,6 +13,8 @@ from kitchen.errors import KitchenError
 from pypdf import PdfReader
 from typer.testing import CliRunner
 
+from tests.test_gap_appliances import fridge_project
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ORDER = "2026-047-petrov"
 MOCK = "МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА"
@@ -134,6 +136,7 @@ def test_header_takes_client_and_installation_from_the_latest_brief(home):
     assert api.trip_from_order(ORDER, home).header.lines() == [
         "Клиент: Петров, +7 900 000-00-00",
         "Адрес: Москва",
+        "Этаж: —, лифт: —",
         "Парковка: платная",
         "Демонтаж старой кухни: делает клиент",
         "Стены: неровные, пол: ровный",
@@ -142,7 +145,7 @@ def test_header_takes_client_and_installation_from_the_latest_brief(home):
 
 def test_header_dashes_for_missing_and_unknown_values(home):
     petrov(home, brief_with_installation(home, parking="unknown", floor_evenness="uneven"))
-    assert api.trip_from_order(ORDER, home).header.lines()[2:] == [
+    assert api.trip_from_order(ORDER, home).header.lines()[3:] == [
         "Парковка: —",
         "Демонтаж старой кухни: —",
         "Стены: —, пол: неровный",
@@ -156,6 +159,7 @@ def test_order_without_brief_has_dash_header_and_warning(home):
     assert r.header.lines() == [
         "Клиент: —",
         "Адрес: —",
+        "Этаж: —, лифт: —",
         "Парковка: —",
         "Демонтаж старой кухни: —",
         "Стены: —, пол: —",
@@ -384,3 +388,106 @@ def test_check_workshop_passes_on_the_repository_workshop(home):
     assert result.valid
     equipment = next(f for f in result.files if f.file == "equipment.yaml")
     assert equipment.counts
+
+
+def test_trip_lists_the_gap_as_a_place(home):
+    r = api.trip_from_project(fridge_project(home, 620), home)
+    assert "ПМ1 — место под холодильник, 620 мм" in texts(r, "Модули")
+    assert "Холодильник — ПМ1" in texts(r, "Техника клиента")
+
+
+def test_gap_without_appliance_is_an_empty_place_first_in_its_row(home):
+    path = fridge_project(home, 600, appliance={"type": "sink", "width": 600, "module": "Н1"})
+    r = api.trip_from_project(path, home)
+    assert section(r, "Модули").title == "Модули (2)"
+    assert texts(r, "Модули") == ["ПМ1 — пустое место, 600 мм", "Н1 — нижний модуль, 600 мм"]
+
+
+def test_trip_pdf_and_cli_work_on_a_project_with_a_gap(home):
+    path = fridge_project(home, 620)
+    out = runner.invoke(app, ["trip", "--project", str(path)]).output
+    assert "ПМ1 — место под холодильник, 620 мм" in out
+    api.order_new(ORDER, home=home)
+    api.import_project(ORDER, path, home=home)
+    assert runner.invoke(app, ["production", ORDER]).exit_code == 0
+    assert (home / "orders" / ORDER / "out" / "trip-checklist.pdf").exists()
+
+
+def test_every_production_kind_builds_on_a_project_with_a_gap(home):
+    api.order_new(ORDER, home=home)
+    api.import_project(ORDER, fridge_project(home, 620), home=home)
+    api.production_and_save(ORDER, home)
+    assert {o.kind for o in api.list_outputs(ORDER, home)} == set(api.PRODUCTION_KINDS)
+
+
+def test_header_has_floor_and_elevator_after_the_address(home):
+    brief = json.loads((FIXTURES / "petrov_brief.json").read_text(encoding="utf-8"))
+    brief["client"]["floor"] = {"value": 5, "source": "client"}
+    brief["client"]["elevator"] = {"value": "freight", "source": "client"}
+    path = home / "brief-floor.json"
+    path.write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
+    petrov(home, path)
+    lines = api.trip_from_order(ORDER, home).header.lines()
+    assert lines[1:3] == ["Адрес: Москва", "Этаж: 5, лифт: грузовой"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "label"), [("none", "нет"), ("passenger", "пассажирский"), ("freight", "грузовой")]
+)
+def test_elevator_labels_come_from_the_brief_schema(home, raw, label):
+    brief = json.loads((FIXTURES / "petrov_brief.json").read_text(encoding="utf-8"))
+    brief["client"]["elevator"] = {"value": raw, "source": "client"}
+    path = home / "brief-lift.json"
+    path.write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
+    petrov(home, path)
+    assert api.trip_from_order(ORDER, home).header.lines()[2] == f"Этаж: —, лифт: {label}"
+
+
+def test_petrov_modules_keep_the_project_order(home):
+    petrov(home)
+    labels = [t.split(" — ")[0] for t in texts(api.trip_from_order(ORDER, home), "Модули")]
+    assert labels == ["П1", "Н1", "Н2", "Н3", "Н4", "В1", "В2", "В3", "В4", "Н5", "Н6", "В5", "В6"]
+
+
+@pytest.mark.parametrize(("drop", "expected"), [("phone", "Петров, —"), ("name", "—, +7 900 000-00-00")])
+def test_client_line_keeps_the_known_half(home, drop, expected):
+    brief = json.loads((FIXTURES / "petrov_brief.json").read_text(encoding="utf-8"))
+    del brief["client"][drop]
+    path = home / "brief-partial.json"
+    path.write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
+    petrov(home, path)
+    assert api.trip_from_order(ORDER, home).header.client == expected
+
+
+def test_cli_empty_section_prints_a_dash(home):
+    path = home / "workshop" / "equipment.yaml"
+    path.write_text(
+        "\n".join([*without_trip_key(home), "выезд:", "  инструмент: []", "  расходники: [Скотч]"]) + "\n"
+    )
+    petrov(home)
+    out = runner.invoke(app, ["trip", "petrov"]).output
+    assert "Инструмент:\n  —\nРасходники:\n  Скотч\n" in out
+
+
+def test_section_heading_never_ends_a_page_whatever_the_item_count(home):
+    petrov(home)
+    result = api.trip_from_order(ORDER, home)
+    first = result.sections[0]
+    for n in range(1, 90):
+        items = [first.items[0].model_copy(update={"text": f"строка {i}"}) for i in range(n)]
+        sections = [first.model_copy(update={"items": items}), *result.sections[1:]]
+        pages = api.trip_layout(result.model_copy(update={"sections": sections}))
+        titles = {s.title for s in sections}
+        for page in pages[:-1]:
+            assert page.lines[-1].text not in titles, (n, page.lines[-1].text)
+
+
+def test_long_item_wraps_under_the_text_not_under_the_box(home):
+    petrov(home)
+    result = api.trip_from_order(ORDER, home)
+    first = result.sections[0]
+    long = first.items[0].model_copy(update={"text": "очень длинная строка " * 20})
+    sections = [first.model_copy(update={"items": [long]}), *result.sections[1:]]
+    lines = api.trip_layout(result.model_copy(update={"sections": sections}))[0].lines
+    start = next(i for i, l in enumerate(lines) if l.text.startswith("☐ очень"))
+    assert lines[start + 1].x > lines[start].x and not lines[start + 1].text.startswith("☐")

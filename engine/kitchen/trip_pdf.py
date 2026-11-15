@@ -11,9 +11,8 @@ from pydantic import BaseModel
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 
-from kitchen.assembly_pdf import _wrap
 from kitchen.drilling_pdf import TextLine
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area, register_fonts
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area, register_fonts, wrap
 from kitchen.trip import DASH, TripHeader, TripSection
 
 __all__ = ["BOX", "TripPageLayout", "layout", "write_trip"]
@@ -65,7 +64,7 @@ def layout(header: TripHeader, sections: list[TripSection]) -> list[TripPageLayo
 
     physical: list[_Row] = []
     for row in _rows(header, sections):
-        pieces = _wrap(row.text, row.bold, row.size, area.w - row.indent - row.hang)
+        pieces = wrap(row.text, row.bold, row.size, area.w - row.indent - row.hang)
         for i, piece in enumerate(pieces):
             physical.append(
                 row.model_copy(

@@ -60,6 +60,11 @@
             "passenger",
             "freight"
           ],
+          "value_labels": {
+            "none": "нет",
+            "passenger": "пассажирский",
+            "freight": "грузовой"
+          },
           "required": false,
           "ask": "now"
         }

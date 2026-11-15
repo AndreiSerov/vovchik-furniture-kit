@@ -14,7 +14,8 @@ from kitchen.assembly import UNIT
 from kitchen.common import CommonItem, size_countertop
 from kitchen.models import Workshop
 from kitchen.parts import APPLIANCE_NAMES, TEMPLATES, module_dims
-from kitchen.project import Project
+from kitchen.project import Project, is_gap
+from kitchen.quote import describe_gap
 
 __all__ = ["NO_BRIEF_WARNING", "TripHeader", "TripItem", "TripSection", "build_trip"]
 
@@ -38,6 +39,7 @@ class TripHeader(BaseModel):
 
     client: str
     address: str
+    floor_lift: str
     parking: str
     dismantling: str
     walls: str
@@ -47,6 +49,7 @@ class TripHeader(BaseModel):
         return [
             f"Клиент: {self.client}",
             f"Адрес: {self.address}",
+            f"Этаж: {self.floor_lift}",
             f"Парковка: {self.parking}",
             f"Демонтаж старой кухни: {self.dismantling}",
             f"Стены: {self.walls}, пол: {self.floor}",
@@ -72,6 +75,7 @@ def build_header(brief: dict[str, Any] | None) -> TripHeader:
     return TripHeader(
         client=_client(brief),
         address=_text(brief, "client.address"),
+        floor_lift=f"{_text(brief, 'client.floor')}, лифт: {_label(brief, 'client.elevator')}",
         parking=_label(brief, "installation.parking"),
         dismantling=_label(brief, "installation.dismantling"),
         walls=_label(brief, "installation.walls_evenness"),
@@ -109,7 +113,9 @@ def build_trip(
 ) -> list[TripSection]:
     """Разделы чек-листа по порядку; пустой раздел остаётся с пустым списком."""
     modules = [
-        f"{m.label} — {TEMPLATES[m.template].title}, {module_dims(m, row.kind, ws).width} мм"
+        f"{m.label} — {describe_gap(m, project)}"
+        if is_gap(m)
+        else f"{m.label} — {TEMPLATES[m.template].title}, {module_dims(m, row.kind, ws).width} мм"
         for wall in project.walls
         for row in wall.rows
         for m in row.modules
