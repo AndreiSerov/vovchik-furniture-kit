@@ -19,7 +19,6 @@ from kitchen.drilling import apply_drilling, plate_warnings
 from kitchen.errors import KitchenError, OrderError, WorkshopError
 from kitchen.formulas import FormulaError, InexactDivisionError
 from kitchen.geometry import (
-    PURPOSE_RU,
     Axis,
     DrawerRunners,
     HingedDoor,
@@ -30,7 +29,6 @@ from kitchen.geometry import (
     PinnedShelf,
     Position,
     side_of_face,
-    steps_pick,
 )
 from kitchen.models import ApplianceItem, EdgeRule, Num, Workshop
 from kitchen.project import Appliance, Gap, ModuleSpec, Project, ProjectMaterials, Row, is_gap
@@ -42,7 +40,6 @@ __all__ = [
     "DRAWER_BACK",
     "DRAWER_BOTTOM",
     "GAP_NAMES",
-    "PURPOSE_RU",
     "ROW_GEN",
     "ROW_LOC",
     "ROW_NOM",
@@ -51,16 +48,11 @@ __all__ = [
     "TEMPLATES",
     "AssemblyPlan",
     "EdgeTotals",
-    "HingedDoor",
-    "Hole",
-    "Joint",
     "ModuleDims",
     "ModuleParts",
-    "Orientation",
     "Part",
     "PartsComputation",
     "PartsGap",
-    "Position",
     "Span",
     "Template",
     "accepts",
@@ -77,7 +69,6 @@ __all__ = [
     "niche_item",
     "required_thickness",
     "resolve_materials",
-    "steps_pick",
     "unknown_template_error",
     "upper_corner_offset",
 ]
@@ -341,7 +332,7 @@ def side_part_id(label: str, side: HingeSide) -> str:
 
 def joined_to_sides(label: str, end: str) -> list[Joint]:
     """Деталь `end` между боковинами на конфирматах к обеим."""
-    return [Joint(side_part_id(label, side), end) for side in SIDE_SUFFIX]
+    return [Joint(side, end) for side in both_sides(label)]
 
 
 def both_sides(label: str) -> tuple[str, str]:
@@ -643,6 +634,9 @@ class Template:
     both_rows: bool = False  # модуль записан в одном ряду стены и занимает оба (пенал)
     title: str = field(kw_only=True)  # русское название для строки состава КП: «нижний модуль», «пенал»
     pull_out_front: bool = field(default=False, kw_only=True)  # фасад выдвижной, а не дверь (бутылочница)
+    corner: bool = field(
+        default=False, kw_only=True
+    )  # угловой модуль: сторона петель следует из места в ряду
 
 
 def _plain(build: Callable[[ModuleSpec, ModuleDims, ProjectMaterials, Workshop], TemplateOut]):
@@ -1097,11 +1091,12 @@ TEMPLATES = {
         title="пенал",
     ),
     "base_door": Template(_plain(build_base_door), "lower", title="нижний модуль"),
-    "base_corner": Template(build_base_corner, "lower", title="нижний угловой модуль"),
+    "base_corner": Template(build_base_corner, "lower", title="нижний угловой модуль", corner=True),
     "wall_corner": Template(
         build_wall_corner,
         "upper",
         title="верхний угловой модуль",
+        corner=True,
     ),
     "wall_door": Template(_plain(build_wall_door), "upper", title="верхний модуль"),
     "wall_lift": Template(_plain(build_wall_lift), "upper", title="верхний модуль"),
@@ -1505,7 +1500,7 @@ def _check_hinge_side(module: ModuleSpec, out: TemplateOut) -> None:
     """Сторону петель задают только одной двери на петлях; у углового модуля она следует из места в ряду."""
     if module.contents is None or module.contents.hinge_side is None:
         return
-    if module.template in ("base_corner", "wall_corner"):
+    if TEMPLATES[module.template].corner:
         raise OrderError(
             f"Модуль {module.label}: у углового модуля сторона петель следует из места в ряду, "
             "поле hinge_side не задаётся."

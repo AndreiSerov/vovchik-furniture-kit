@@ -20,11 +20,11 @@ from kitchen.errors import KitchenError, OrderError
 from kitchen.geometry import (
     PURPOSE_RU,
     DrawerRunners,
-    Face,
     HingedDoor,
     Hole,
     Joint,
     Mm,
+    ModuleFace,
     PinnedShelf,
     Point,
     Purpose,
@@ -78,7 +78,7 @@ class _Draft:
 
     purpose: Purpose
     surface: Literal["face", "end"]
-    from_face: Face
+    from_face: ModuleFace
     diameter: int
     depth: int
     center: dict[str, Mm]
@@ -95,10 +95,10 @@ def _confirmats(module: str, plate: Part, end: Part, ws: Workshop) -> tuple[list
     pe, ee = part_extent(plate), part_extent(end)
     if ee[axis][0] == pe[axis][1]:
         end_face = plate_face = cast(
-            Face, f"-{axis}"
+            ModuleFace, f"-{axis}"
         )  # `end` справа от `plate`: торец «-», наружная пласть «-»
     elif ee[axis][1] == pe[axis][0]:
-        end_face = plate_face = cast(Face, f"+{axis}")
+        end_face = plate_face = cast(ModuleFace, f"+{axis}")
     else:
         raise KitchenError(
             f"Модуль {module}: детали {plate.id} и {end.id} не соприкасаются, конфирмат не поставить."
@@ -166,7 +166,7 @@ def _hinges(
         )
         for z in zs
     ]
-    inner: Face = "+x" if door.side == "left" else "-x"
+    inner: ModuleFace = "+x" if door.side == "left" else "-x"
     y = se["y"][1] - plate.front_offset
     plates = [
         _Draft(
@@ -187,7 +187,7 @@ def _hinges(
     return cups, plates
 
 
-def _inner_face(module: str, side: Part, inside: Part) -> Face:
+def _inner_face(module: str, side: Part, inside: Part) -> ModuleFace:
     """Пласть боковины, обращённая к детали `inside` (полке, ящику): у левой `+x`, у правой `-x`."""
     se, ie = part_extent(side), part_extent(inside)
     if se["x"][1] <= ie["x"][0]:

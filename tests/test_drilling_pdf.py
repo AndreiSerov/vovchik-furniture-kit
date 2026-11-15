@@ -255,3 +255,80 @@ def test_hole_marks_sit_at_their_distances_from_base_edges(home):
                 else:
                     d = abs(m.y - (y1 if face[0] == s.up[0] else y0))
                 assert d == pytest.approx(h.from_base[i] * s.scale), (s.part, face, h.from_base)
+
+
+# Уборка этапа 4 (тикет 46): направление отрезка, короткие варианты строк, запас строк цепочек.
+def test_end_hole_segment_runs_from_its_mouth_into_the_part(home):
+    """Отверстие в торец на схеме — отрезок от устья на кромке внутрь детали, а не наружу."""
+    _, pages = petrov_layout(home)
+    marks = [(s, h) for s in schemes(pages).values() for h in s.holes if h.surface == "end"]
+    assert marks
+    eps = 0.01
+    for s, h in marks:
+        x0, y0, x1, y1 = s.outline
+        on_edge = min(abs(h.x - x0), abs(h.x - x1)) < eps or min(abs(h.y - y0), abs(h.y - y1)) < eps
+        assert on_edge, (s.part, h)
+        assert x0 - eps <= h.x2 <= x1 + eps and y0 - eps <= h.y2 <= y1 + eps, (s.part, h)
+        assert (h.x2, h.y2) != (h.x, h.y)
+
+
+def test_long_part_name_and_material_fall_back_to_short_lines(home):
+    result = api.drilling_from_project(FIXTURES / "petrov_project.json", home)
+    side = next(p for p in result.parts if p.id == "П1-бок-Л")
+    long_name = "очень длинное название детали " * 6
+    long_part = side.model_copy(update={"name": long_name, "material": "материал с длинным названием " * 6})
+    scheme = schemes(api.drilling_map_layout(result.model_copy(update={"parts": [long_part]})))["П1-бок-Л"]
+    title, sub = scheme.texts[0].text, scheme.texts[1].text
+    assert title.startswith("Деталь П1-бок-Л — ") and long_name not in title
+    assert title.endswith(f"{side.length}×{side.width}×{side.thickness} мм")
+    assert sub.startswith("базовые кромки: ") and "материал" not in sub
+
+
+def test_chain_reserve_never_shrinks_when_another_axis_grows(home, monkeypatch):
+    """Строк цепочек при подборе масштаба: ось, где запас был больше, запас не теряет, пока растёт другая ось.
+    Число строк подставляем по порядку вызовов: сначала запас (вправо, вверх), затем каждый новый масштаб."""
+    result = api.drilling_from_project(FIXTURES / "petrov_project.json", home)
+    bottom = next(p for p in result.parts if p.id == "П1-дно")
+
+    def scale(plan):
+        calls = iter(plan)
+
+        def rows(values, k, size):
+            out = [0] * len(values)
+            if out:
+                out[-1] = next(calls, 1) - 1
+            return out
+
+        monkeypatch.setattr("kitchen.drilling_pdf._levels", rows)
+        pages = api.drilling_map_layout(result.model_copy(update={"parts": [bottom]}))
+        scheme = schemes(pages)["П1-дно"]
+        return scheme.scale, scheme.outline, [t.y for t in scheme.texts]
+
+    shrinking = scale([3, 1, 2, 2, 2, 2])  # запас (3, 1); при новом масштабе (2, 2): рост по второй оси
+    steady = scale([3, 2, 3, 2])  # запас (3, 2) сразу
+    assert shrinking == steady  # под контуром остаётся место на три строки, как в запасе
+
+
+def test_end_hole_segment_into_front_and_back_edge_is_vertical_and_inward(home):
+    """У детали в плоскости x–y отверстие в передний и задний торец рисуется отрезком вдоль вертикали схемы."""
+    result = api.drilling_from_project(FIXTURES / "petrov_project.json", home)
+    bottom = next(p for p in result.parts if p.id == "П1-дно")
+    base = next(h for h in bottom.holes if h.surface == "end")
+    back = base.model_copy(
+        update={
+            "from_face": "+y",
+            "edge_side": "L1",
+            "center": base.center.model_copy(update={"x": 300, "y": 560}),
+        }
+    )
+    front = back.model_copy(
+        update={"from_face": "-y", "edge_side": "L2", "center": back.center.model_copy(update={"y": 0})}
+    )
+    part = bottom.model_copy(update={"holes": [back, front]})
+    scheme = schemes(api.drilling_map_layout(result.model_copy(update={"parts": [part]})))["П1-дно"]
+    _, y0, _, y1 = scheme.outline
+    marks = [h for h in scheme.holes if h.surface == "end"]
+    assert len(marks) == 2
+    for h in marks:
+        assert abs(h.x2 - h.x) < 1e-6 and abs(h.y2 - h.y) > 1  # отрезок вертикальный
+        assert y0 - 0.01 <= h.y2 <= y1 + 0.01  # и уходит внутрь контура

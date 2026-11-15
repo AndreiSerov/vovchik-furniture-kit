@@ -20,12 +20,12 @@ __all__ = [
     "Axis",
     "DrawerRunners",
     "EdgeSide",
-    "Face",
     "HingeSide",
     "HingedDoor",
     "Hole",
     "Joint",
     "Mm",
+    "ModuleFace",
     "Orientation",
     "PinnedShelf",
     "Point",
@@ -38,8 +38,8 @@ __all__ = [
 ]
 
 Axis = Literal["x", "y", "z"]
-Face = Literal["+x", "-x", "+y", "-y", "+z", "-z"]  # грань в осях модуля: знак и ось
-FACES: tuple[Face, ...] = ("+x", "-x", "+y", "-y", "+z", "-z")
+ModuleFace = Literal["+x", "-x", "+y", "-y", "+z", "-z"]  # грань в осях модуля: знак и ось
+FACES: tuple[ModuleFace, ...] = ("+x", "-x", "+y", "-y", "+z", "-z")
 EdgeSide = Literal["L1", "L2", "W1", "W2"]
 Purpose = Literal["confirmat", "hinge_cup", "hinge_plate", "shelf_pin", "runner"]
 PURPOSE_RU: dict[str, str] = {
@@ -126,14 +126,14 @@ class Hole(BaseModel):
 
     purpose: Purpose
     surface: Literal["face", "end"]
-    from_face: Face
+    from_face: ModuleFace
     edge_side: EdgeSide | None = None  # у торца — сторона детали
     diameter: int
     depth: int
     through: bool = False
     center: Point
     from_base: tuple[Mm, Mm]
-    in_thickness: int | None = None  # у торца — от пласти с меньшей координатой до центра, мм
+    in_thickness: Mm | None = None  # у торца — от пласти с меньшей координатой до центра, мм
     holds_shelf: bool = False  # отверстие ряда полкодержателей, на котором лежит полка (тикет 20)
 
 

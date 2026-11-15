@@ -17,7 +17,7 @@ from reportlab.pdfgen.canvas import Canvas
 
 from kitchen.drilling import DrillingCheck, part_extent
 from kitchen.errors import KitchenError
-from kitchen.geometry import PURPOSE_RU, Face, Hole, Mm, to_mm
+from kitchen.geometry import PURPOSE_RU, Hole, Mm, ModuleFace, to_mm
 from kitchen.parts import Part
 from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, mm, page_area, register_fonts
 
@@ -78,7 +78,7 @@ class DimChain(BaseModel):
     """Цепочка размеров от базовой кромки `face` вдоль оси схемы. `base` — координата базовой кромки на этой
     оси, `line` — координата линии цепочки поперёк оси."""
 
-    face: Face
+    face: ModuleFace
     direction: Literal["horizontal", "vertical"]
     base: float
     line: float
@@ -88,7 +88,7 @@ class DimChain(BaseModel):
 class BaseLine(BaseModel):
     """Выделенная базовая кромка на схеме."""
 
-    face: Face
+    face: ModuleFace
     x1: float
     y1: float
     x2: float
@@ -115,9 +115,9 @@ class SchemeLayout(BaseModel):
     slot: Box
     outline: Box
     scale: float  # пунктов на мм
-    right: Face  # какая грань модуля смотрит вправо на схеме
-    up: Face  # и вверх
-    view: Face  # с какой стороны смотрим
+    right: ModuleFace  # какая грань модуля смотрит вправо на схеме
+    up: ModuleFace  # и вверх
+    view: ModuleFace  # с какой стороны смотрим
     texts: list[TextLine]
     base_lines: list[BaseLine]
     chains: list[DimChain]
@@ -160,12 +160,12 @@ def _line(text: str, size: float, bold: bool, x: float, y: float) -> TextLine:
 _UNIT = {"x": (1, 0, 0), "y": (0, -1, 0), "z": (0, 0, 1)}  # оси модуля в правой тройке (y модуля — к зрителю)
 
 
-def _view_faces(part: Part) -> tuple[Face, Face, Face]:
+def _view_faces(part: Part) -> tuple[ModuleFace, ModuleFace, ModuleFace]:
     """Вправо — x модуля, если он в плоскости детали, иначе y (перед справа); вверх — z, если в плоскости,
     иначе задняя кромка (деталь лёжа видна сверху, перед внизу). Третья грань — откуда смотрим."""
     plane = {part.orientation.length, part.orientation.width}
-    right: Face = "+x" if "x" in plane else "+y"
-    up: Face = "+z" if "z" in plane else "-y"
+    right: ModuleFace = "+x" if "x" in plane else "+y"
+    up: ModuleFace = "+z" if "z" in plane else "-y"
 
     def vec(face: str) -> tuple[int, int, int]:
         s = 1 if face[0] == "+" else -1
@@ -179,7 +179,7 @@ def _view_faces(part: Part) -> tuple[Face, Face, Face]:
     return right, up, f"{sign}{axis}"  # type: ignore[return-value]
 
 
-def view_text(part: Part, right: Face, up: Face, view: Face) -> tuple[str, list[str]]:
+def view_text(part: Part, right: ModuleFace, up: ModuleFace, view: ModuleFace) -> tuple[str, list[str]]:
     """Строка вида и варианты строки сверления (полный, короткий и без назначений), из граней отверстий:
     «вид с лица (+y)», «сверлить: с тыльной стороны (-y, обратная) — чашка петли»."""
     full: dict[str, list[str]] = {}
@@ -263,7 +263,7 @@ def _rows(part: Part) -> list[str]:
     return rows
 
 
-def _levels(values: list[int], k: float, size: float) -> list[int]:
+def _levels(values: list[Mm], k: float, size: float) -> list[int]:
     """Строка каждой подписи цепочки: близкие подписи уходят на следующую строку, чтобы не налезать."""
     levels: list[int] = []
     ends: list[float] = []  # дальний край последней подписи на каждой строке, пункты от базы
@@ -277,6 +277,11 @@ def _levels(values: list[int], k: float, size: float) -> list[int]:
             ends[level] = at + half
         levels.append(level)
     return levels
+
+
+def grown_reserve(reserved: dict[str, int], need: dict[str, int]) -> dict[str, int]:
+    """Запас строк цепочек по осям после очередного масштаба: ни одна ось не теряет запас, иначе подбор масштаба мог бы ходить по кругу."""
+    return {a: max(reserved[a], need[a]) for a in reserved}
 
 
 def _scheme(part: Part, slot: Area) -> SchemeLayout:
@@ -315,7 +320,7 @@ def _scheme(part: Part, slot: Area) -> SchemeLayout:
     table_h = len(rows) * _LINE
     by_axis = {f[1]: f for f in part.base_edges}
 
-    def values(face: str) -> list[int]:
+    def values(face: str) -> list[Mm]:
         i = part.base_edges.index(face)  # type: ignore[union-attr]
         return sorted({h.from_base[i] for h in part.holes or []})
 
@@ -347,7 +352,7 @@ def _scheme(part: Part, slot: Area) -> SchemeLayout:
         if all(need[a] <= reserved[a] for a in axes):
             ok = True
             break
-        reserved = need
+        reserved = grown_reserve(reserved, need)
     if not ok:
         raise KitchenError(
             f"Схема детали {part.id} не помещается на карте присадки: отверстий {len(part.holes)}."
@@ -355,10 +360,10 @@ def _scheme(part: Part, slot: Area) -> SchemeLayout:
     ox = slot.x + left
     oy = top - head - height_mm * k  # левый нижний угол контура
 
-    def px(value: int) -> float:
+    def px(value: Mm) -> float:
         return ox + ((value - h0) if right[0] == "+" else (h1 - value)) * k
 
-    def py(value: int) -> float:
+    def py(value: Mm) -> float:
         return oy + ((value - v0) if up[0] == "+" else (v1 - value)) * k
 
     x0, x1, y0, y1 = ox, ox + width_mm * k, oy, oy + height_mm * k
@@ -442,8 +447,8 @@ def _scheme(part: Part, slot: Area) -> SchemeLayout:
     _, table_size = _fit([widest], slot.w, _TEXT_SIZES, True, f"Строка таблицы отверстий детали {part.id}")
     for i, row in enumerate(rows):
         texts.append(_line(row, table_size, i == 0, slot.x, table_top - (i + 1) * _LINE))
-    if texts[-1].y < slot.y:
-        raise KitchenError(f"Таблица отверстий детали {part.id} не помещается в схему: строк {len(rows)}.")
+    # `avail_h` уже вычел высоту таблицы, так что строки таблицы лежат в ячейке
+    assert texts[-1].y >= slot.y, f"Таблица отверстий детали {part.id} вышла из ячейки: строк {len(rows)}"
     return SchemeLayout(
         part=part.id,
         slot=(slot.x, slot.y, slot.x + slot.w, slot.y + slot.h),
