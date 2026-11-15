@@ -19,3 +19,7 @@ class OrderError(KitchenError):
 
 class InputError(KitchenError):
     """Неверный аргумент команды (например, длина кухни не больше нуля)."""
+
+
+class ProjectFileError(OrderError):
+    """Файл проекта — JSON, но проект не принят (схема, `order`): его надо править."""

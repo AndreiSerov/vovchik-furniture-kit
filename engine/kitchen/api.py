@@ -28,7 +28,7 @@ from kitchen.drilling import DrillingCheck, reconcile
 from kitchen.drilling_pdf import PageLayout, map_layout, write_drilling_map
 from kitchen.economy import EconomyLine, EconomyVariant, apply_rule
 from kitchen.edging_pdf import write_edging_map
-from kitchen.errors import InputError, KitchenError, OrderError
+from kitchen.errors import InputError, KitchenError, OrderError, ProjectFileError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
 from kitchen.parts import PURPOSE_RU, EdgeTotals, ModuleParts, Part, compute_parts
@@ -89,6 +89,7 @@ __all__ = [
     "assembly_layout",
     "brief_save",
     "brief_show",
+    "check_order",
     "check_project",
     "check_workshop",
     "cut_and_save",
@@ -407,17 +408,26 @@ def _same_order(value: Any, ctx: ValidationContext) -> bool:
         return False
 
 
+def parse_project_file(data: Any, ctx: ValidationContext | None = None) -> Project:
+    """Разбор файла проекта: один для импорта и `kitchen check --project`. Не объект, нет `order`, чужой
+    заказ (только с `ctx`), схема; номер версии ставит движок, поле `version` файла не разбирается."""
+    if not isinstance(data, dict):
+        raise ProjectFileError("Проект должен быть JSON-объектом ({...}), а не списком или значением.")
+    if "order" not in data:
+        raise ProjectFileError("В проекте нет поля «order» с номером заказа.")
+    value = data["order"]
+    if ctx is not None and not _same_order(value, ctx):
+        raise ProjectFileError(f"Поле «order» = «{value}» не совпадает с заказом {ctx.order_ref}.")
+    try:
+        return parse_project({k: v for k, v in data.items() if k != "version"})
+    except OrderError as e:
+        raise ProjectFileError(e.problems) from e
+
+
 def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
     """Проверить заказ, схему и конструкцию проекта (`kitchen.checks`): ошибки отклоняют импорт."""
-    if not isinstance(data, dict):
-        return ValidationResult(["Проект должен быть JSON-объектом ({...}), а не списком или значением."])
-    if "order" not in data:
-        return ValidationResult(["В проекте нет поля «order» с номером заказа."])
-    value = data["order"]
-    if not _same_order(value, ctx):
-        return ValidationResult([f"Поле «order» = «{value}» не совпадает с заказом {ctx.order_ref}."])
     try:
-        project = parse_project({k: v for k, v in data.items() if k != "version"})
+        project = parse_project_file(data, ctx)
     except OrderError as e:
         return ValidationResult(errors=e.problems)
     if ctx.workshop is None:  # без мастерской проект не проверить, а непроверенный не принимаем
@@ -1695,11 +1705,12 @@ def estimate_from_order(order: str, home: Path | None = None, economy: bool = Fa
 
 def _project_file(path: Path) -> tuple[Project, PartsSource]:
     data = _read_json(Path(path), "Файл проекта")
-    project = parse_project(data)
+    project = parse_project_file(data)
+    version = data.get("version")
     source = PartsSource(
         kind="file",
         order=project.order,
-        version=project.version,
+        version=version if type(version) is int and version >= 1 else None,
         content_hash=_project_hash(project),
         path=str(path),
     )
@@ -2008,9 +2019,11 @@ class CheckResult(Result):
     """Находки проверок проекта: ошибки отклоняют импорт, предупреждения идут в журнал."""
 
     order: str
+    source: PartsSource  # версия проекта заказа или файл, как у `parts`
     findings: list[Finding]
     brief_id: int | None = None  # какой бриф использован (последний сохранённый заказа)
     brief_saved_at: str | None = None
+    brief_note: str | None = None  # бриф новее брифа версии: совет переимпортировать (только у заказа)
 
     @property
     def errors(self) -> list[Finding]:
@@ -2021,26 +2034,39 @@ class CheckResult(Result):
         return [f for f in self.findings if f.level == "warning"]
 
 
-def check_project(path: Path, home: Path | None = None) -> CheckResult:
-    """`проверки проекта` из файла без БД: все находки сразу."""
-    home = home or resolve_home()
-    project = parse_project(_read_json(Path(path), "Файл проекта"))
-    workshop = load_workshop(home)
-    latest = None
-    if store.db_path(home).exists():
-        with store.connect(home) as conn:
-            try:
-                latest = _latest_brief(conn, store.find_order(conn, project.order)["id"])
-            except OrderError:  # заказа ещё нет: проект проверяют как черновик
-                latest = None
+def _check_result(
+    project: Project, source: PartsSource, brief: sqlite3.Row | None, note: str | None, workshop: Workshop
+) -> CheckResult:
+    """Находки проверок: одна функция для файла и для заказа; импорт зовёт те же `run_checks`."""
     return CheckResult(
         order=project.order,
-        findings=run_checks(project, workshop, json.loads(latest["data"]) if latest else None),
-        brief_id=latest["id"] if latest else None,
-        brief_saved_at=latest["created_at"] if latest else None,
+        source=source.model_copy(
+            update={
+                "brief_id": brief["id"] if brief else None,
+                "brief_saved_at": brief["created_at"] if brief else None,
+            }
+        ),
+        findings=run_checks(project, workshop, json.loads(brief["data"]) if brief else None),
+        brief_id=brief["id"] if brief else None,
+        brief_saved_at=brief["created_at"] if brief else None,
+        brief_note=note,
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,
     )
+
+
+def check_project(path: Path, home: Path | None = None) -> CheckResult:
+    """`проверки проекта` из файла без БД: все находки сразу."""
+    home = home or resolve_home()
+    project, source = _project_file(path)
+    return _check_result(project, source, _brief_of_project(home, project.order), None, load_workshop(home))
+
+
+def check_order(order: str, home: Path | None = None) -> CheckResult:
+    """`kitchen check <заказ>`: находки проверок текущей версии проекта с последним брифом заказа."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
+    return _check_result(project, source, latest, warnings[0] if warnings else None, load_workshop(home))
 
 
 # --- быстрая вилка ------------------------------------------------------------
