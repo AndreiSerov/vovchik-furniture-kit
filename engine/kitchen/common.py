@@ -2,7 +2,7 @@
 
 Правила и позиции — в `construction.yaml` (`общие_позиции`, МОК). Длины берутся из рядов проекта:
 цоколь — по фронту всех нижних модулей (пенал и ПММ тоже стоят на цоколе), шина и LED — по верхним
-рядам, столешница — по нижним модулям без пенала. Угловой модуль считается на своей стене:
+рядам, столешница — по общей длине нижних модулей без пенала, целыми листами. Угловой модуль считается на своей стене:
 смещение на соседней стене его не удлиняет (стык в углу «встык»).
 """
 
@@ -17,7 +17,7 @@ from kitchen.models import Workshop
 from kitchen.parts import TEMPLATES
 from kitchen.project import Project
 
-__all__ = ["CommonItem", "CountertopCut", "compute_common", "is_tall", "plan_countertop", "row_layouts"]
+__all__ = ["CommonItem", "CountertopSize", "compute_common", "is_tall", "row_layouts", "size_countertop"]
 
 
 class CommonItem(BaseModel):
@@ -128,42 +128,20 @@ def _pieces(total_mm: int, rule_piece_mm: int, reserve: Decimal) -> int:
     return _ceil(Decimal(total_mm) * (1 + reserve) / rule_piece_mm)
 
 
-def _countertop_sheets(runs: list[tuple[str, list[int]]], sheet_mm: int, kerf: int) -> list[list[int]]:
-    """Куски столешницы (участок = кусок, длиннее листа режется по длине листа) по листам: первый подходящий,
-    куски по убыванию; между кусками одного листа пропил. Результат — длины кусков каждого листа."""
-    pieces: list[int] = []
-    for _, widths in runs:
-        length = sum(widths)
-        while length > sheet_mm:
-            pieces.append(sheet_mm)
-            length -= sheet_mm
-        if length:
-            pieces.append(length)
-    sheets: list[list[int]] = []
-    for piece in sorted(pieces, reverse=True):
-        for sheet in sheets:
-            if sum(sheet) + kerf * len(sheet) + piece <= sheet_mm:
-                sheet.append(piece)
-                break
-        else:
-            sheets.append([piece])
-    return sheets
-
-
-class CountertopCut(BaseModel):
-    """Линейный раскрой столешницы: куски по листам (длины вдоль листа, мм)."""
+class CountertopSize(BaseModel):
+    """Столешница: общая длина под ней и целые листы (без нарезки на куски)."""
 
     item: str
     name: str
     sheet_length: int
     sheet_width: int
-    sheets: list[list[int]]
     sheet_count: int
-    total_length_mm: int  # сумма длин нижних рядов без пенала
+    total_length_mm: int  # сумма ширин нижних модулей без пенала, угол без смещения
 
 
-def plan_countertop(project: Project, ws: Workshop) -> CountertopCut | None:
-    """Куски столешницы по листам; `None`, если столешница в проекте не задана."""
+def size_countertop(project: Project, ws: Workshop) -> CountertopSize | None:
+    """Общая длина столешницы и число листов (вверх до целого); `None`, если столешница в проекте не задана.
+    Одна функция для общих позиций, раскроя, закупки и сметы."""
     top_id = project.materials.countertop
     if not top_id:
         return None
@@ -171,16 +149,14 @@ def plan_countertop(project: Project, ws: Workshop) -> CountertopCut | None:
     if top is None:
         known = ", ".join(sorted(t.id for t in ws.materials.countertops))
         raise OrderError(f"Столешница «{top_id}» не найдена в materials.yaml (столешницы: {known}).")
-    runs = _runs(project, ("lower",), with_tall=False)
-    sheets = _countertop_sheets(runs, top.sheet[0], ws.equipment.saw.kerf_mm)
-    return CountertopCut(
+    total = _total(_runs(project, ("lower",), with_tall=False))
+    return CountertopSize(
         item=top_id,
         name=top.name,
         sheet_length=top.sheet[0],
         sheet_width=top.sheet[1],
-        sheets=sheets,
-        sheet_count=len(sheets),
-        total_length_mm=_total(runs),
+        sheet_count=_ceil(Decimal(total) / top.sheet[0]),
+        total_length_mm=total,
     )
 
 
@@ -264,18 +240,17 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
                 basis=f"{led.meters_per_supply:g} м ленты на блок",
             )
         )
-    plan = plan_countertop(project, ws)
-    if plan is not None:
-        listed = " + ".join(str(p) for p in sorted((p for sheet in plan.sheets for p in sheet), reverse=True))
+    size = size_countertop(project, ws)
+    if size is not None:
         items.append(
             CommonItem(
                 kind="countertop",
-                item=plan.item,
-                name=plan.name,
-                quantity=plan.sheet_count,
+                item=size.item,
+                name=size.name,
+                quantity=size.sheet_count,
                 unit="лист",
-                length_mm=plan.total_length_mm,
-                basis=f"куски {listed} мм из листов по {plan.sheet_length} мм, стык в углу встык",
+                length_mm=size.total_length_mm,
+                basis=f"общая длина {size.total_length_mm} мм, листы по {size.sheet_length} мм вверх до целого",
             )
         )
     return items

@@ -661,10 +661,10 @@ def drawer_depth_shortfall(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -
     need = max(guide, bottom[1] + thickness)
     if dims.depth >= need:
         return None
-    if dims.depth < guide:
-        why = f"меньше направляющей ящика {guide:g} мм"
-    else:
-        why = f"меньше нужной {need:g} мм (дно ящика {bottom[1]} мм + задняя стенка {thickness} мм)"
+    why = (
+        f"меньше нужной {need:g} мм (дно ящика {bottom[1]} мм + задняя стенка {thickness} мм, "
+        f"но не меньше направляющей {guide:g} мм)"
+    )
     return need, f"Модуль {module.label}: внутренняя глубина {dims.depth} мм {why}."
 
 

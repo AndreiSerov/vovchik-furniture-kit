@@ -19,7 +19,7 @@ from kitchen import brief as brief_check
 from kitchen import store
 from kitchen.checks import Finding, duplicate_labels
 from kitchen.checks import check_project as run_checks
-from kitchen.common import CommonItem, CountertopCut, compute_common, plan_countertop
+from kitchen.common import CommonItem, CountertopSize, compute_common, size_countertop
 from kitchen.cutting import MaterialCut, cut_parts, kerf_warnings
 from kitchen.cutting_pdf import write_cutting_map
 from kitchen.edging_pdf import write_edging_map
@@ -1046,7 +1046,7 @@ class CutResult(Result):
     trim: int  # обрезка по периметру, мм
     max_cut_length: int  # макс. длина реза станка, мм
     materials: list[MaterialCut]
-    countertop: CountertopCut | None  # линейный раскрой столешницы; нет столешницы в проекте — `None`
+    countertop: CountertopSize | None  # общая длина и листы столешницы; нет столешницы в проекте — `None`
     warnings: list[str]
     output: OutputInfo | None = None  # PDF карты раскроя; только после `cut_and_save`
 
@@ -1078,7 +1078,7 @@ def _build_cut(
         trim=workshop.equipment.sheet.perimeter_trim,
         max_cut_length=saw.max_cut_length,
         materials=cut_parts(computed.modules, workshop),
-        countertop=plan_countertop(project, workshop),
+        countertop=size_countertop(project, workshop),
         warnings=[*computed.warnings, *extra, *kerf_warnings(saw)],
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,

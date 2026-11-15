@@ -34,7 +34,7 @@
 - [x] 16 — Смета (3.1, 3.2, 3.3) ([спека](docs/specs/stage-3-estimate.md))
 - [x] 33 — Хотфикс: мастерская, заказы и раскрой отклоняют неверный ввод ([спека](docs/specs/hotfix-input-guards.md))
 - [x] 34 — Хотфикс: проект и шаблоны отклоняют неверный ввод ([спека](docs/specs/hotfix-input-guards.md))
-- [ ] 35 — Столешница по общей длине ([спека](docs/specs/hotfix-input-guards.md))
+- [x] 35 — Столешница по общей длине ([спека](docs/specs/hotfix-input-guards.md))
 - [ ] 17 — Вариант «экономия» (3.3) ([спека](docs/specs/stage-3-estimate.md))
 - [ ] 18 — КП (3.4) ([спека](docs/specs/stage-3-estimate.md))
 

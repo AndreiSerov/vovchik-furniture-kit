@@ -346,9 +346,9 @@ def _render_cut(r: api.CutResult) -> str:
                 )
     if r.countertop:
         t = r.countertop
-        sheets = "; ".join(" + ".join(str(p) for p in sheet) for sheet in t.sheets)
         lines.append(
-            f"Столешница {t.item} — {t.name}: листов {t.sheet_count} ({t.sheet_length} мм), куски, мм: {sheets}"
+            f"Столешница {t.item} — {t.name}: общая длина {t.total_length_mm} мм, "
+            f"листов {t.sheet_count} ({t.sheet_length} мм)"
         )
     if r.output:
         lines.append(f"Карта раскроя PDF: {r.output.file} (версия проекта {r.output.source_version})")
@@ -475,7 +475,7 @@ def _render_production(r: api.ProductionResult) -> str:
         )
     if r.cutting.countertop:
         top = r.cutting.countertop
-        lines.append(f"Столешница {top.item}: листов {top.sheet_count}")
+        lines.append(f"Столешница {top.item}: общая длина {top.total_length_mm} мм, листов {top.sheet_count}")
     purchase_edges = {
         item.id: item.quantity for shop in r.purchase.shops for item in shop.items if item.kind == "edge"
     }

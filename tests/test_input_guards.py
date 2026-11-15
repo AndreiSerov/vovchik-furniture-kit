@@ -558,16 +558,6 @@ def test_kerf_warning_shows_the_declared_value(home):
     assert any("пропил 4.0000001 мм учтён как 5 мм" in w for w in r.warnings), r.warnings
 
 
-def test_fractional_kerf_in_countertop(home):
-    """Куски 2200 + 1200 с пропилом 2.2 (учтён как 3) не влезают в лист 3402: нужен второй."""
-    edit(home, "materials.yaml", "лист: [4100, 600]", "лист: [3402, 600]")
-    petrov = FIXTURES / "petrov_project.json"
-    edit(home, "equipment.yaml", "пропил: 4", "пропил: 2")
-    assert api.cut_from_project(petrov, home).countertop.sheet_count == 1
-    edit(home, "equipment.yaml", "пропил: 2", "пропил: 2.2")
-    assert api.cut_from_project(petrov, home).countertop.sheet_count == 2
-
-
 def test_kerf_warning_in_purchase_estimate_production_and_map(home):
     from pypdf import PdfReader
 

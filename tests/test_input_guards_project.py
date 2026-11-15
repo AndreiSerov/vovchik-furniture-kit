@@ -288,7 +288,7 @@ def test_grid_of_sizes_gives_error_or_sound_parts(home, template):
 
 
 # Ревью тикета 34
-def test_countertop_breaks_at_tall_from_other_row_after_own_tall(home):
+def test_countertop_excludes_tall_from_other_row_after_own_tall(home):
     # стена 3000: Н1 | П1 | Н2 | П2 | Н3; П1 записан в нижнем ряду, П2 — в верхнем
     base = lambda label: {"label": label, "template": "base_door", "width": 600}
     upper = lambda label: {"label": label, "template": "wall_door", "width": 600}
@@ -310,7 +310,7 @@ def test_countertop_breaks_at_tall_from_other_row_after_own_tall(home):
     result = api.parts_from_project(path, home)
     assert [f for f in result.findings if f.code == "row_sum"] == []
     top = next(c for c in result.common if c.kind == "countertop")
-    assert "600 + 600 + 600" in top.basis, top.basis
+    assert top.length_mm == 1800, top
 
 
 def test_appliance_on_unknown_template_module_is_one_finding(home):
@@ -381,3 +381,11 @@ def test_duplicate_label_keeps_dims_of_the_first_module(home):
     data["appliances"] = [{"type": "dishwasher", "width": 450, "module": "Н1"}]
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     assert "niche_too_small" in codes(api.check_project(path, home))
+
+
+# Тикет 35: текст находки глубины ящика и `limit` называют одно число
+@pytest.mark.parametrize("depth", [450, 499, 500, 505])
+def test_drawer_depth_text_and_limit_name_the_same_number(home, depth):
+    (finding,) = depth_codes(home, depth)
+    assert f"{finding.limit:g}" in finding.message, (depth, finding)
+    assert finding.value == depth
