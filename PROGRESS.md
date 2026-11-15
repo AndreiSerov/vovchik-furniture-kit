@@ -68,7 +68,7 @@
 - [x] 36 — Команда `kitchen check` (6.1) ([спека](docs/specs/stage-6-skills.md))
 - [x] 30 — Схема брифа и правила `check_brief.py` (6.5) ([спека](docs/specs/stage-6-skills.md))
 - [x] 40 — Чек-лист выезда (4.4, этап 4) ([спека](docs/specs/stage-4-drilling-assembly.md))
-- [ ] 49 — Следующий шаг в `status` (6.4) ([спека](docs/specs/stage-6-skills.md))
+- [x] 49 — Следующий шаг в `status` (6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 46 — Уборка этапа 4 ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [ ] 27 — Скилл `kitchen-project` (6.1, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 28 — Скилл `kitchen-production` (6.2, 6.4) ([спека](docs/specs/stage-6-skills.md))

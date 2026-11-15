@@ -12,7 +12,7 @@ from typing import Literal, NamedTuple
 from kitchen.errors import OrderError
 from kitchen.workshop import resolve_home
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Миграции: номер схемы -> скрипт (операторы через «;», без «;» внутри комментариев).
 # Добавить v4: написать _SCHEMA_V4, внести в MIGRATIONS и поднять SCHEMA_VERSION.
@@ -71,7 +71,13 @@ _SCHEMA_V3 = """
 ALTER TABLE project_versions ADD COLUMN brief_id INTEGER
 """
 
-MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2, 3: _SCHEMA_V3}
+# auto — запись журнала, которую программа пишет сама («бриф сохранён»); «Дальше» её не считает за «сделано»
+_SCHEMA_V4 = """
+ALTER TABLE log ADD COLUMN auto INTEGER NOT NULL DEFAULT 0;
+UPDATE log SET auto = 1 WHERE kind = 'done' AND text = 'бриф сохранён'
+"""
+
+MIGRATIONS = {1: _SCHEMA_V1, 2: _SCHEMA_V2, 3: _SCHEMA_V3, 4: _SCHEMA_V4}
 
 
 def now() -> str:
@@ -228,10 +234,23 @@ def parse_query(text: str) -> OrderQuery:
     return OrderQuery("surname", slug=slug)
 
 
+def _digits(text: str) -> str:
+    return re.sub(r"\D", "", text)
+
+
+def _is_phone_query(text: str) -> bool:
+    """Запрос без букв и с 10+ цифрами — телефон; номер заказа ГГГГ-NNN (7 цифр) им не считается."""
+    return not any(c.isalpha() for c in text) and len(_digits(text)) >= 10
+
+
 def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
     """Точный номер, `номер-фамилия` или подстрока фамилии или имени клиента (кириллица и латиница)."""
-    parsed = parse_query(query)
     rows = conn.execute("SELECT * FROM orders ORDER BY number").fetchall()
+    if _is_phone_query(query):
+        tail = _digits(query)[-10:]  # последние 10 цифр: +7, 8 и без кода — один номер
+        hits = [r for r in rows if len(_digits(r["phone"])) >= 10 and _digits(r["phone"])[-10:] == tail]
+        return _single(hits, query)
+    parsed = parse_query(query)
     if parsed.kind == "number":
         hits = [r for r in rows if r["number"] == parsed.number]
     elif parsed.kind == "full":
@@ -244,6 +263,10 @@ def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
     else:
         needle = parsed.slug
         hits = [r for r in rows if needle in r["slug"] or needle in slugify(r["client"])]
+    return _single(hits, query)
+
+
+def _single(hits: list[sqlite3.Row], query: str) -> sqlite3.Row:
     if not hits:
         raise OrderError(f"Заказ «{query}» не найден. Заведите его: kitchen order new ГГГГ-NNN-фамилия.")
     if len(hits) > 1:
@@ -290,6 +313,8 @@ class Recompute(NamedTuple):
 
 # Реестр «вид вывода → команда пересчёта» (тикет 24). Новый OutputKind без записи роняет
 # tests/test_status_stale.py; команда должна существовать в CLI.
+# Документы цеха пересчитываются одной командой `kitchen production` (тикет 49).
+PRODUCTION_RECOMPUTE = Recompute("документы цеха", "production")
 OUTPUT_RECOMPUTE: dict[OutputKind, Recompute] = {
     CUTTING: Recompute("карта раскроя", "cut"),
     EDGING: Recompute("карта кромления", "edges"),
