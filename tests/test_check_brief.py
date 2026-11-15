@@ -451,3 +451,54 @@ def test_who_buys_master_and_old_salon_are_accepted():
         brief["appliances"]["items"]["value"][1]["who_buys"] = who
         result = run(brief)
         assert result["errors"] == [] and result["unknown_fields"] == []
+
+
+def test_hood_exhaust_duct_is_in_enum():
+    brief = sergey()
+    brief["appliances"]["hood"] = c({"kind": "built_in", "exhaust": "duct"})
+    assert run(brief)["errors"] == []
+
+
+def test_fridge_place_asked_when_side_without_wall():
+    assert "fridge_place" in rules(run(with_fridge(sergey(), side="left")))
+
+
+def test_sergey_with_fridge_wall_and_side_has_11_findings():
+    brief = sergey()
+    brief["appliances"]["fridge"] = c(
+        {"existing": True, "width_mm": 600, "location": "у входа", "wall": "A", "side": "left"}
+    )
+    result = run(brief)
+    assert len(result["conflicts"]) == 11 and "over_fridge" in rules(result)
+
+
+def test_new_enum_label_texts_match_ticket():
+    f = {**SCHEMA["sections"]["workzone"]["fields"], **SCHEMA["sections"]["installation"]["fields"]}
+    labels = {n: spec["value_labels"] for n, spec in f.items() if spec["type"] == "enum"}
+    assert labels["parking"] == {
+        "free": "бесплатная у дома",
+        "paid": "платная",
+        "none": "нет",
+        "unknown": "не знаю",
+    }
+    assert labels["dismantling"] == {
+        "master": "делаю я",
+        "client": "делает клиент",
+        "not_needed": "не нужен",
+        "unknown": "не знаю",
+    }
+    for k in ("walls_evenness", "floor_evenness"):
+        assert labels[k] == {"even": "ровные", "uneven": "неровные", "unknown": "не знаю"}
+    assert labels["sink_mount"] == {
+        "overlay": "накладная",
+        "inset": "врезная",
+        "undermount": "подстольная",
+        "unknown": "не знаю",
+    }
+    assert labels["sink_bowls"] == {"1": "одна чаша", "1.5": "полторы", "2": "две", "unknown": "не знаю"}
+    assert labels["sink_material"] == {
+        "steel": "нержавейка",
+        "stone": "камень",
+        "ceramic": "керамика",
+        "unknown": "не знаю",
+    }
