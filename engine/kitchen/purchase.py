@@ -55,7 +55,7 @@ def _facades(project: Project, modules: list[ModuleParts]) -> dict[tuple[str, st
     colors = {}
     for wall in project.walls:
         for row in wall.rows:
-            for module in row.modules:
+            for module in row.cabinets:
                 colors[module.label] = facade_color(module, row, project.materials)
     groups: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
     for module in modules:

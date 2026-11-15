@@ -976,7 +976,7 @@ def _project_hash(project: Project) -> str:
         for row in wall["rows"]:
             for module in row["modules"]:
                 # `contents: {}` и отсутствующий `contents` — один проект
-                if module["contents"] and not any(module["contents"].values()):
+                if module.get("contents") and not any(module["contents"].values()):
                     module["contents"] = None
     return hashlib.sha256(_canonical(normalized).encode()).hexdigest()
 

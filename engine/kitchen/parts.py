@@ -32,7 +32,7 @@ from kitchen.geometry import (
     steps_pick,
 )
 from kitchen.models import ApplianceItem, EdgeRule, Num, Workshop
-from kitchen.project import Appliance, ModuleSpec, Project, ProjectMaterials, Row
+from kitchen.project import Appliance, Gap, ModuleSpec, Project, ProjectMaterials, Row, is_gap
 
 __all__ = [
     "APPLIANCE_NAMES",
@@ -40,6 +40,7 @@ __all__ = [
     "BACK_PANEL",
     "DRAWER_BACK",
     "DRAWER_BOTTOM",
+    "GAP_NAMES",
     "PURPOSE_RU",
     "TEMPLATES",
     "AssemblyPlan",
@@ -210,6 +211,11 @@ def _whole(value: Num, what: str) -> int:
     if float(value).is_integer():
         return int(value)
     raise OrderError(f"{what} — {value}, а ожидалось целое число миллиметров.")
+
+
+def gap_width(gap: Gap) -> int:
+    """Ширина пустого места в целых миллиметрах, как у модулей."""
+    return _whole(gap.width, f"Ширина пустого места {gap.label}")
 
 
 def module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:
@@ -1114,7 +1120,24 @@ APPLIANCE_NAMES = {
     "wine_cooler": "винный шкаф",
     "other": "другая техника",
     "hood": "вытяжка",
+    "fridge": "холодильник",
 }
+
+# Формы названия техники для пустого места: (именительный, дательный, винительный). Что не названо — как в
+# `APPLIANCE_NAMES` во всех падежах. Ключи — виды из `construction.yaml` (`пустое_место.техника`).
+GAP_NAMES = {
+    "fridge": ("холодильник", "холодильнику", "холодильник"),
+    "dishwasher": ("посудомойка", "посудомойке", "посудомойку"),
+    "cooker": ("плита", "плите", "плиту"),
+    "washing_machine": ("стиральная машина", "стиральной машине", "стиральную машину"),
+}
+
+
+def gap_name(appliance_type: str, case: int) -> str:
+    """Название техники в пустом месте: `case` 0 — именительный, 1 — дательный, 2 — винительный."""
+    forms = GAP_NAMES.get(appliance_type)
+    return forms[case] if forms else APPLIANCE_NAMES.get(appliance_type, appliance_type)
+
 
 # Явная несовместимость вида техники с рядом модуля: вытяжка только вверху, остальное только внизу
 # (духовка ещё и в пенале). Что не названо (СВЧ, холодильник…), не ограничено.
@@ -1211,7 +1234,11 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     colored: dict[str, Decimal] = {}
     for wall in project.walls:
         for row in wall.rows:
-            for module in row.modules:
+            for entry in row.modules:
+                if is_gap(entry):
+                    gap_width(entry)  # дробная ширина — ошибка, как у модуля
+                    continue
+                module = entry
                 if module.template in ("base_corner", "wall_corner") and module.corner:
                     adjacent = module.corner.adjacent_wall
                     if adjacent == wall.label or adjacent not in {w.label for w in project.walls}:

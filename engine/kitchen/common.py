@@ -14,8 +14,8 @@ from pydantic import BaseModel
 
 from kitchen.errors import OrderError
 from kitchen.models import Workshop
-from kitchen.parts import TEMPLATES
-from kitchen.project import Project
+from kitchen.parts import TEMPLATES, gap_width
+from kitchen.project import Project, is_gap
 
 __all__ = ["CommonItem", "CountertopSize", "compute_common", "is_tall", "row_layouts", "size_countertop"]
 
@@ -39,6 +39,8 @@ def _ceil(value: Decimal) -> int:
 
 def is_tall(m) -> bool:
     """Модуль записан в одном ряду стены и занимает оба — свойство шаблона в реестре."""
+    if is_gap(m):
+        return False
     return TEMPLATES[m.template].both_rows if m.template in TEMPLATES else False
 
 
@@ -101,16 +103,44 @@ def _row_modules(wall, row) -> list:
     return row_layouts(wall)[next(i for i, r in enumerate(wall.rows) if r is row)]
 
 
+def _entries(project: Project, kinds: Iterable[str], with_tall: bool) -> list:
+    """Записи рядов нужного вида по всем стенам (модули и пустые места); пенал входит только при `with_tall`.
+    Нижний ряд берёт пеналы стены из других рядов; на стене без нижнего ряда пенал тоже стоит на цоколе."""
+    found: list = []
+    for wall in project.walls:
+        lowers = [row for row in wall.rows if row.kind == "lower"]
+        for row in wall.rows:
+            if row.kind in kinds:
+                found += [m for m in _row_modules(wall, row) if with_tall or not is_tall(m)]
+        if with_tall and "lower" in kinds and not lowers:
+            found += [m for row in wall.rows for m in row.modules if is_tall(m)]
+    return found
+
+
 def _length(project: Project, kinds: Iterable[str], with_tall: bool) -> int:
-    """Сумма ширин модулей рядов нужного вида по всем стенам; пенал входит в сумму только при `with_tall`."""
+    """Сумма ширин модулей рядов нужного вида по всем стенам, без пустых мест."""
     return sum(
         int(m.width)  # целую ширину обеспечивает `module_dims`
-        for wall in project.walls
-        for row in wall.rows
-        if row.kind in kinds
-        for m in _row_modules(wall, row)
-        if with_tall or not is_tall(m)
+        for m in _entries(project, kinds, with_tall)
+        if not is_gap(m)
     )
+
+
+def _gaps_mm(project: Project, kinds: Iterable[str], *, under_top: bool | None = None) -> int:
+    """Сумма ширин пустых мест рядов нужного вида; `under_top` отбирает места по `under_countertop`."""
+    return sum(
+        gap_width(m)
+        for m in _entries(project, kinds, False)
+        if is_gap(m) and (under_top is None or m.under_countertop == under_top)
+    )
+
+
+def _tail(mm: int, own: bool = False) -> str:
+    """Хвост основания при пустых местах: «, без пустых мест 600 мм» внутри скобок, `own` — в своих скобках
+    « (без пустых мест 600 мм)»; без пустых мест — пусто."""
+    if not mm:
+        return ""
+    return f" (без пустых мест {mm} мм)" if own else f", без пустых мест {mm} мм"
 
 
 def _named(items: list, item_id: str) -> str:
@@ -129,7 +159,10 @@ class CountertopSize(BaseModel):
     sheet_length: int
     sheet_width: int
     sheet_count: int
-    total_length_mm: int  # сумма ширин нижних модулей без пенала, угол без смещения
+    total_length_mm: (
+        int  # сумма ширин нижних модулей без пенала, угол без смещения, плюс места под столешницей
+    )
+    gaps_mm: int = 0  # пустые места, не вошедшие в длину
 
 
 def size_countertop(project: Project, ws: Workshop) -> CountertopSize | None:
@@ -142,7 +175,8 @@ def size_countertop(project: Project, ws: Workshop) -> CountertopSize | None:
     if top is None:
         known = ", ".join(sorted(t.id for t in ws.materials.countertops))
         raise OrderError(f"Столешница «{top_id}» не найдена в materials.yaml (столешницы: {known}).")
-    total = _length(project, ("lower",), with_tall=False)
+    # места под общей столешницей входят в её длину, остальные — нет
+    total = _length(project, ("lower",), with_tall=False) + _gaps_mm(project, ("lower",), under_top=True)
     return CountertopSize(
         item=top_id,
         name=top.name,
@@ -150,6 +184,7 @@ def size_countertop(project: Project, ws: Workshop) -> CountertopSize | None:
         sheet_width=top.sheet[1],
         sheet_count=_ceil(Decimal(total) / top.sheet[0]),
         total_length_mm=total,
+        gaps_mm=_gaps_mm(project, ("lower",), under_top=False),
     )
 
 
@@ -167,10 +202,11 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
         for wall in project.walls
         for row in wall.rows
         if row.kind == "lower"
-        for m in row.modules
+        for m in row.cabinets
         if m.corner
     )
     lower = _length(project, ("lower",), with_tall=True) - dead
+    lower_gaps = _gaps_mm(project, ("lower",))
     n = _pieces(lower, rules.plinth.piece_length, reserve)
     items.append(
         CommonItem(
@@ -180,10 +216,11 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
             quantity=n,
             unit="шт",
             length_mm=lower,
-            basis=f"фронт нижних рядов {lower} мм (без глухой части углов {dead} мм) + запас {percent}, штуки по {rules.plinth.piece_length} мм",
+            basis=f"фронт нижних рядов {lower} мм (без глухой части углов {dead} мм{_tail(lower_gaps)}) + запас {percent}, штуки по {rules.plinth.piece_length} мм",
         )
     )
     upper = _length(project, ("upper",), with_tall=False)
+    upper_gaps = _gaps_mm(project, ("upper",))
     n = _pieces(upper, rules.rail.piece_length, reserve)
     items.append(
         CommonItem(
@@ -193,7 +230,7 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
             quantity=n,
             unit="шт",
             length_mm=upper,
-            basis=f"верхние ряды {upper} мм + запас {percent}, штуки по {rules.rail.piece_length} мм",
+            basis=f"верхние ряды {upper} мм{_tail(upper_gaps, True)} + запас {percent}, штуки по {rules.rail.piece_length} мм",
         )
     )
     hanger = ws.construction.upper_rules.hanger
@@ -219,7 +256,7 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
                 quantity=_ceil(meters / led.meter_rounding) * led.meter_rounding,
                 unit="м",
                 length_mm=upper,
-                basis=f"верхние ряды {upper} мм + запас {percent}, вверх до кратного {led.meter_rounding} м",
+                basis=f"верхние ряды {upper} мм{_tail(upper_gaps, True)} + запас {percent}, вверх до кратного {led.meter_rounding} м",
             )
         )
         items.append(
@@ -242,7 +279,7 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
                 quantity=size.sheet_count,
                 unit="лист",
                 length_mm=size.total_length_mm,
-                basis=f"общая длина {size.total_length_mm} мм, листы по {size.sheet_length} мм вверх до целого",
+                basis=f"общая длина {size.total_length_mm} мм{_tail(size.gaps_mm, True)}, листы по {size.sheet_length} мм вверх до целого",
             )
         )
     return items

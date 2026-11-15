@@ -197,6 +197,38 @@
       "title": "Corner",
       "type": "object"
     },
+    "Gap": {
+      "additionalProperties": false,
+      "description": "Пустое место ряда: участок заданной ширины без деталей (под отдельностоящую технику или над окном).\nЗапись того же списка `modules`; признак — `gap: true`, шаблона нет.",
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "gap": {
+          "const": true,
+          "title": "Gap",
+          "type": "boolean"
+        },
+        "width": {
+          "exclusiveMinimum": 0,
+          "title": "Width",
+          "type": "number"
+        },
+        "under_countertop": {
+          "default": false,
+          "title": "Under Countertop",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "label",
+        "gap",
+        "width"
+      ],
+      "title": "Gap",
+      "type": "object"
+    },
     "MaterialOverrides": {
       "additionalProperties": false,
       "properties": {
@@ -440,7 +472,14 @@
         },
         "modules": {
           "items": {
-            "$ref": "#/$defs/ModuleSpec"
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ModuleSpec"
+              },
+              {
+                "$ref": "#/$defs/Gap"
+              }
+            ]
           },
           "title": "Modules",
           "type": "array"

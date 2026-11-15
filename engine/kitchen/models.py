@@ -54,6 +54,7 @@ APPLIANCE_KINDS = frozenset(
         "wine_cooler",
         "other",
         "hood",
+        "fridge",
     }
 )
 

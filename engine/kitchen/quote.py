@@ -19,11 +19,12 @@ from kitchen.parts import (
     DRAWER_BOTTOM,
     TEMPLATES,
     ModuleParts,
+    gap_name,
     is_facade,
     lower_facades,
     resolve_materials,
 )
-from kitchen.project import ModuleSpec, Project, Row
+from kitchen.project import Gap, ModuleSpec, Project, Row, is_gap
 
 __all__ = [
     "DAYS_ERROR",
@@ -194,6 +195,12 @@ def describe_module(module: ModuleSpec, row: Row, built: ModuleParts, project: P
     return text + (f"; техника: {', '.join(kinds)}" if kinds else "")
 
 
+def describe_gap(gap: Gap, project: Project) -> str:
+    """«место под холодильник, 600 мм»; без техники — «пустое место, 600 мм». Без цены."""
+    kinds = [gap_name(a.type, 2) for a in project.appliances if a.module == gap.label]
+    return (f"место под {_enumerate(kinds)}" if kinds else "пустое место") + f", {gap.width:g} мм"
+
+
 # --- материалы --------------------------------------------------------------
 
 
@@ -274,7 +281,18 @@ def build_quote(
     modules, body, lower, upper = [], [], [], []
     for wall in project.walls:
         for row in wall.rows:
-            for module in row.modules:
+            for entry in row.modules:
+                if is_gap(entry):
+                    modules.append(
+                        QuoteModule(
+                            label=entry.label,
+                            wall=wall.label,
+                            row=row.kind,
+                            text=describe_gap(entry, project),
+                        )
+                    )
+                    continue
+                module = entry
                 label = module.label
                 place = f"{wall.label}/{row.kind}"  # метки одного ряда одной стены
                 modules.append(

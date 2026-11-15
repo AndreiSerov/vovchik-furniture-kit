@@ -28,12 +28,13 @@ from kitchen.parts import (
     build_module,
     built_niche,
     drawer_depth_shortfall,
+    gap_width,
     module_dims,
     niche_item,
     part_too_small_message,
     unknown_template_error,
 )
-from kitchen.project import ModuleSpec, Project
+from kitchen.project import ModuleSpec, Project, is_gap
 
 __all__ = ["Finding", "along_texture", "check_project", "part_fit_findings"]
 
@@ -64,7 +65,7 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
     walls = {w.label for w in project.walls}
     for wall in project.walls:
         for row in wall.rows:
-            for m in row.modules:
+            for m in row.cabinets:
                 if m.corner is None:
                     continue
                 adjacent = m.corner.adjacent_wall
@@ -90,13 +91,28 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
                         subject=wall.label,
                         message=(
                             f"Стена {wall.label}: {_KIND_RU[row.kind]} ряд занимает {_num(total)} мм "
-                            f"(модули, угловые смещения, пенал), а длина стены {_num(wall.length)} мм: "
+                            f"(модули, пустые места, угловые смещения, пенал), а длина стены {_num(wall.length)} мм: "
                             f"разница {_num(abs(total - wall.length))} мм (допуск {rules.wall_tolerance} мм)."
                         ),
                         value=total,
                         limit=wall.length,
                     )
                 )
+    return found
+
+
+def _gap_widths(project: Project) -> list[Finding]:
+    """Ширина пустого места — целые миллиметры, как у модулей (общее правило «Целые миллиметры»)."""
+    found: list[Finding] = []
+    for _, entry in _entries(project):
+        if not is_gap(entry):
+            continue
+        try:
+            gap_width(entry)
+        except KitchenError as e:
+            found.append(
+                Finding(code="gap_width", level="error", subject=entry.label, message="\n".join(e.problems))
+            )
     return found
 
 
@@ -347,8 +363,16 @@ def _niches(
 def _modules(project: Project):
     for wall in project.walls:
         for row in wall.rows:
-            for module in row.modules:
+            for module in row.cabinets:
                 yield row, module
+
+
+def _entries(project: Project):
+    """Все записи рядов: модули и пустые места."""
+    for wall in project.walls:
+        for row in wall.rows:
+            for entry in row.modules:
+                yield row, entry
 
 
 def _build(project: Project, ws: Workshop, found: list[Finding]):
@@ -395,7 +419,7 @@ def duplicate_labels(project: Project) -> list[Finding]:
     нормализации (регистр, пробелы по краям, латинские «H1» и кириллические «Н1»), — повтор. Одна находка на
     метку, в сообщении все записи."""
     groups: dict[str, list[str]] = {}
-    for _, module in _modules(project):
+    for _, module in _entries(project):
         groups.setdefault(_label_key(module.label), []).append(module.label)
     return [
         Finding(
@@ -501,7 +525,7 @@ def _countertop_overrides(project: Project) -> list[Finding]:
     for wall in project.walls:
         for row in wall.rows:
             places = [(f"ряд {_KIND_RU[row.kind]} на стене «{wall.label}»", wall.label, row.materials)]
-            places += [(f"Модуль {m.label}", m.label, m.materials) for m in row.modules]
+            places += [(f"Модуль {m.label}", m.label, m.materials) for m in row.cabinets]
             for where, subject, overrides in places:
                 if overrides is not None and overrides.countertop is not None:
                     found.append(
@@ -520,7 +544,12 @@ def _countertop_overrides(project: Project) -> list[Finding]:
 
 def check_project(project: Project, ws: Workshop, brief: dict | None = None) -> list[Finding]:
     """Все проверки проекта, ошибки и предупреждения вместе. `brief` — последний бриф заказа (или `None`)."""
-    found = duplicate_labels(project) + _row_sums(project, ws) + _countertop_overrides(project)
+    found = (
+        duplicate_labels(project)
+        + _row_sums(project, ws)
+        + _gap_widths(project)
+        + _countertop_overrides(project)
+    )
     dims, built = _build(project, ws, found)
     failed = {f.subject for f in found if f.code == "module_build"}
     found += _niches(project, ws, dims, None if brief is None else brief_appliances(brief), failed)
