@@ -390,7 +390,7 @@ def test_views_draw_unknown_template_and_too_small_part_as_bare_boxes(home):
 
 
 def test_cli_3d_project_with_a_module_that_does_not_build_succeeds_and_names_the_error(home):
-    # заказ с таким проектом не импортируется (импорт отклоняет), поэтому у CLI достижим только --project
+    # импорт такой проект отклоняет; у заказа он возникает после правки мастерской (тест ниже)
     from tests.test_placement import petrov
 
     path = home / "p.json"
@@ -439,3 +439,34 @@ def test_plan_row_depth_is_the_deepest_module_of_the_row_with_facade(home):
     texts = [lb.text for lb in plan.labels]
     assert "глубина: нижние 619, верхние 339" in texts  # стена A: 600 + 19 фасад, остальные 579
     assert "глубина: нижние 579, верхние 339" in texts  # стена Б без правок
+
+
+def test_views_of_a_clean_project_keep_the_parts_warnings(home):
+    assert api.views_from_project(PETROV, home).warnings == ["Н5: без задней стенки"]
+
+
+def test_only_the_module_that_does_not_build_loses_its_facades(home):
+    from tests.test_placement import petrov
+
+    clean = {m.label: m for m in api.views_from_project(PETROV, home).scene.modules}
+    path = home / "p.json"
+    path.write_text(
+        json.dumps(petrov(Н3={"width": 100}, Н4={"width": 1100}), ensure_ascii=False), encoding="utf-8"
+    )
+    broken = {m.label: m for m in api.views_from_project(path, home).scene.modules}
+    assert [label for label, m in broken.items() if not m.facades] == ["Н3"]
+    for label in ("Н1", "Н5", "В5", "В6"):
+        assert broken[label].facades == clean[label].facades, label
+    assert broken["Н4"].blind_width == 650
+
+
+def test_order_views_draw_a_module_that_stopped_building_after_a_workshop_edit(home):
+    petrov_order(home)
+    yaml = home / "workshop" / "construction.yaml"
+    text = yaml.read_text(encoding="utf-8")
+    assert "макс_ширина: 150}" in text
+    yaml.write_text(text.replace("макс_ширина: 150}", "макс_ширина: 100}"), encoding="utf-8")
+    result = api.views_and_save(ORDER, home)
+    assert [(f.code, f.subject) for f in result.errors] == [("module_build", "Н3")]
+    assert result.output is not None
+    assert next(m for m in result.scene.modules if m.label == "Н3").facades == []
