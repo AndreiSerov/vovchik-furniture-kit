@@ -41,6 +41,9 @@ from kitchen.result import MOCK_BANNER, Result
 from kitchen.trip import NO_BRIEF_WARNING, TripHeader, TripSection, build_header, build_trip
 from kitchen.trip_pdf import TripPageLayout, write_trip
 from kitchen.trip_pdf import layout as trip_page_layout
+from kitchen.views import ViewPage, ViewScene, build_scene
+from kitchen.views import layout as views_page_layout
+from kitchen.views_pdf import write_views
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
 __all__ = [
@@ -87,6 +90,8 @@ __all__ = [
     "StatusResult",
     "ValidationContext",
     "ValidationResult",
+    "ViewPage",
+    "ViewsResult",
     "WorkshopCheck",
     "assembly_and_save",
     "assembly_from_order",
@@ -142,6 +147,10 @@ __all__ = [
     "trip_from_project",
     "trip_layout",
     "validate_wrapper",
+    "views_and_save",
+    "views_from_order",
+    "views_from_project",
+    "views_layout",
 ]
 
 
@@ -2293,6 +2302,108 @@ def placement_from_order(order: str, home: Path | None = None) -> PlacementResul
     home = home or resolve_home()
     project, source, _, _ = _order_project(order, home)
     return _placement(project, source, load_workshop(home))
+
+
+# --- виды кухни в PDF ---------------------------------------------------------
+
+
+class ViewsResult(Result):
+    """Виды кухни (тикет 41): сцена видов из расстановки, находки проверок проекта (при ошибках виды рисуются с
+    плашкой) и предупреждения расстановки (`tall_heights`). Ошибки расстановки — отказ (`OrderError`)."""
+
+    order: str
+    source: PartsSource
+    findings: list[Finding]  # находки проверок проекта, как у `kitchen check`
+    placement_findings: list[Finding]  # предупреждения расстановки: `tall_heights`
+    scene: ViewScene
+    walls: int
+    pages: int
+    warnings: list[str]
+    output: OutputInfo | None = None
+
+    @property
+    def errors(self) -> list[Finding]:
+        return [f for f in self.findings if f.level == "error"]
+
+    @property
+    def check_warnings(self) -> list[Finding]:
+        return [f for f in self.findings if f.level == "warning"]
+
+
+VIEWS_PDF = "kitchen-views.pdf"
+
+
+def _views(
+    project: Project, source: PartsSource, brief: sqlite3.Row | None, warnings: list[str], workshop: Workshop
+) -> ViewsResult:
+    _require_unique_labels(project)
+    placed = place_project(project, workshop)
+    refused = [f.message for f in placed.findings if f.level == "error"]
+    if refused:
+        raise OrderError(refused)
+    computed = compute_parts(project, workshop)
+    scene = build_scene(project, placed, computed.modules, workshop)
+    findings = run_checks(project, workshop, json.loads(brief["data"]) if brief else None)
+    errors = sum(f.level == "error" for f in findings)
+    pages = views_page_layout(scene, errors)  # подписи, которым нет места, — ошибка уже здесь
+    return ViewsResult(
+        order=project.order,
+        source=source.model_copy(
+            update={
+                "brief_id": brief["id"] if brief else None,
+                "brief_saved_at": brief["created_at"] if brief else None,
+            }
+        ),
+        findings=findings,
+        placement_findings=placed.findings,
+        scene=scene,
+        walls=len(scene.walls),
+        pages=len(pages),
+        warnings=[*computed.warnings, *warnings],
+        mock=workshop.is_mock,
+        mock_files=workshop.mock_files,
+    )
+
+
+def views_from_project(path: Path, home: Path | None = None) -> ViewsResult:
+    """`kitchen 3d --project <файл>`: виды проекта из файла, файлов не пишет."""
+    home = home or resolve_home()
+    project, source = _project_file(path)
+    return _views(project, source, _brief_of_project(home, project.order), [], load_workshop(home))
+
+
+def views_from_order(order: str, home: Path | None = None) -> ViewsResult:
+    """Виды текущей версии проекта заказа, без записи файлов."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
+    return _views(project, source, latest, warnings, load_workshop(home))
+
+
+def views_layout(result: ViewsResult) -> list[ViewPage]:
+    """Раскладка страниц видов (фигуры, линии, подписи, цепочки, высоты) — ровно то, что рисует PDF."""
+    return views_page_layout(result.scene, len(result.errors))
+
+
+def views_and_save(order: str, home: Path | None = None, on: date | None = None) -> ViewsResult:
+    """`kitchen 3d <заказ>`: виды текущей версии, PDF и регистрация вывода."""
+    home = home or resolve_home()
+    result = views_from_order(order, home)
+    pages = views_layout(result)
+    output = _save_output(
+        home,
+        result.source,
+        store.VIEWS,
+        VIEWS_PDF,
+        lambda path: write_views(
+            path,
+            pages,
+            order=result.source.order,
+            version=result.source.version,
+            mock=result.mock,
+            on=on or store.today(),
+        ),
+    )
+    return result.model_copy(update={"output": output})
 
 
 # --- быстрая вилка ------------------------------------------------------------

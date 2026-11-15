@@ -230,6 +230,14 @@ def _plural(n: int, forms: tuple[str, str, str]) -> str:
     return f"{n} {forms[0] if n % 10 == 1 else forms[1] if n % 10 in (2, 3, 4) else forms[2]}"
 
 
+def _checks_line(errors: int, warnings: int) -> str:
+    """«Проверки: 2 ошибки, 1 предупреждение» — у `check` и `3d`."""
+    return (
+        f"Проверки: {_plural(errors, ('ошибка', 'ошибки', 'ошибок'))}, "
+        f"{_plural(warnings, ('предупреждение', 'предупреждения', 'предупреждений'))}"
+    )
+
+
 def _render_parts(r: api.PartsResult) -> str:
     errors = sum(f.level == "error" for f in r.findings)
     summary = (
@@ -443,6 +451,41 @@ def trip(
     except KitchenError as e:
         fail(e)
     emit(result, _render_trip, json)
+
+
+def _render_views(r: api.ViewsResult) -> str:
+    lines = [
+        _render_source(r.source),
+        _checks_line(len(r.errors), len(r.check_warnings)),
+        *(f.message for f in r.placement_findings),
+    ]
+    if r.output:
+        lines.append(f"Виды PDF: {r.output.file} (стен {r.walls}, страниц {r.pages})")
+    else:
+        lines.append("Файл не записан (--project)")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("3d")
+def three_d(
+    order: Annotated[
+        str | None, typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project.")
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Виды кухни: план сверху и вид на каждую стену спереди; для заказа также PDF."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError("Укажите либо заказ (kitchen 3d petrov), либо файл: --project project.json.")
+        result = api.views_and_save(order) if order is not None else api.views_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_views, json)
 
 
 def _render_cut(r: api.CutResult) -> str:
@@ -816,10 +859,7 @@ def quick_estimate(
 
 def _render_check_result(r: api.CheckResult) -> str:
     errors = r.errors
-    summary = (
-        f"Проверки: {_plural(len(errors), ('ошибка', 'ошибки', 'ошибок'))}, "
-        f"{_plural(len(r.warnings), ('предупреждение', 'предупреждения', 'предупреждений'))}"
-    )
+    summary = _checks_line(len(errors), len(r.warnings))
     lines = [f"Проверки проекта {r.order}:", _render_source(r.source), summary]
     if r.findings:
         lines += [f"  [ОШИБКА] {f.message}" for f in errors]
