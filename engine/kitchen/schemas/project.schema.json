@@ -8,6 +8,7 @@
           "type": "string"
         },
         "width": {
+          "exclusiveMinimum": 0,
           "title": "Width",
           "type": "number"
         },
@@ -26,6 +27,7 @@
         "height": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0,
               "type": "number"
             },
             {
@@ -38,6 +40,7 @@
         "depth": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0,
               "type": "number"
             },
             {
@@ -50,6 +53,7 @@
         "niche_width": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0,
               "type": "number"
             },
             {
@@ -62,6 +66,7 @@
         "niche_height": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0,
               "type": "number"
             },
             {
@@ -74,6 +79,7 @@
         "niche_depth": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0,
               "type": "number"
             },
             {
@@ -251,16 +257,32 @@
           "type": "string"
         },
         "template": {
+          "enum": [
+            "base_bottle",
+            "base_corner",
+            "base_door",
+            "base_drawers",
+            "base_sink",
+            "dishwasher_panel",
+            "tall_oven",
+            "wall_corner",
+            "wall_door",
+            "wall_dryer",
+            "wall_hood",
+            "wall_lift"
+          ],
           "title": "Template",
           "type": "string"
         },
         "width": {
+          "exclusiveMinimum": 0,
           "title": "Width",
           "type": "number"
         },
         "height": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0,
               "type": "number"
             },
             {
@@ -273,6 +295,7 @@
         "depth": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0,
               "type": "number"
             },
             {
@@ -284,6 +307,7 @@
         },
         "shelves": {
           "default": 1,
+          "minimum": 0,
           "title": "Shelves",
           "type": "integer"
         },

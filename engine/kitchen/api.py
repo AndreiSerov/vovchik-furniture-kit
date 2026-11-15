@@ -365,13 +365,6 @@ def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
         project = parse_project({k: v for k, v in data.items() if k != "version"})
     except OrderError as e:
         return ValidationResult(errors=e.problems)
-    seen = set()
-    for wall in project.walls:
-        for row in wall.rows:
-            for module in row.modules:
-                if module.label in seen:
-                    return ValidationResult(errors=[f"Метка модуля «{module.label}» не уникальна."])
-                seen.add(module.label)
     if ctx.workshop is None:  # без мастерской проект не проверить, а непроверенный не принимаем
         return ValidationResult(
             errors=[

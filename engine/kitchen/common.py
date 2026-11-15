@@ -42,12 +42,15 @@ def _is_tall(m) -> bool:
 
 
 def _row_modules(wall, row) -> list:
-    """Модули ряда по порядку вдоль стены. В нижний ряд без своего пенала добавлены пеналы, описанные в других
-    рядах стены: пенал входит в оба ряда. Место пенала — по его отступу от начала стены в своём ряду."""
-    if row.kind != "lower" or any(_is_tall(m) for m in row.modules):
+    """Модули ряда по порядку вдоль стены. В нижний ряд добавлены пеналы стены, описанные в других рядах
+    (даже если в нём есть свой): пенал входит в оба ряда. Место пенала — по его отступу от начала стены
+    в своём ряду."""
+    if row.kind != "lower":
         return list(row.modules)
     talls: list[tuple[float, object]] = []
     for other in wall.rows:
+        if other is row:
+            continue
         x = 0.0
         for m in other.modules:
             if _is_tall(m):

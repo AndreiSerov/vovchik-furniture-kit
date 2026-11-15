@@ -8,6 +8,8 @@ from kitchen.errors import OrderError
 from kitchen.project import Project
 from typer.testing import CliRunner
 
+from tests.conftest import BASE_DOOR_PROJECT
+
 
 def project():
     return {
@@ -113,11 +115,12 @@ def test_diff_reports_width_and_added_removed_modules(home, tmp_path):
 
 def test_duplicate_module_labels_are_rejected(home, tmp_path):
     api.order_new("2026-047-petrov")
-    data = project()
+    # повтор метки — находка `duplicate_label` из проверок проекта (тикет 34), поэтому импорт полный
+    data = json.loads(json.dumps(BASE_DOOR_PROJECT))
     modules = data["walls"][0]["rows"][0]["modules"]
     modules.append(dict(modules[0]))
     with pytest.raises(OrderError, match="Н1"):
-        schema_import("petrov", write(tmp_path / "p.json", data))
+        api.import_project("petrov", write(tmp_path / "p.json", data))
 
 
 def test_import_ignores_any_supplied_version(home, tmp_path):

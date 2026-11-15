@@ -56,18 +56,18 @@ def _both_rows(module: ModuleSpec) -> bool:
 
 
 def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
-    """Ширины модулей ряда + угловые смещения с соседней стены (+ пенал из другого ряда) = длина стены."""
+    """Ширины модулей ряда + угловые смещения с соседней стены + пеналы стены из других рядов = длина стены."""
     rules = ws.construction.corner_rules
     offsets = {"lower": rules.lower_offset, "upper": rules.upper_offset}
     extra: dict[tuple[str, str], float] = {}  # (стена, вид ряда) -> смещения и пеналы
-    tall_widths: dict[str, float] = {}
+    talls: dict[str, list[tuple[int, float]]] = {}  # стена -> (номер ряда, ширина пенала)
     found: list[Finding] = []
     walls = {w.label for w in project.walls}
     for wall in project.walls:
-        for row in wall.rows:
+        for number, row in enumerate(wall.rows):
             for m in row.modules:
                 if _both_rows(m):
-                    tall_widths[wall.label] = tall_widths.get(wall.label, 0) + m.width
+                    talls.setdefault(wall.label, []).append((number, m.width))
                 if m.corner is None:
                     continue
                 adjacent = m.corner.adjacent_wall
@@ -83,10 +83,9 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
                     continue
                 extra[(adjacent, row.kind)] = extra.get((adjacent, row.kind), 0) + offsets[row.kind]
     for wall in project.walls:
-        for row in wall.rows:
+        for number, row in enumerate(wall.rows):
             total = sum(m.width for m in row.modules) + extra.get((wall.label, row.kind), 0)
-            if not any(_both_rows(m) for m in row.modules):
-                total += tall_widths.get(wall.label, 0)
+            total += sum(width for at, width in talls.get(wall.label, []) if at != number)
             if abs(total - wall.length) > rules.wall_tolerance:
                 found.append(
                     Finding(
@@ -236,6 +235,8 @@ def _niches(
         ]
     for a in project.appliances:
         if a.module not in dims:
+            if a.module in failed:  # модуль не рассчитался: причина уже названа находкой `module_build`
+                continue
             found.append(
                 Finding(
                     code="appliance_module",
@@ -350,25 +351,51 @@ def _modules(project: Project):
 
 
 def _build(project: Project, ws: Workshop, found: list[Finding]):
-    """Габариты и детали каждого модуля; сбой расчёта модуля — находка, а не обрыв."""
+    """Габариты и детали каждого модуля; сбой расчёта модуля — находка, а не обрыв. Модули с одной меткой
+    считаются все (находка `duplicate_label` — отдельно): `dims` хранит первый, `built` — каждый."""
     dims: dict[str, tuple[ModuleSpec, ModuleDims]] = {}
-    built: dict[str, TemplateOut] = {}
+    built: list[tuple[ModuleSpec, TemplateOut]] = []
     for row, module in _modules(project):
+        if module.template not in TEMPLATES:  # текст ошибки — один, как у `kitchen parts`
+            try:
+                build_module(module, row, project.materials, ws, project.appliances)
+            except KitchenError as e:
+                found.append(_build_failure(module, e))
+            continue
         try:
             d = module_dims(module, row.kind, ws)
         except KitchenError as e:
             found.append(_build_failure(module, e))
             continue
-        dims[module.label] = (module, d)
+        dims.setdefault(module.label, (module, d))
         depth = _drawer_depth(module, d, ws)
         if depth:
             found.append(depth)
             continue  # расчёт упёрся бы в ту же глубину
         try:
-            built[module.label] = build_module(module, row, project.materials, ws, project.appliances)
+            built.append((module, build_module(module, row, project.materials, ws, project.appliances)))
         except KitchenError as e:
             found.append(_build_failure(module, e))
     return dims, built
+
+
+def duplicate_labels(project: Project) -> list[Finding]:
+    """Метка модуля уникальна в проекте: пенал, записанный в двух рядах, тоже повтор. Одна находка на метку."""
+    seen: set[str] = set()
+    repeated: dict[str, None] = {}
+    for _, module in _modules(project):
+        if module.label in seen:
+            repeated[module.label] = None
+        seen.add(module.label)
+    return [
+        Finding(
+            code="duplicate_label",
+            level="error",
+            subject=label,
+            message=f"Метка модуля «{label}» не уникальна.",
+        )
+        for label in repeated
+    ]
 
 
 def _build_failure(module: ModuleSpec, error: KitchenError) -> Finding:
@@ -419,38 +446,38 @@ def part_fit_findings(part: Part, sheet: SheetMaterial, ws: Workshop) -> list[Fi
     ]
 
 
-def _sheet_fit(built: dict[str, TemplateOut], ws: Workshop) -> list[Finding]:
+def _sheet_fit(built: list[tuple[ModuleSpec, TemplateOut]], ws: Workshop) -> list[Finding]:
     """Все листовые детали проекта в рабочем поле листа."""
     sheets = {m.id: m for m in ws.materials.sheets}
     return [
         f
-        for out in built.values()
+        for _, out in built
         for part in out.parts
         if part.material in sheets  # фасады и столешница — не листовые детали
         for f in part_fit_findings(part, sheets[part.material], ws)
     ]
 
 
-def _no_back(built: dict[str, TemplateOut], dims: dict[str, tuple[ModuleSpec, ModuleDims]]) -> list[Finding]:
+def _no_back(built: list[tuple[ModuleSpec, TemplateOut]]) -> list[Finding]:
     """Корпус без задней стенки. Модуль без корпуса (только фасад) не в счёт."""
     return [
         Finding(
             code="no_back_panel",
             level="warning",
-            subject=label,
-            message=f"Модуль {label}: без задней стенки — проверьте, что так и задумано.",
+            subject=module.label,
+            message=f"Модуль {module.label}: без задней стенки — проверьте, что так и задумано.",
         )
-        for label, out in built.items()
-        if TEMPLATES[dims[label][0].template].carcass and not any(p.name == BACK_PANEL for p in out.parts)
+        for module, out in built
+        if TEMPLATES[module.template].carcass and not any(p.name == BACK_PANEL for p in out.parts)
     ]
 
 
 def check_project(project: Project, ws: Workshop, brief: dict | None = None) -> list[Finding]:
     """Все проверки проекта, ошибки и предупреждения вместе. `brief` — последний бриф заказа (или `None`)."""
-    found = _row_sums(project, ws)
+    found = duplicate_labels(project) + _row_sums(project, ws)
     dims, built = _build(project, ws, found)
     failed = {f.subject for f in found if f.code == "module_build"}
     found += _niches(project, ws, dims, None if brief is None else brief_appliances(brief), failed)
     found += _sheet_fit(built, ws)
-    found += _no_back(built, dims)
+    found += _no_back(built)
     return found

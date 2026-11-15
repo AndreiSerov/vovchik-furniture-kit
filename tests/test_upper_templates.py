@@ -160,7 +160,7 @@ def test_hood_rejects_nonpositive_project_appliance_dimensions(home, base_door_p
         {"type": "hood", "width": 500, "niche_height": 150, "niche_depth": -10, "module": "В1"}
     ]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
-    with pytest.raises(OrderError, match="В1.*положительн"):
+    with pytest.raises(OrderError, match="niche_depth.*больше 0"):
         api.parts_from_project(base_door_project, home)
 
 

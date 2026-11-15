@@ -39,6 +39,7 @@ __all__ = [
     "build_module",
     "built_niche",
     "compute_parts",
+    "drawer_parts",
     "facade_color",
     "module_dims",
     "niche_item",
@@ -630,6 +631,61 @@ def build_base_bottle(
     return out
 
 
+def drawer_parts(
+    module: ModuleSpec, dims: ModuleDims, ws: Workshop, *, number: int, z: int, top: int
+) -> list[Part]:
+    """Дно и задняя стенка ящика Tandembox за фасадом, нижний край которого `z`, верхний `top` (мм от низа
+    корпуса). Одна функция для `base_drawers` и пенала. Ящик, который не помещается в корпус или за свой
+    фасад, — ошибка «ящик не помещается» с цифрами, а не деталь отрицательного размера."""
+    c = ws.construction
+    t, D = c.case_thickness, dims.depth
+    material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
+    thickness = _required_thickness(material, "деталей ящика")
+    inner = _calc(module, dims, "внутренняя ширина ящика", c.drawers.inner_width, W=dims.width, T=t)
+    try:
+        bottom = formulas.evaluate(c.tandembox.bottom, внутр_ширина=inner)
+        back = formulas.evaluate(c.tandembox.back, внутр_ширина=inner)
+    except FormulaError as e:
+        raise OrderError(f"Модуль {module.label}: размеры ящика: {e}.") from e
+    if not isinstance(bottom, tuple) or not isinstance(back, tuple):
+        raise OrderError(f"Модуль {module.label}: формулы деталей ящика должны задавать два размера.")
+    if min(*bottom, *back) <= 0:
+        raise OrderError(
+            f"Модуль {module.label}: ящик не помещается: размеры деталей ящика должны быть положительными, "
+            f"а при внутренней ширине {inner} мм они {bottom[0]}×{bottom[1]} и {back[0]}×{back[1]} мм."
+        )
+    drawer_z = _calc(module, dims, "высота дна ящика", c.drawers.bottom_height, Z=z, T=t)
+    drawer_top = drawer_z + max(thickness, back[1])
+    if D - bottom[1] - thickness < 0:
+        raise OrderError(
+            f"Модуль {module.label}: ящик не помещается: дно ящика {bottom[1]} мм и задняя стенка "
+            f"{thickness} мм глубже корпуса {D} мм."
+        )
+    if drawer_z < t or drawer_top > top:
+        raise OrderError(
+            f"Модуль {module.label}: ящик не помещается: ящик занимает высоту от {drawer_z} до {drawer_top} мм, "
+            f"а место под него от {t} до {top} мм (фасад ящика {top - z} мм)."
+        )
+    return [
+        make_part(
+            pid=f"{module.label}-{suffix}-{number}",
+            module_label=module.label,
+            name=name,
+            a=Span(sizes[0], axes[0]),
+            b=Span(sizes[1], axes[1]),
+            thickness=thickness,
+            material_id=material.id,
+            textured=bool(material.texture),
+            at=Position(x=(dims.width - sizes[0]) // 2, y=y, z=drawer_z),
+            edges=dict.fromkeys(EDGE_SIDES, _edge_id(ws, material.id)) if c.drawers.edge_parts else None,
+        )
+        for suffix, name, sizes, axes, y in (
+            ("дно-ящ", DRAWER_BOTTOM, bottom, ("x", "y"), D - bottom[1]),
+            ("зад-ящ", DRAWER_BACK, back, ("x", "z"), D - bottom[1] - thickness),
+        )
+    ]
+
+
 def build_base_drawers(
     module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
 ) -> TemplateOut:
@@ -656,25 +712,8 @@ def build_base_drawers(
     if lower_height <= 0:
         raise OrderError(f"Модуль {module.label}: высота фасада ящика должна быть положительной.")
     facade = _material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
-    drawer_material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
-    drawer_t = _required_thickness(drawer_material, "деталей ящика")
-    inner = _calc(
-        module, dims, "внутренняя ширина ящика", c.drawers.inner_width, W=dims.width, T=c.case_thickness
-    )
-    try:
-        bottom_dims = formulas.evaluate(c.tandembox.bottom, внутр_ширина=inner)
-        back_dims = formulas.evaluate(c.tandembox.back, внутр_ширина=inner)
-    except FormulaError as e:
-        raise OrderError(f"Модуль {module.label}: размеры ящика: {e}.") from e
-    if not isinstance(bottom_dims, tuple) or not isinstance(back_dims, tuple):
-        raise OrderError(f"Модуль {module.label}: формулы деталей ящика должны задавать два размера.")
-    if min(*bottom_dims, *back_dims) <= 0:
-        raise OrderError(
-            f"Модуль {module.label}: размеры деталей ящика должны быть положительными: {bottom_dims}, {back_dims}."
-        )
     z = facades.gap
     for n, h in enumerate((lower_height, lower_height, top), 1):
-        drawer_z = _calc(module, dims, "высота дна ящика", c.drawers.bottom_height, Z=z, T=c.case_thickness)
         out.parts.append(
             make_part(
                 pid=f"{module.label}-фасад-{n}",
@@ -689,32 +728,7 @@ def build_base_drawers(
                 area=True,
             )
         )
-        for suffix, name, sizes, axes, y in (
-            ("дно-ящ", DRAWER_BOTTOM, bottom_dims, ("x", "y"), dims.depth - bottom_dims[1]),
-            (
-                "зад-ящ",
-                DRAWER_BACK,
-                back_dims,
-                ("x", "z"),
-                dims.depth - bottom_dims[1] - drawer_t,
-            ),
-        ):
-            out.parts.append(
-                make_part(
-                    pid=f"{module.label}-{suffix}-{n}",
-                    module_label=module.label,
-                    name=name,
-                    a=Span(sizes[0], axes[0]),
-                    b=Span(sizes[1], axes[1]),
-                    thickness=drawer_t,
-                    material_id=drawer_material.id,
-                    textured=bool(drawer_material.texture),
-                    at=Position(x=(dims.width - sizes[0]) // 2, y=y, z=drawer_z),
-                    edges=dict.fromkeys(EDGE_SIDES, _edge_id(ws, drawer_material.id))
-                    if c.drawers.edge_parts
-                    else None,
-                )
-            )
+        out.parts += drawer_parts(module, dims, ws, number=n, z=z, top=z + h)
         z += h + facades.gap
     return out
 
@@ -1090,6 +1104,9 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     unknown = sorted(set(hw) - known)
     if unknown:
         raise OrderError(f"Неизвестные позиции фурнитуры (нет в hardware.yaml): {', '.join(unknown)}.")
+    negative = _negative_hardware(hw)
+    if negative:
+        raise OrderError(f"Количество фурнитуры меньше нуля: {', '.join(negative)}.")
     all_parts = [p for m in modules for p in m.parts]
     # площадь фасадов — сумма площадей их деталей; округляется один раз, до 4 знаков
     facade_area = sum((Decimal(str(p.area_m2)) for p in all_parts if p.area_m2 is not None), Decimal(0))
@@ -1226,4 +1243,33 @@ def build_module(
         )
     resolved_materials = resolve_materials(module, row, materials)
     dims = module_dims(module, row.kind, ws)
-    return template.build(module, dims, resolved_materials, ws, BuildContext(appliances, row))
+    out = template.build(module, dims, resolved_materials, ws, BuildContext(appliances, row))
+    _check_sound(module, dims, out)
+    return out
+
+
+def _negative_hardware(hardware: Counter) -> list[str]:
+    """Позиции фурнитуры с количеством меньше нуля, «id количество»."""
+    return sorted(f"{item} {n}" for item, n in hardware.items() if n < 0)
+
+
+def _check_sound(module: ModuleSpec, dims: ModuleDims, out: TemplateOut) -> None:
+    """Шаблон на этих габаритах строит деталь, которой нет: размер не больше нуля, положение за пределами
+    модуля или фурнитуры меньше нуля — ошибка модуля, а не молчаливо неверный вывод. Единственное
+    место проверки для всех шаблонов. Задняя стенка ХДФ накладная: она стоит за корпусом (`y < 0`)."""
+    problems = []
+    for part in out.parts:
+        if min(part.length, part.width, part.thickness) <= 0:
+            problems.append(f"{part.id} {part.length}×{part.width} мм")
+        else:
+            at = part.position
+            if min(at.x, at.z) < 0 or (at.y < 0 and part.name != BACK_PANEL):
+                problems.append(f"{part.id} за пределами модуля (x={at.x}, y={at.y}, z={at.z})")
+    if problems:
+        raise OrderError(
+            f"Модуль {module.label}: при габаритах {dims.width}×{dims.height}×{dims.depth} мм шаблон "
+            f"{module.template} строит деталь неверного размера или положения: {'; '.join(problems)}."
+        )
+    negative = _negative_hardware(out.hardware)
+    if negative:
+        raise OrderError(f"Модуль {module.label}: количество фурнитуры меньше нуля: {', '.join(negative)}.")

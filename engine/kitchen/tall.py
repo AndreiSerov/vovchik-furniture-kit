@@ -5,9 +5,6 @@ from kitchen.errors import OrderError
 from kitchen.formulas import FormulaError
 from kitchen.models import Workshop
 from kitchen.parts import (
-    DRAWER_BACK,
-    DRAWER_BOTTOM,
-    EDGE_SIDES,
     ModuleDims,
     Position,
     Span,
@@ -18,6 +15,7 @@ from kitchen.parts import (
     _required_thickness,
     build_base_door,
     built_niche,
+    drawer_parts,
     make_part,
     niche_item,
     steps_pick,
@@ -125,44 +123,7 @@ def build_tall_oven(
                 area=True,
             )
         )
-    inner = _calc(module, dims, "внутренняя ширина ящика", c.drawers.inner_width, W=W, T=t)
-    try:
-        bottom = formulas.evaluate(c.tandembox.bottom, внутр_ширина=inner)
-        back = formulas.evaluate(c.tandembox.back, внутр_ширина=inner)
-    except FormulaError as e:
-        raise OrderError(f"Модуль {module.label}: размеры ящика: {e}.") from e
-    if (
-        not isinstance(bottom, tuple)
-        or not isinstance(back, tuple)
-        or min(*bottom, *back) <= 0
-        or bottom[1] > D
-    ):
-        raise OrderError(f"Модуль {module.label}: неверные размеры ящика.")
-    drawer_material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
-    drawer_t = _required_thickness(drawer_material, "деталей ящика")
-    drawer_z = _calc(module, dims, "высота дна ящика", c.drawers.bottom_height, Z=gap, T=t)
-    if D - bottom[1] - drawer_t < 0 or drawer_z < t or drawer_z + max(drawer_t, back[1]) > bottom_z:
-        raise OrderError(f"Модуль {module.label}: ящик не помещается под дном ниши.")
-    for pid, name, sizes, axes, y in (
-        ("дно-ящ-1", DRAWER_BOTTOM, bottom, ("x", "y"), D - bottom[1]),
-        ("зад-ящ-1", DRAWER_BACK, back, ("x", "z"), D - bottom[1] - drawer_t),
-    ):
-        out.parts.append(
-            make_part(
-                pid=f"{module.label}-{pid}",
-                module_label=module.label,
-                name=name,
-                a=Span(sizes[0], axes[0]),
-                b=Span(sizes[1], axes[1]),
-                thickness=drawer_t,
-                material_id=drawer_material.id,
-                textured=bool(drawer_material.texture),
-                at=Position(x=(W - sizes[0]) // 2, y=y, z=drawer_z),
-                edges=dict.fromkeys(EDGE_SIDES, _edge_id(ws, drawer_material.id))
-                if c.drawers.edge_parts
-                else None,
-            )
-        )
+    out.parts += drawer_parts(module, dims, ws, number=1, z=gap, top=bottom_z)
     hw = c.furniture
     joints = 6 * steps_pick(c.confirmats_by_joint_length, D, "конфирматы_по_длине_соединения")
     hinges = steps_pick(c.hinges_by_facade_height, door_h, "петли_по_высоте_фасада")
