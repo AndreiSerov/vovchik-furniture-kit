@@ -265,6 +265,7 @@ OutputKind = Literal[
     "quote_json",
     "drilling",
     "assembly",
+    "trip",
 ]  # виды выводов; этапы 2-4 добавляют свои
 CUTTING: OutputKind = "cutting"
 EDGING: OutputKind = "edging"
@@ -276,6 +277,7 @@ QUOTE_PDF: OutputKind = "quote_pdf"
 QUOTE_JSON: OutputKind = "quote_json"
 DRILLING: OutputKind = "drilling"
 ASSEMBLY: OutputKind = "assembly"
+TRIP: OutputKind = "trip"
 
 
 class Recompute(NamedTuple):
@@ -299,6 +301,7 @@ OUTPUT_RECOMPUTE: dict[OutputKind, Recompute] = {
     QUOTE_JSON: Recompute("КП (json)", "quote", "--days <рабочих дней>"),
     DRILLING: Recompute("карта присадки", "drilling"),
     ASSEMBLY: Recompute("сборочный лист", "assembly"),
+    TRIP: Recompute("чек-лист выезда", "trip"),
 }
 
 

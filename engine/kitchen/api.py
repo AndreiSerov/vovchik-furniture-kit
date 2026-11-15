@@ -37,6 +37,9 @@ from kitchen.purchase import PurchaseShop, build_purchase
 from kitchen.quote import DAYS_ERROR, QuoteBody, build_quote, check_days, money, parse_days, percent, plural
 from kitchen.quote_pdf import write_quote
 from kitchen.result import MOCK_BANNER, Result
+from kitchen.trip import NO_BRIEF_WARNING, TripHeader, TripSection, build_header, build_trip
+from kitchen.trip_pdf import TripPageLayout, write_trip
+from kitchen.trip_pdf import layout as trip_page_layout
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
 __all__ = [
@@ -129,6 +132,10 @@ __all__ = [
     "quote_from_project",
     "resolve_home",
     "status",
+    "trip_and_save",
+    "trip_from_order",
+    "trip_from_project",
+    "trip_layout",
     "validate_wrapper",
 ]
 
@@ -1490,6 +1497,78 @@ def _assembly_writer(result: AssemblyResult, on: date | None) -> Callable[[Path]
     )
 
 
+# --- чек-лист выезда ----------------------------------------------------------
+
+
+class TripResult(Result):
+    """Чек-лист выезда: шапка из брифа, разделы со строками; версия-источник."""
+
+    source: PartsSource
+    output: OutputInfo | None = None
+    warnings: list[str]
+    header: TripHeader
+    sections: list[TripSection]
+
+
+def _trip(project: Project, parts: PartsResult, workshop: Workshop, brief: sqlite3.Row | None) -> TripResult:
+    """Шапка берётся из брифа `brief` (строка БД); нет брифа — «—» и предупреждение."""
+    data = json.loads(brief["data"]) if brief else None
+    return TripResult(
+        source=parts.source,
+        warnings=[*parts.warnings, *([] if brief else [NO_BRIEF_WARNING])],
+        header=build_header(data),
+        sections=build_trip(project, parts.common, parts.hardware, workshop),
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+    )
+
+
+def trip_from_order(order: str, home: Path | None = None) -> TripResult:
+    """Чек-лист выезда текущей версии проекта заказа, без записи файлов."""
+    home = home or resolve_home()
+    project, source, latest, warnings = _order_project(order, home)
+    workshop = load_workshop(home)
+    parts = _build_parts(project, home, source, latest, warnings, workshop)
+    return _trip(project, parts, workshop, latest)
+
+
+def trip_from_project(path: Path, home: Path | None = None) -> TripResult:
+    """`kitchen trip --project <файл>`: чек-лист из файла, файлов не пишет; брифа у файла нет — шапка из «—»."""
+    home = home or resolve_home()
+    project, source = _project_file(path)
+    workshop = load_workshop(home)
+    parts = _build_parts(project, home, source, None, [], workshop)
+    return _trip(project, parts, workshop, None)
+
+
+TRIP_PDF = "trip-checklist.pdf"
+
+
+def trip_layout(result: TripResult) -> list[TripPageLayout]:
+    """Раскладка страниц чек-листа (строки, кегли, положение) — ровно то, что рисует PDF."""
+    return trip_page_layout(result.header, result.sections)
+
+
+def trip_and_save(order: str, home: Path | None = None, on: date | None = None) -> TripResult:
+    """`kitchen trip <заказ>`: чек-лист текущей версии, PDF и регистрация вывода."""
+    home = home or resolve_home()
+    result = trip_from_order(order, home)
+    output = _save_output(home, result.source, store.TRIP, TRIP_PDF, _trip_writer(result, on))
+    return result.model_copy(update={"output": output})
+
+
+def _trip_writer(result: TripResult, on: date | None) -> Callable[[Path], None]:
+    return lambda path: write_trip(
+        path,
+        result.header,
+        result.sections,
+        order=result.source.order,
+        version=result.source.version,
+        mock=result.mock,
+        on=on or store.today(),
+    )
+
+
 class PurchaseResult(Result):
     """Позиции закупки с количеством, ценами и суммами по магазинам."""
 
@@ -1960,6 +2039,7 @@ PRODUCTION_KINDS: tuple[OutputKind, ...] = (
     store.PURCHASE_MD,
     store.PURCHASE_JSON,
     store.ASSEMBLY,
+    store.TRIP,
 )
 
 
@@ -1970,6 +2050,7 @@ class ProductionResult(Result):
     edging: EdgingResult
     purchase: PurchaseResult
     assembly: AssemblyResult
+    trip: TripResult
     mock_notice: str | None = None
 
 
@@ -1983,6 +2064,8 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
     purchase, purchase_files = _purchase_files(home, _purchase(project, parts, cut, workshop))
     assembly = _assembly(project, parts, workshop)
     assembly_output = _output_info(home, source, store.ASSEMBLY, ASSEMBLY_PDF)
+    trip = _trip(project, parts, workshop, brief)
+    trip_output = _output_info(home, source, store.TRIP, TRIP_PDF)
     cut_output = _output_info(home, source, store.CUTTING, CUTTING_PDF)
     edging_output = _output_info(home, source, store.EDGING, "edging-map.pdf")
     day = on or store.today()
@@ -2015,6 +2098,7 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
         ),
         *purchase_files,
         (assembly_output, _assembly_writer(assembly, day)),
+        (trip_output, _trip_writer(trip, day)),
     ]
     _save_outputs(home, source, files)
     return ProductionResult(
@@ -2022,6 +2106,7 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
         edging=edging.model_copy(update={"output": edging_output}),
         purchase=purchase,
         assembly=assembly.model_copy(update={"output": assembly_output}),
+        trip=trip.model_copy(update={"output": trip_output}),
         mock=parts.mock,
         mock_files=parts.mock_files,
         mock_notice=MOCK_BANNER if parts.mock else None,

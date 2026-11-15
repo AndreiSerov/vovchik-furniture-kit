@@ -13,12 +13,13 @@ from pathlib import Path
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen.canvas import Canvas
 
 from kitchen.result import MOCK_BANNER
 
-__all__ = ["FONT", "FONT_BOLD", "Area", "PdfDocument", "mm", "page_area", "register_fonts"]
+__all__ = ["FONT", "FONT_BOLD", "Area", "PdfDocument", "mm", "page_area", "register_fonts", "wrap"]
 
 FONT = "DejaVuSans"
 FONT_BOLD = "DejaVuSans-Bold"
@@ -119,3 +120,25 @@ class PdfDocument:
             canvas.setFont(FONT_BOLD, 7)
             canvas.setFillColorRGB(0.7, 0, 0)
             canvas.drawRightString(width - _MARGIN, _MARGIN + 3 * mm, MOCK_BANNER)
+
+
+def wrap(text: str, bold: bool, size: float, width: float) -> list[str]:
+    """Строка по словам до ширины `width`; слово шире строки режется по буквам."""
+    font = FONT_BOLD if bold else FONT
+    lines: list[str] = []
+    current = ""
+    for word in text.split(" "):
+        candidate = f"{current} {word}" if current else word
+        if stringWidth(candidate, font, size) <= width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+        while stringWidth(word, font, size) > width:
+            cut = len(word)
+            while cut > 1 and stringWidth(word[:cut], font, size) > width:
+                cut -= 1
+            lines.append(word[:cut])
+            word = word[cut:]
+        current = word
+    return [*lines, current] if current else lines

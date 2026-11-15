@@ -50,7 +50,7 @@
 - [x] 20 — Присадка: направляющие и полкодержатели (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [x] 22 — Сборочный лист (4.4) ([спека](docs/specs/stage-4-drilling-assembly.md))
 
-Чек-лист выезда (40) и уборка этапа 4 (46) ждут схему брифа (30) и стоят в этапе 6 после неё.
+Чек-лист выезда (40) сделан в этапе 6 после схемы брифа (30); уборка этапа 4 (46) стоит там же.
 
 ## Этап 5. Проект и 3D
 
@@ -67,7 +67,7 @@
 - [x] 26 — Статические проверки скиллов (6.6) ([спека](docs/specs/stage-6-skills.md))
 - [x] 36 — Команда `kitchen check` (6.1) ([спека](docs/specs/stage-6-skills.md))
 - [x] 30 — Схема брифа и правила `check_brief.py` (6.5) ([спека](docs/specs/stage-6-skills.md))
-- [ ] 40 — Чек-лист выезда (4.4, этап 4) ([спека](docs/specs/stage-4-drilling-assembly.md))
+- [x] 40 — Чек-лист выезда (4.4, этап 4) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [ ] 49 — Следующий шаг в `status` (6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 46 — Уборка этапа 4 ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [ ] 27 — Скилл `kitchen-project` (6.1, 6.4) ([спека](docs/specs/stage-6-skills.md))

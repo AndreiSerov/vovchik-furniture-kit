@@ -14,7 +14,7 @@ from reportlab.pdfgen.canvas import Canvas
 
 from kitchen.assembly import AssemblyModule
 from kitchen.drilling_pdf import TextLine
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area, register_fonts
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area, register_fonts, wrap
 
 __all__ = ["AssemblyPageLayout", "layout", "write_assembly"]
 
@@ -41,28 +41,6 @@ class _Row(BaseModel):
     size: float
     indent: float
     heading: bool = False  # заголовок раздела: не остаётся последней строкой страницы
-
-
-def _wrap(text: str, bold: bool, size: float, width: float) -> list[str]:
-    """Строка по словам до ширины `width`; слово шире строки режется по буквам."""
-    font = FONT_BOLD if bold else FONT
-    lines: list[str] = []
-    current = ""
-    for word in text.split(" "):
-        candidate = f"{current} {word}" if current else word
-        if stringWidth(candidate, font, size) <= width:
-            current = candidate
-            continue
-        if current:
-            lines.append(current)
-        while stringWidth(word, font, size) > width:
-            cut = len(word)
-            while cut > 1 and stringWidth(word[:cut], font, size) > width:
-                cut -= 1
-            lines.append(word[:cut])
-            word = word[cut:]
-        current = word
-    return [*lines, current] if current else lines
 
 
 def _rows(module: AssemblyModule) -> list[_Row]:
@@ -97,7 +75,7 @@ def _physical(rows: list[_Row], width: float) -> list[_Row]:
     out = []
     for row in rows:
         hang = _HANGING if row.indent else 0
-        for i, piece in enumerate(_wrap(row.text, row.bold, row.size, width - row.indent - hang)):
+        for i, piece in enumerate(wrap(row.text, row.bold, row.size, width - row.indent - hang)):
             out.append(row.model_copy(update={"text": piece, "indent": row.indent + (hang if i else 0)}))
     return out
 
