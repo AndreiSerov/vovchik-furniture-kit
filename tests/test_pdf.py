@@ -3,9 +3,10 @@
 from datetime import date
 
 import pytest
-from kitchen.pdf import FONT, PdfDocument
+from kitchen.pdf import FONT, FONT_BOLD, PdfDocument, register_fonts, wrap
 from kitchen.result import MOCK_BANNER
 from pypdf import PdfReader
+from reportlab.pdfbase.pdfmetrics import stringWidth
 
 
 def make(path, *, mock, pages=2, version=3):
@@ -74,3 +75,12 @@ def test_continuation_note_in_footer(tmp_path):
     doc.save()
     first, second = texts(tmp_path / "a.pdf")
     assert "продолжение" not in first and "лист 2, продолжение" in second
+
+
+def test_wrap_measures_bold_text_in_the_bold_font():
+    register_fonts()
+    text = " ".join(["Столешница"] * 8)
+    width = stringWidth(text, FONT, 10) + 0.1  # обычным шрифтом строка влезает, жирным — нет
+    lines = wrap(text, True, 10, width)
+    assert len(lines) > 1
+    assert all(stringWidth(line, FONT_BOLD, 10) <= width for line in lines)
