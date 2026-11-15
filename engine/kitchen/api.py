@@ -131,6 +131,7 @@ class WorkshopCheck(Result):
     valid: bool
     files: list[FileSummary]
     errors: list[str]
+    warnings: list[str] = Field(default_factory=list)
 
 
 # Что считать в сводке файла: поля моделей; русские ключи берём из алиасов моделей, а не повторяем здесь.
@@ -152,6 +153,19 @@ def _counts(name: str, data: dict) -> dict[str, int]:
     return {"ключей": len([k for k in data if k != "mock"])}
 
 
+def _workshop_warnings(raw: dict[str, dict]) -> list[str]:
+    """Предупреждения, не ошибки: данные верны, но клиент увидит не то, что задумано."""
+    items = raw.get("hardware.yaml", {}).get("позиции")
+    found = []
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, dict) and item.get("для_клиента_мн") and not item.get("для_клиента"):
+            found.append(
+                f"hardware.yaml: позиция «{item.get('id')}»: есть для_клиента_мн, но нет для_клиента — "
+                "в КП название этой позиции не пишется."
+            )
+    return found
+
+
 def check_workshop(home: Path | None = None) -> WorkshopCheck:
     loaded = load(home or resolve_home())
     mock = loaded.mock_files
@@ -163,7 +177,12 @@ def check_workshop(home: Path | None = None) -> WorkshopCheck:
         if n in loaded.raw
     ]
     return WorkshopCheck(
-        valid=not loaded.problems, files=files, errors=loaded.problems, mock=bool(mock), mock_files=mock
+        valid=not loaded.problems,
+        files=files,
+        errors=loaded.problems,
+        warnings=_workshop_warnings(loaded.raw),
+        mock=bool(mock),
+        mock_files=mock,
     )
 
 
@@ -1563,6 +1582,18 @@ def _with_economy(
     return result.model_copy(update={"economy": variant})
 
 
+def _draft_warnings(source: PartsSource, parts: PartsResult) -> list[str]:
+    """Проект из файла (черновик до импорта) с ошибками проверок: расчёт идёт, но импорт такой проект отклонит.
+    Версия заказа таких ошибок не несёт."""
+    if source.kind != "file":
+        return []
+    return [
+        f"Проект с ошибкой проверки (импорт его отклонит): {f.message}"
+        for f in parts.findings
+        if f.level == "error"
+    ]
+
+
 def _estimate_run(
     project: Project,
     home: Path,
@@ -1576,6 +1607,8 @@ def _estimate_run(
     parts = _build_parts(project, home, source, brief, warnings, workshop)
     cut = _build_cut(project, home, source, brief, warnings, workshop)
     result = _estimate(project, parts, cut, workshop)
+    draft = _draft_warnings(source, parts)
+    result = result.model_copy(update={"warnings": [*result.warnings, *draft]}) if draft else result
     return _with_economy(result, project, home, workshop, economy), parts
 
 
@@ -1721,6 +1754,9 @@ class QuoteResult(QuoteBody, Result):
     """КП: то, что видит клиент. Цена — из сметы того же снимка проекта; себестоимости и наценки нет."""
 
     source: PartsSource
+    warnings: list[str] = Field(
+        default_factory=list
+    )  # для мастера (CLI, `--json`); в quote.json и PDF не идут
     outputs: list[OutputInfo] = Field(default_factory=list)
 
 
@@ -1742,6 +1778,7 @@ def _quote(
     return QuoteResult(
         **body.model_dump(),
         source=estimate.source,
+        warnings=estimate.warnings,
         mock=estimate.mock,
         mock_files=estimate.mock_files,
     )
@@ -1789,7 +1826,9 @@ def quote_and_save(
             ),
             (
                 outputs[1],
-                lambda path: path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8"),
+                lambda path: path.write_text(
+                    result.model_dump_json(indent=2, exclude={"warnings"}) + "\n", encoding="utf-8"
+                ),
             ),
         ],
     )

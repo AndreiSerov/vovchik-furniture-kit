@@ -11,7 +11,7 @@ from kitchen.common import CommonItem, CountertopSize
 from kitchen.cutting import MaterialCut
 from kitchen.errors import OrderError
 from kitchen.models import Workshop
-from kitchen.parts import EdgeTotals, ModuleParts, facade_color
+from kitchen.parts import EdgeTotals, ModuleParts, facade_color, is_facade
 from kitchen.project import Project
 
 
@@ -60,7 +60,7 @@ def _facades(project: Project, modules: list[ModuleParts]) -> dict[tuple[str, st
     groups: dict[tuple[str, str], Decimal] = defaultdict(Decimal)
     for module in modules:
         for part in module.parts:
-            if part.area_m2 is not None:
+            if is_facade(part):
                 groups[(part.material, colors[module.module])] += _decimal(part.area_m2)
     return {k: v.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP) for k, v in sorted(groups.items())}
 

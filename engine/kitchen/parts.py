@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from kitchen import formulas
 from kitchen.drilling import apply_drilling, plate_warnings
@@ -112,6 +112,13 @@ class ModuleParts(BaseModel):
     module: str
     template: str
     parts: list[Part]
+    # фурнитура модуля: для описания в КП, чтобы не строить модуль второй раз; в выводах не нужна
+    hardware: dict[str, int] = Field(default_factory=dict, exclude=True)
+
+
+def is_facade(part: Part) -> bool:
+    """Фасад — деталь с площадью (`area_m2`): одно правило для площади, закупки, сметы и КП, не по имени."""
+    return part.area_m2 is not None
 
 
 @dataclass(frozen=True)
@@ -601,6 +608,7 @@ class Template:
     both_rows: bool = False  # модуль записан в одном ряду стены и занимает оба (пенал)
     default_depth: Callable[[Workshop], int] | None = None  # глубина по умолчанию вместо глубины ряда
     title: str = field(kw_only=True)  # русское название для строки состава КП: «нижний модуль», «пенал»
+    pull_out_front: bool = field(default=False, kw_only=True)  # фасад выдвижной, а не дверь (бутылочница)
 
 
 def _plain(build: Callable[[ModuleSpec, ModuleDims, ProjectMaterials, Workshop], TemplateOut]):
@@ -1060,7 +1068,9 @@ TEMPLATES = {
     "wall_hood": Template(build_hood_of_project, "upper", appliances=("hood",), title="модуль над вытяжкой"),
     "wall_dryer": Template(_plain(build_wall_dryer), "upper", title="верхний модуль"),
     "base_sink": Template(_plain(build_base_sink), "lower", appliances=("sink",), title="модуль под мойку"),
-    "base_bottle": Template(_plain(build_base_bottle), "lower", title="нижний модуль-бутылочница"),
+    "base_bottle": Template(
+        _plain(build_base_bottle), "lower", title="нижний модуль-бутылочница", pull_out_front=True
+    ),
     "base_drawers": Template(_plain(build_base_drawers), "lower", drawers=True, title="нижний модуль"),
     "dishwasher_panel": Template(
         _plain(build_dishwasher_panel),
@@ -1195,10 +1205,17 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
                             f"Маркировка «{part.id}» не уникальна: уже есть у детали модуля {seen[part.id]}."
                         )
                     seen[part.id] = module.label
-                modules.append(ModuleParts(module=module.label, template=module.template, parts=out.parts))
+                modules.append(
+                    ModuleParts(
+                        module=module.label,
+                        template=module.template,
+                        parts=out.parts,
+                        hardware=dict(out.hardware),
+                    )
+                )
                 color = facade_color(module, row, project.materials)
                 for part in out.parts:
-                    if part.area_m2 is not None:
+                    if is_facade(part):
                         colored[color] = colored.get(color, Decimal(0)) + Decimal(str(part.area_m2))
                 hw.update(out.hardware)
                 warnings += [f"{module.label}: {w}" for w in out.warnings]
@@ -1208,7 +1225,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
         raise OrderError(f"Неизвестные позиции фурнитуры (нет в hardware.yaml): {', '.join(unknown)}.")
     all_parts = [p for m in modules for p in m.parts]
     # площадь фасадов — сумма площадей их деталей; округляется один раз, до 4 знаков
-    facade_area = sum((Decimal(str(p.area_m2)) for p in all_parts if p.area_m2 is not None), Decimal(0))
+    facade_area = sum((Decimal(str(p.area_m2)) for p in all_parts if is_facade(p)), Decimal(0))
     return PartsComputation(
         modules=modules,
         hardware=dict(sorted(hw.items())),

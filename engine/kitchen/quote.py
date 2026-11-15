@@ -5,6 +5,7 @@
 из итога, и эти числа в неё не попадают.
 """
 
+import re
 from decimal import ROUND_HALF_UP, Decimal
 
 from pydantic import BaseModel, Field
@@ -18,7 +19,7 @@ from kitchen.parts import (
     DRAWER_BOTTOM,
     TEMPLATES,
     ModuleParts,
-    build_module,
+    is_facade,
     lower_facades,
     resolve_materials,
 )
@@ -154,11 +155,12 @@ def _hardware_phrase(name: str, many: str | None, count: int) -> str:
     return _counted(count, "m", many, many) if many else f"{name} ({count} шт.)"
 
 
-def _appliance(appliance) -> str | None:
-    """Прибор словами брифа; «другая техника» слов не имеет: пишется модель прибора, если есть, иначе ничего."""
-    if appliance.type == "other":
-        return appliance.model or None
-    return APPLIANCE_NAMES[appliance.type]
+OTHER_APPLIANCE = "другая техника"
+
+
+def _appliance(appliance) -> str:
+    """Прибор словами брифа; `other` — «другая техника»: модель (в ней бывает марка) клиенту не идёт."""
+    return OTHER_APPLIANCE if appliance.type == "other" else APPLIANCE_NAMES[appliance.type]
 
 
 def describe_module(module: ModuleSpec, row: Row, built: ModuleParts, project: Project, ws: Workshop) -> str:
@@ -166,19 +168,22 @@ def describe_module(module: ModuleSpec, row: Row, built: ModuleParts, project: P
     модуля (то же, что идёт в раскрой); карусель, ведро, сушка и подъёмный фасад — по фурнитуре модуля и
     названию для клиента из `hardware.yaml`; техника — из проекта. Подъёмный фасад дверью не считается."""
     template = TEMPLATES[module.template]
-    hardware = build_module(module, row, project.materials, ws, project.appliances).hardware
+    hardware = built.hardware
     named = {i.id: i.client_name for i in ws.hardware.items if i.client_name}
     plural_names = {i.id: i.client_name_many for i in ws.hardware.items if i.client_name_many}
     lifted = ws.construction.upper_rules.lift in hardware
     names = [p.name for p in built.parts]
     drawers = names.count(DRAWER_BOTTOM)
-    doors = 0 if lifted or not template.carcass else names.count("фасад") - drawers
+    facades = sum(1 for p in built.parts if is_facade(p))
+    doors = 0 if lifted or not template.carcass or template.pull_out_front else facades - drawers
     shelves = names.count("полка")
     extras = []
     if drawers:
         extras.append(_counted(drawers, "m", "ящиком", "ящиками"))
     if doors > 0:
         extras.append(_counted(doors, "f", "дверью", "дверями"))
+    if template.pull_out_front:
+        extras.append("выдвижным фасадом")
     if shelves:
         extras.append(_counted(shelves, "f", "полкой", "полками"))
     for h, count in hardware.items():
@@ -186,19 +191,25 @@ def describe_module(module: ModuleSpec, row: Row, built: ModuleParts, project: P
             extras.append(_hardware_phrase(named[h], plural_names.get(h), count))
     text = template.title + (f" с {_enumerate(extras)}" if extras else "") + f", {module.width:g} мм"
     kinds = [_appliance(a) for a in project.appliances if a.module == module.label]
-    kinds = [k for k in kinds if k]
     return text + (f"; техника: {', '.join(kinds)}" if kinds else "")
 
 
 # --- материалы --------------------------------------------------------------
 
 
-def _runs(labels: list[str], order: list[str]) -> str:
-    """«Н1–Н3, Н5»: подряд идущие в порядке модулей группы от трёх склеиваются в диапазон."""
+def _letters(label: str) -> str:
+    """Буквы метки: «Н» у «Н12», «П» у «П1»."""
+    return re.match(r"\D*", label).group(0)
+
+
+def _runs(labels: list[str], order: list[str], places: dict[str, tuple[str, str]]) -> str:
+    """«Н1–Н3, П1, В2–В4»: подряд идущие в порядке модулей группы от трёх склеиваются в диапазон, но только
+    метки одного ряда одной стены и одной буквы: через ряды и буквы диапазон клиенту не расшифровать."""
     positions = sorted(order.index(label) for label in labels)
     runs: list[list[int]] = []
     for position in positions:
-        if runs and position == runs[-1][-1] + 1:
+        last = runs[-1][-1] if runs else None
+        if last is not None and position == last + 1 and places[order[position]] == places[order[last]]:
             runs[-1].append(position)
         else:
             runs.append([position])
@@ -209,16 +220,18 @@ def _runs(labels: list[str], order: list[str]) -> str:
     return ", ".join(parts)
 
 
-def _group(values: list[tuple[str, str]]) -> str | None:
-    """Значения по модулям группы: одно у всех — как есть, разные — все с метками модулей."""
+def _group(values: list[tuple[str, str, str]]) -> str | None:
+    """Значения по модулям группы (метка, значение, ряд): одно у всех — как есть, разные — все с метками модулей."""
     if not values:
         return None
-    order = [label for label, _ in values]
-    distinct = list(dict.fromkeys(value for _, value in values))
+    order = [label for label, _, _ in values]
+    places = {label: (row, _letters(label)) for label, _, row in values}
+    distinct = list(dict.fromkeys(value for _, value, _ in values))
     if len(distinct) == 1:
         return distinct[0]
     return ", ".join(
-        f"{value} ({_runs([label for label, v in values if v == value], order)})" for value in distinct
+        f"{value} ({_runs([label for label, v, _ in values if v == value], order, places)})"
+        for value in distinct
     )
 
 
@@ -263,6 +276,7 @@ def build_quote(
         for row in wall.rows:
             for module in row.modules:
                 label = module.label
+                place = f"{wall.label}/{row.kind}"  # метки одного ряда одной стены
                 modules.append(
                     QuoteModule(
                         label=label,
@@ -273,12 +287,14 @@ def build_quote(
                 )
                 m = resolve_materials(module, row, project.materials)
                 if TEMPLATES[module.template].carcass:  # корпус — только у модулей с корпусом (не ПММ)
-                    body.append((label, _name(ws.materials.sheets, m.body)))
-                if "фасад" in {p.name for p in by_label[label].parts}:
+                    body.append((label, _name(ws.materials.sheets, m.body), place))
+                if any(is_facade(p) for p in by_label[label].parts):
                     is_lower = lower_facades(module, row)
                     facade = _name(ws.materials.facades, m.facades_lower if is_lower else m.facades_upper)
                     color = m.facades_lower_color if is_lower else m.facades_upper_color
-                    (lower if is_lower else upper).append((label, f"{facade}, {color}" if color else facade))
+                    (lower if is_lower else upper).append(
+                        (label, f"{facade}, {color}" if color else facade, place)
+                    )
     top = size_countertop(project, ws)  # та же столешница, что в цене, раскрое и закупке
     share = ws.pricing.prepayment
     prepayment = _prepayment(price, share)
