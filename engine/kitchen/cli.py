@@ -405,6 +405,40 @@ def assembly(
     emit(result, _render_assembly, json)
 
 
+def _render_trip(r: api.TripResult) -> str:
+    lines = ["Чек-лист выезда:", _render_source(r.source), *r.header.lines()]
+    for section in r.sections:
+        lines.append(f"{section.title}:")
+        lines += [f"  {i.text}" for i in section.items] or ["  —"]
+    if r.output:
+        lines.append(f"Чек-лист выезда PDF: {r.output.file} (версия проекта {r.output.source_version})")
+    else:
+        lines.append("Файл не записан (--project)")
+    if r.warnings:
+        lines.append("Предупреждения: " + "; ".join(r.warnings))
+    return "\n".join(lines)
+
+
+@app.command("trip")
+def trip(
+    order: Annotated[
+        str | None, typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project.")
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, черновик до импорта).")
+    ] = None,
+    json: JsonOpt = False,
+) -> None:
+    """Чек-лист выезда: модули, общие позиции, фурнитура и техника для монтажа, инструмент; для заказа также PDF."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError("Укажите либо заказ (kitchen trip petrov), либо файл: --project project.json.")
+        result = api.trip_and_save(order) if order is not None else api.trip_from_project(project)
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_trip, json)
+
+
 def _render_cut(r: api.CutResult) -> str:
     lines = [
         f"Раскрой проекта {r.order}:",
@@ -680,6 +714,10 @@ def _render_production(r: api.ProductionResult) -> str:
         lines.append(
             f"Сборочный лист PDF: {r.assembly.output.file} (версия проекта {r.assembly.output.source_version})"
         )
+    if r.trip.output:
+        lines.append(
+            f"Чек-лист выезда PDF: {r.trip.output.file} (версия проекта {r.trip.output.source_version})"
+        )
     if r.purchase.warnings:
         lines.append("Предупреждения: " + "; ".join(r.purchase.warnings))
     return "\n".join(lines)
@@ -687,7 +725,7 @@ def _render_production(r: api.ProductionResult) -> str:
 
 @app.command("production")
 def production(order: OrderArg, json: JsonOpt = False) -> None:
-    """Пересчитать раскрой, кромление, закупку и сборочный лист текущей версии заказа."""
+    """Пересчитать раскрой, кромление, закупку, сборочный лист и чек-лист выезда текущей версии заказа."""
     try:
         result = api.production_and_save(order)
     except KitchenError as e:

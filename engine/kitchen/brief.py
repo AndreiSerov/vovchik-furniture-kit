@@ -123,3 +123,23 @@ def appliances(brief: dict[str, Any]) -> list[BriefAppliance]:
         label = " ".join(x for x in ("вытяжка", hood.get("model")) if x)
         found.append(_appliance(hood, "hood", label, True))
     return found
+
+
+# --- значения и подписи для документов ----------------------------------------
+
+
+def value(brief: dict[str, Any], path: str) -> Any:
+    """Значение поля брифа по пути «раздел.поле» (обёртка `{value, source}` снята); пусто — `None`."""
+    cb = _checker()
+    found = cb.get(brief, path)
+    return None if cb.is_empty(found) else found
+
+
+def value_label(path: str, raw: Any) -> str:
+    """Подпись значения перечня из `value_labels` схемы брифа («floor_evenness», «even» → «ровный»);
+    подписи нет — само значение."""
+    cb = _checker()
+    schema = json.loads(cb.SCHEMA_PATH.read_text(encoding="utf-8"))
+    section, _, name = path.partition(".")
+    labels = schema["sections"][section]["fields"][name].get("value_labels", {})
+    return labels.get(raw, str(raw))
