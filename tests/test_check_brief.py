@@ -266,3 +266,188 @@ def test_cli_outputs_json(tmp_path):
     )
     data = json.loads(out.stdout)
     assert set(data) == {"summary", "missing_required", "conflicts", "unknown_fields", "errors"}
+
+
+# --- место холодильника и антресоль (тикет 30) ---------------------------------
+
+FRIDGE_PLACE_Q = (
+    "У какой стены и с какого края будет стоять холодильник, если стоять лицом к стене? "
+    "Какой он ширины и высоты?"
+)
+FRIDGE_PLACE_NOTE = "Без места холодильника не собрать проект: он занимает длину стены."
+OVER_FRIDGE_Q = "Над холодильником можно сделать шкаф до потолка — нужен?"
+OVER_FRIDGE_NOTE = "Верх до потолка и отдельностоящий холодильник: решите про антресоль."
+
+
+def with_fridge(brief, **fridge):
+    brief["appliances"]["fridge"] = c({"width_mm": 600, **fridge})
+    return brief
+
+
+def finding(result, rule_id):
+    return next(f for f in result["conflicts"] if f["rule"] == rule_id)
+
+
+def test_fridge_place_asked_when_fridge_has_no_wall():
+    f = finding(run(with_fridge(sergey())), "fridge_place")
+    assert f["client_question"] == FRIDGE_PLACE_Q
+    assert f["designer_note"] == FRIDGE_PLACE_NOTE
+    assert f["ask"] == "now"
+
+
+def test_fridge_place_asked_when_wall_without_side():
+    assert "fridge_place" in rules(run(with_fridge(sergey(), wall="A")))
+
+
+def test_fridge_place_silent_with_wall_and_side():
+    assert "fridge_place" not in rules(run(with_fridge(sergey(), wall="A", side="left")))
+
+
+def test_fridge_place_silent_when_fridge_not_in_kitchen():
+    assert "fridge_place" not in rules(run(with_fridge(sergey(), wall="none")))
+
+
+def test_fridge_place_silent_when_fridge_section_empty():
+    brief = sergey()
+    del brief["appliances"]["fridge"]
+    assert "fridge_place" not in rules(run(brief))
+
+
+def test_fridge_place_silent_on_sergey_with_wall_and_side():
+    brief = sergey()
+    brief["appliances"]["fridge"] = c(
+        {"existing": True, "width_mm": 600, "location": "у входа", "wall": "A", "side": "left"}
+    )
+    assert "fridge_place" not in rules(run(brief))
+
+
+def over_fridge_brief(**fridge):
+    return with_fridge(sergey(), wall="A", side="left", **fridge)
+
+
+def test_over_fridge_asked_for_freestanding_fridge_to_ceiling():
+    f = finding(run(over_fridge_brief(built_in=False)), "over_fridge")
+    assert f["client_question"] == OVER_FRIDGE_Q
+    assert f["designer_note"] == OVER_FRIDGE_NOTE
+    assert f["ask"] == "now"
+
+
+def test_over_fridge_asked_when_built_in_is_empty():
+    assert "over_fridge" in rules(run(over_fridge_brief()))
+
+
+@pytest.mark.parametrize("over", ["yes", "no", "undecided"])
+def test_over_fridge_silent_once_answered(over):
+    brief = over_fridge_brief(built_in=False)
+    brief["storage"]["over_fridge"] = c(over)
+    assert "over_fridge" not in rules(run(brief))
+
+
+def test_over_fridge_silent_for_low_uppers():
+    brief = over_fridge_brief(built_in=False)
+    brief["storage"]["upper_height"] = c(720)
+    assert "over_fridge" not in rules(run(brief))
+
+
+def test_over_fridge_silent_for_built_in_fridge():
+    assert "over_fridge" not in rules(run(over_fridge_brief(built_in=True)))
+
+
+def test_over_fridge_silent_when_fridge_not_in_kitchen():
+    brief = with_fridge(sergey(), wall="none", built_in=False)
+    assert "over_fridge" not in rules(run(brief))
+
+
+def test_sergey_gets_two_new_findings():
+    assert len(run(sergey())["conflicts"]) == 12
+    assert {"fridge_place", "over_fridge"} <= rules(run(sergey()))
+
+
+# --- схема: рабочая зона, монтаж, поля холодильника ----------------------------
+
+
+def full_new_fields():
+    brief = sergey()
+    brief["workzone"] = {
+        "sink_mount": c("undermount"),
+        "sink_bowls": c("1.5"),
+        "sink_material": c("stone"),
+        "note": c("сушка слева"),
+    }
+    brief["installation"] = {
+        "parking": c("paid"),
+        "dismantling": c("master"),
+        "walls_evenness": c("uneven"),
+        "floor_evenness": c("unknown"),
+        "note": c("лифт грузовой"),
+    }
+    with_fridge(brief, wall="A", side="right")
+    brief["storage"]["over_fridge"] = c("undecided")
+    return brief
+
+
+def test_new_fields_are_known_to_the_schema():
+    result = run(full_new_fields())
+    assert result["unknown_fields"] == [] and result["errors"] == []
+
+
+def test_sink_bowls_accepts_numbers_as_well_as_strings():
+    brief = sergey()
+    brief["workzone"] = {"sink_bowls": c(2)}
+    assert run(brief)["errors"] == []
+
+
+@pytest.mark.parametrize(
+    ("path", "bad"),
+    [
+        ("workzone.sink_mount", "накладная"),
+        ("workzone.sink_bowls", "3"),
+        ("workzone.sink_material", "wood"),
+        ("installation.parking", "yes"),
+        ("installation.dismantling", "salon"),
+        ("installation.walls_evenness", "crooked"),
+        ("installation.floor_evenness", "crooked"),
+        ("storage.over_fridge", "maybe"),
+        ("appliances.fridge.side", "middle"),
+    ],
+)
+def test_value_outside_enum_is_an_error(path, bad):
+    brief = full_new_fields()
+    section, _, rest = path.partition(".")
+    name, _, key = rest.partition(".")
+    if key:
+        brief[section][name] = c({**brief[section][name]["value"], key: bad})
+    else:
+        brief[section][name] = c(bad)
+    errors = run(brief)["errors"]
+    assert any(path in e and bad in e for e in errors), errors
+
+
+def test_every_new_enum_has_labels_for_each_value():
+    for section in ("workzone", "installation"):
+        for name, spec in SCHEMA["sections"][section]["fields"].items():
+            if spec["type"] == "enum":
+                assert set(spec["values"]) == set(spec["value_labels"]), name
+    over = SCHEMA["sections"]["storage"]["fields"]["over_fridge"]
+    assert over["value_labels"] == {"yes": "да", "no": "нет", "undecided": "не решено"}
+    side = SCHEMA["sections"]["appliances"]["fields"]["fridge"]["item_value_labels"]["side"]
+    assert side == {"left": "слева", "right": "справа"}
+
+
+def test_parking_and_dismantling_ask_now_evenness_ask_at_measure():
+    inst = SCHEMA["sections"]["installation"]["fields"]
+    assert (inst["parking"]["ask"], inst["dismantling"]["ask"]) == ("now", "now")
+    assert (inst["walls_evenness"]["ask"], inst["floor_evenness"]["ask"]) == ("measure", "measure")
+    assert not any(
+        f["required"]
+        for sec in ("workzone", "installation")
+        for f in SCHEMA["sections"][sec]["fields"].values()
+    )
+
+
+def test_who_buys_master_and_old_salon_are_accepted():
+    for who in ("master", "salon"):
+        brief = sergey()
+        brief["appliances"]["items"]["value"][1]["who_buys"] = who
+        result = run(brief)
+        assert result["errors"] == [] and result["unknown_fields"] == []

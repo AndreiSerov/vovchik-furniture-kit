@@ -1,6 +1,7 @@
 import json
 import sqlite3
 from datetime import UTC, date
+from pathlib import Path
 
 import pytest
 from kitchen import api, store
@@ -31,8 +32,11 @@ def test_save_with_full_id_creates_order_with_client_from_brief(home, tmp_path):
     assert api.order_show("2026-047").order.client == "Сергей"
     assert r.mock is True
     # счётчики эталонного брифа Сергея, как их считает check_brief.py
-    assert (r.missing_required, r.conflicts) == (4, 10)
-    assert len(r.check["conflicts"]) == 10 and r.check["unknown_fields"] == []
+    assert (r.missing_required, r.conflicts) == (
+        4,
+        12,
+    )  # было 10: тикет 30 добавил fridge_place и over_fridge
+    assert len(r.check["conflicts"]) == 12 and r.check["unknown_fields"] == []
 
 
 def test_save_into_existing_order_does_not_recreate(home, tmp_path):
@@ -121,7 +125,9 @@ def test_resave_replaces_current_brief(home, tmp_path):
     api.brief_save("2026-047-sergeev", _brief(tmp_path, second, "second.json"))
     shown = api.brief_show("sergeev")
     assert shown.brief["budget"]["amount_rub"]["value"] == 900000
-    assert shown.check["summary"]["conflicts"] < 10  # бюджет вырос: часть замечаний ушла
+    assert (
+        shown.check["summary"]["conflicts"] < 12
+    )  # было 10 (тикет 30: +2 вопроса про холодильник); бюджет вырос: часть замечаний ушла
 
 
 def test_show_returns_saved_brief_and_check(home, tmp_path):
@@ -129,7 +135,7 @@ def test_show_returns_saved_brief_and_check(home, tmp_path):
     shown = api.brief_show("sergeev")
     assert shown.order == "2026-047-sergeev"
     assert shown.brief == sergey()
-    assert shown.check["summary"]["conflicts"] == 10
+    assert shown.check["summary"]["conflicts"] == 12  # было 10, тикет 30
     assert shown.mock is True and shown.mock_files  # плашка мока везде одинаковая
 
 
@@ -205,7 +211,7 @@ def test_old_v1_database_is_upgraded_and_keeps_orders(home, tmp_path):
     columns = [r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(project_versions)")]
     assert "brief_id" in columns  # миграция 3: бриф, с которым проверена версия
     assert api.brief_save("2026-047-petrov", _brief(tmp_path)).created is False
-    assert api.brief_show("petrov").check["summary"]["conflicts"] == 10
+    assert api.brief_show("petrov").check["summary"]["conflicts"] == 12  # было 10, тикет 30
 
 
 # --- quick-estimate ----------------------------------------------------------
@@ -313,3 +319,54 @@ def test_version_made_on_v2_database_reports_no_brief_after_migration(home):
     conn.close()
     again = api.import_project("petrov", path)
     assert not again.changed and again.version == 1 and again.brief_id is None
+
+
+# --- тикет 30: status.md и старые брифы ---------------------------------------
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_save_new_order_writes_status_md_with_stage_brief(home, tmp_path):
+    r = api.brief_save("2026-047-Сергеев", _brief(tmp_path))
+    status = home / "orders" / r.order / "status.md"
+    assert status.is_file()
+    text = status.read_text(encoding="utf-8")
+    assert "## Этап\n\nБриф\n" in text
+    assert "бриф сохранён" in text  # запись done, сделанная самой командой
+
+
+def test_resave_rebuilds_status_md(home, tmp_path):
+    api.brief_save("2026-047-sergeev", _brief(tmp_path))
+    status = home / "orders" / "2026-047-sergeev" / "status.md"
+    status.write_text("устарело", encoding="utf-8")
+    api.brief_save("2026-047-sergeev", _brief(tmp_path))
+    assert "## Этап" in status.read_text(encoding="utf-8")
+
+
+def test_rejected_brief_writes_no_status_md(home, tmp_path):
+    bad = sergey()
+    bad["budget"]["amout_rub"] = c(1)
+    with pytest.raises(OrderError):
+        api.brief_save("2026-047-sergeev", _brief(tmp_path, bad))
+    assert not (home / "orders" / "2026-047-sergeev" / "status.md").exists()
+
+
+def test_petrov_fixture_brief_still_saves(home):
+    r = api.brief_save("2026-047-petrov", FIXTURES / "petrov_brief.json")
+    assert r.created is True and r.check["errors"] == [] and r.check["unknown_fields"] == []
+
+
+def test_old_brief_with_who_buys_salon_still_saves(home, tmp_path):
+    old = sergey()
+    old["appliances"]["items"]["value"][1]["who_buys"] = "salon"
+    r = api.brief_save("2026-047-sergeev", _brief(tmp_path, old))
+    assert r.check["errors"] == []
+    assert (home / "orders" / r.order / "status.md").is_file()
+
+
+def test_brief_with_new_sections_saves_and_loads_back(home, tmp_path):
+    new = sergey()
+    new["workzone"] = {"sink_mount": c("inset")}
+    new["installation"] = {"parking": c("free"), "dismantling": c("not_needed")}
+    api.brief_save("2026-047-sergeev", _brief(tmp_path, new))
+    assert api.brief_show("sergeev").brief == new
