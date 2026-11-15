@@ -1,4 +1,4 @@
-"""Тикет 49: «Следующий шаг» в status.md, «Дальше» только новее последнего done, поиск по падежу."""
+"""Тикет 49: «Следующий шаг» в status.md, «Дальше» только новее последнего ручного done, поиск по телефону."""
 
 import json
 import re
@@ -188,3 +188,33 @@ def test_order_number_is_not_a_phone(home):
     api.order_new("2026-048-ivanov", client="Иванов", home=home)
     assert api.status("2026-047", home).order == ORDER
     assert api.status("Иванов", home).order == "2026-048-ivanov"
+
+
+def test_v3_database_marks_brief_saved_as_automatic(home):
+    # база v3: создаём текущую через API и откатываем колонку log.auto
+    api.order_new(ORDER, client="Петров", home=home)
+    api.log_add(ORDER, "next", "позвонить клиенту", home)
+    db = home / "orders" / "kitchen.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO log (order_id, created_at, kind, text) VALUES (1, '2026-11-01T00:00:00+00:00', 'done', 'бриф сохранён')"
+    )
+    conn.execute("ALTER TABLE log DROP COLUMN auto")
+    conn.execute("PRAGMA user_version = 3")
+    conn.commit()
+    conn.close()
+    first = api.status(ORDER, home)
+    assert "позвонить клиенту" in _section(first.text, "Дальше")
+    rows = (
+        sqlite3.connect(db)
+        .execute("SELECT kind, auto FROM log WHERE kind IN ('next', 'done') ORDER BY id")
+        .fetchall()
+    )
+    assert rows == [("next", 0), ("done", 1)]
+    assert api.status(ORDER, home).text == first.text  # повторное открытие ничего не меняет
+
+
+def test_phone_compares_ten_digits_not_fewer(home):
+    api.order_new(ORDER, phone="+7 900 123-45-67", home=home)
+    api.order_new("2026-048-ivanov", phone="+7 911 123-45-67", home=home)
+    assert api.status("89001234567", home).order == ORDER
