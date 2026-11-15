@@ -26,7 +26,7 @@ from kitchen.drilling import DrillingCheck, reconcile
 from kitchen.drilling_pdf import PageLayout, map_layout, write_drilling_map
 from kitchen.economy import EconomyLine, EconomyVariant, apply_rule
 from kitchen.edging_pdf import write_edging_map
-from kitchen.errors import InputError, KitchenError, OrderError
+from kitchen.errors import InputError, KitchenError, OrderError, ProjectFileError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
 from kitchen.parts import PURPOSE_RU, EdgeTotals, ModuleParts, Part, compute_parts
@@ -398,17 +398,26 @@ def _same_order(value: Any, ctx: ValidationContext) -> bool:
         return False
 
 
+def parse_project_file(data: Any, ctx: ValidationContext | None = None) -> Project:
+    """Разбор файла проекта: один для импорта и `kitchen check --project`. Не объект, нет `order`, чужой
+    заказ (только с `ctx`), схема; номер версии ставит движок, поле `version` файла не разбирается."""
+    if not isinstance(data, dict):
+        raise ProjectFileError("Проект должен быть JSON-объектом ({...}), а не списком или значением.")
+    if "order" not in data:
+        raise ProjectFileError("В проекте нет поля «order» с номером заказа.")
+    value = data["order"]
+    if ctx is not None and not _same_order(value, ctx):
+        raise ProjectFileError(f"Поле «order» = «{value}» не совпадает с заказом {ctx.order_ref}.")
+    try:
+        return parse_project({k: v for k, v in data.items() if k != "version"})
+    except OrderError as e:
+        raise ProjectFileError(e.problems) from e
+
+
 def validate_wrapper(data: Any, ctx: ValidationContext) -> ValidationResult:
     """Проверить заказ, схему и конструкцию проекта (`kitchen.checks`): ошибки отклоняют импорт."""
-    if not isinstance(data, dict):
-        return ValidationResult(["Проект должен быть JSON-объектом ({...}), а не списком или значением."])
-    if "order" not in data:
-        return ValidationResult(["В проекте нет поля «order» с номером заказа."])
-    value = data["order"]
-    if not _same_order(value, ctx):
-        return ValidationResult([f"Поле «order» = «{value}» не совпадает с заказом {ctx.order_ref}."])
     try:
-        project = parse_project({k: v for k, v in data.items() if k != "version"})
+        project = parse_project_file(data, ctx)
     except OrderError as e:
         return ValidationResult(errors=e.problems)
     if ctx.workshop is None:  # без мастерской проект не проверить, а непроверенный не принимаем
@@ -1622,11 +1631,12 @@ def estimate_from_order(order: str, home: Path | None = None, economy: bool = Fa
 
 def _project_file(path: Path) -> tuple[Project, PartsSource]:
     data = _read_json(Path(path), "Файл проекта")
-    project = parse_project(data)
+    project = parse_project_file(data)
+    version = data.get("version")
     source = PartsSource(
         kind="file",
         order=project.order,
-        version=project.version,
+        version=version if type(version) is int and version >= 1 else None,
         content_hash=_project_hash(project),
         path=str(path),
     )

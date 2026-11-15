@@ -13,7 +13,7 @@ import typer
 from typer.core import TyperCommand
 
 from kitchen import api
-from kitchen.errors import InputError, KitchenError
+from kitchen.errors import InputError, KitchenError, ProjectFileError
 from kitchen.result import MOCK_BANNER, Result
 
 app = typer.Typer(help="Движок мастерской: проверка данных, заказы, раскрой, смета.", no_args_is_help=True)
@@ -761,6 +761,8 @@ def check(
         if (order is None) == (project is None):
             raise InputError("Укажите либо заказ (kitchen check petrov), либо файл: --project project.json.")
         result = api.check_order(order) if order is not None else api.check_project(project)
+    except ProjectFileError as e:  # файл — JSON, но проект надо править: код 1
+        fail(e)
     except KitchenError as e:
         fail(e, code=2)
     emit(result, _render_check_result, json, ok=not result.errors)

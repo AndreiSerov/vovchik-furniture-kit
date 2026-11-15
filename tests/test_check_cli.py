@@ -140,15 +140,6 @@ def test_unmocked_workshop_has_no_banner(home):
     assert json.loads(runner.invoke(app, ["check", "petrov", "--json"]).output)["warning"] is None
 
 
-def test_no_findings_text(home, monkeypatch):
-    petrov(home)
-    real = api.check_order("petrov", home)
-    monkeypatch.setattr(api, "check_order", lambda order, home=None: real.model_copy(update={"findings": []}))
-    r = runner.invoke(app, ["check", "petrov"])
-    assert r.exit_code == 0, r.output
-    assert "Проверки: 0 ошибок, 0 предупреждений" in r.output and "Замечаний нет." in r.output
-
-
 def test_unbuildable_template_and_duplicate_label_are_findings(home):
     data = petrov_data()
     first_module(data)["template"] = "foo"
@@ -170,7 +161,7 @@ def test_schema_rejection_matches_import(home):
     path = write(home, data)
     imp = runner.invoke(app, ["import", "petrov", str(path)])
     chk = runner.invoke(app, ["check", "--project", str(path)])
-    assert imp.exit_code == 1 and chk.exit_code == 2
+    assert imp.exit_code == 1 and chk.exit_code == 1
     problems = [p for p in imp.output.splitlines() if p and p != MOCK_BANNER and "отклонён" not in p]
     assert problems
     for line in problems:
@@ -187,3 +178,78 @@ def test_check_writes_no_log_and_no_status(home):
         runner.invoke(app, argv)
     assert status.stat().st_mtime_ns == 1
     assert log_count(home) == before
+
+
+def test_version_field_same_verdict_as_import(home):
+    petrov(home)
+    for bad in (0, "2"):
+        path = write(home, {**petrov_data(), "version": bad})
+        assert runner.invoke(app, ["import", "petrov", str(path)]).exit_code == 0
+        assert runner.invoke(app, ["check", "--project", str(path)]).exit_code == 0
+
+
+def test_missing_order_same_text_as_import(home):
+    petrov(home)
+    data = petrov_data()
+    del data["order"]
+    path = write(home, data)
+    imp = runner.invoke(app, ["import", "petrov", str(path)])
+    chk = runner.invoke(app, ["check", "--project", str(path)])
+    assert "В проекте нет поля «order» с номером заказа." in imp.output
+    assert "В проекте нет поля «order» с номером заказа." in chk.output
+
+
+def test_source_carries_brief(home):
+    petrov(home)
+    assert "; бриф №1 от " in runner.invoke(app, ["check", "petrov"]).output
+    out = runner.invoke(app, ["check", "--project", str(FIXTURES / "petrov_project.json"), "--json"]).output
+    j = json.loads(out)
+    assert j["source"]["brief_id"] == 1 and j["source"]["brief_saved_at"] == j["brief_saved_at"]
+
+
+def test_brief_note_after_findings(home):
+    petrov(home)
+    api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
+    lines = [x for x in runner.invoke(app, ["check", "petrov"]).output.splitlines() if x]
+    note = next(i for i, x in enumerate(lines) if x.startswith("Бриф №2 новее"))
+    assert note == len(lines) - 2 and lines[note - 1].startswith("  [")
+
+
+def test_row_sum_error_has_both_numbers(home):
+    petrov(home)
+    data = petrov_data()
+    first_module(data)["width"] += 100
+    r = runner.invoke(app, ["check", "--project", str(write(home, data))])
+    line = next(x for x in r.output.splitlines() if x.startswith("  [ОШИБКА]"))
+    assert "2900 мм" in line and "2800 мм" in line
+
+
+def test_real_project_without_findings(home):
+    brief = json.loads((FIXTURES / "petrov_brief.json").read_text(encoding="utf-8"))
+    brief["appliances"] = []
+    api.brief_save(ORDER, write(home, brief, "b.json"), home)
+    project = {
+        "order": ORDER,
+        "ceiling_height": 2700,
+        "walls": [
+            {
+                "label": "A",
+                "length": 600,
+                "rows": [
+                    {
+                        "kind": "lower",
+                        "modules": [{"label": "Н1", "template": "base_door", "width": 600, "shelves": 1}],
+                    }
+                ],
+            }
+        ],
+        "materials": {
+            "body": "ldsp_16_white",
+            "facades_lower": "mdf_enamel_matt",
+            "facades_upper": "mdf_enamel_matt",
+            "handles": "handle_profile",
+        },
+    }
+    r = runner.invoke(app, ["check", "--project", str(write(home, project))])
+    assert r.exit_code == 0, r.output
+    assert "Проверки: 0 ошибок, 0 предупреждений" in r.output and "Замечаний нет." in r.output
