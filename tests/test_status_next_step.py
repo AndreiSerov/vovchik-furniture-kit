@@ -111,21 +111,80 @@ def test_next_entries_only_after_last_done(home):
     assert "новое" in later and "старое" not in later
 
 
-@pytest.mark.parametrize("query", ["Петрова", "Петрову", "Петровым"])
-def test_surname_in_oblique_case(home, query):
-    api.order_new(ORDER, client="Петров", home=home)
+def test_next_entries_shown_when_nothing_done(home):
+    api.order_new(ORDER, home=home)
+    api.log_add(ORDER, "next", "позвонить клиенту", home)
+    assert "позвонить клиенту" in _section(api.status(ORDER, home).text, "Дальше")
+
+
+def test_automatic_done_does_not_reset_next(home):
+    api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
+    api.log_add(ORDER, "next", "позвонить клиенту", home)
+    api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)  # программа пишет «бриф сохранён»
+    assert "позвонить клиенту" in _section(api.status(ORDER, home).text, "Дальше")
+    api.log_add(ORDER, "done", "позвонил", home)
+    assert _section(api.status(ORDER, home).text, "Дальше") == "Пока ничего."
+
+
+def test_estimate_without_quote_still_needs_quote(home):
+    _v1(home)
+    api.estimate_and_save(ORDER, home)
+    assert _step(home).text.startswith("Смета и КП: ")
+
+
+def test_one_workshop_document_is_not_enough(home):
+    _v1(home)
+    api.estimate_and_save(ORDER, home)
+    api.quote_and_save(ORDER, 35, home)
+    api.cut_and_save(ORDER, home)
+    assert _step(home).text == "Документы цеха: kitchen production 2026-047-petrov."
+
+
+def test_stale_workshop_documents_collapse_to_production(home):
+    _v1(home)
+    api.estimate_and_save(ORDER, home)
+    api.quote_and_save(ORDER, 35, home)
+    api.production_and_save(ORDER, home)
+    _import_v2(home)
+    step = _step(home)
+    assert step.text == (
+        "Пересчитать устаревшее: kitchen estimate 2026-047-petrov, "
+        "kitchen quote 2026-047-petrov --days <рабочих дней>, kitchen production 2026-047-petrov."
+    )
+    assert step.commands[-1] == f"kitchen production {ORDER}"
+
+
+def test_one_stale_workshop_document_also_gives_production(home):
+    _v1(home)
+    api.estimate_and_save(ORDER, home)
+    api.quote_and_save(ORDER, 35, home)
+    api.production_and_save(ORDER, home)
+    _import_v2(home)
+    api.estimate_and_save(ORDER, home)
+    api.quote_and_save(ORDER, 35, home)
+    api.cut_and_save(ORDER, home)
+    assert _step(home).text == "Пересчитать устаревшее: kitchen production 2026-047-petrov."
+
+
+@pytest.mark.parametrize("query", ["+7 900 000-00-00", "89000000000", "9000000000"])
+def test_order_found_by_phone(home, query):
+    api.order_new(ORDER, client="Петров", phone="+7 (900) 000-00-00", home=home)
+    api.order_new("2026-048-ivanov", client="Иванов", phone="8 911 111 11 11", home=home)
     assert api.status(query, home).order == ORDER
 
 
-def test_exact_match_beats_trimming(home):
-    api.order_new("2026-047-petrov", home=home)
-    api.order_new("2026-048-petrova", home=home)
-    assert api.status("Петрова", home).order == "2026-048-petrova"
-
-
-def test_two_petrovs_is_an_error_with_list(home):
-    api.order_new("2026-047-petrov", home=home)
-    api.order_new("2026-048-petrov", home=home)
+def test_phone_without_match_and_with_two_matches(home):
+    api.order_new("2026-047-petrov", phone="+7 900 000-00-00", home=home)
+    api.order_new("2026-048-ivanov", phone="8 900 000 00 00", home=home)
     with pytest.raises(OrderError) as e:
-        api.status("Петрова", home)
-    assert "2026-047-petrov" in str(e.value) and "2026-048-petrov" in str(e.value)
+        api.status("9000000000", home)
+    assert "2026-047-petrov" in str(e.value) and "2026-048-ivanov" in str(e.value)
+    with pytest.raises(OrderError, match="не найден"):
+        api.status("9111111111", home)
+
+
+def test_order_number_is_not_a_phone(home):
+    api.order_new(ORDER, phone="2026047 0000", home=home)  # номер заказа не считается телефоном
+    api.order_new("2026-048-ivanov", client="Иванов", home=home)
+    assert api.status("2026-047", home).order == ORDER
+    assert api.status("Иванов", home).order == "2026-048-ivanov"

@@ -468,11 +468,13 @@ def _reject_constant(name: str) -> None:
     raise ValueError(f"{name} в JSON недопустимо")
 
 
-def _insert_log(conn: sqlite3.Connection, pk: int, kind: str, text: str, version: int | None) -> LogEntry:
+def _insert_log(
+    conn: sqlite3.Connection, pk: int, kind: str, text: str, version: int | None, auto: bool = False
+) -> LogEntry:
     ts = store.now()
     conn.execute(
-        "INSERT INTO log (order_id, created_at, kind, text, project_version) VALUES (?, ?, ?, ?, ?)",
-        (pk, ts, kind, text, version),
+        "INSERT INTO log (order_id, created_at, kind, text, project_version, auto) VALUES (?, ?, ?, ?, ?, ?)",
+        (pk, ts, kind, text, version, int(auto)),
     )
     return LogEntry(created_at=ts, kind=kind, text=text, project_version=version)
 
@@ -832,6 +834,10 @@ def _stale_line(s: StaleOutput) -> str:
     return f"- {label} `{s.path}`: версия {s.source_version}, пересчитать: `{s.command}`"
 
 
+def _command(recompute: store.Recompute, order_ref: str) -> str:
+    return " ".join(p for p in ("kitchen", recompute.command, order_ref, recompute.args) if p)
+
+
 def _next_step(
     order_ref: str, has_brief: bool, has_project: bool, stale: list[StaleOutput], kinds: set[str]
 ) -> NextStep:
@@ -843,13 +849,17 @@ def _next_step(
         cmd = f"kitchen brief save {order_ref} <файл>"
         return NextStep(text=f"Собрать бриф: kitchen-brief, затем {cmd}.", commands=[cmd])
     if stale:
-        commands = list(dict.fromkeys(s.command for s in stale))  # purchase_md и purchase_json — одна команда
+        workshop = any(s.kind in PRODUCTION_KINDS for s in stale)
+        commands = list(dict.fromkeys(s.command for s in stale if s.kind not in PRODUCTION_KINDS))
+        if workshop:  # один `kitchen production` вместо отдельных команд цеха, после сметы и КП
+            commands.append(_command(store.PRODUCTION_RECOMPUTE, order_ref))
         return NextStep(text=f"Пересчитать устаревшее: {', '.join(commands)}.", commands=commands)
     if store.QUOTE_PDF not in kinds:
-        estimate, quote = f"kitchen estimate {order_ref}", f"kitchen quote {order_ref} --days <рабочих дней>"
+        estimate = _command(store.OUTPUT_RECOMPUTE[store.ESTIMATE_MD], order_ref)
+        quote = _command(store.OUTPUT_RECOMPUTE[store.QUOTE_PDF], order_ref)
         return NextStep(text=f"Смета и КП: {estimate}, затем {quote}.", commands=[estimate, quote])
     if not set(PRODUCTION_KINDS) <= kinds:
-        cmd = f"kitchen production {order_ref}"
+        cmd = _command(store.PRODUCTION_RECOMPUTE, order_ref)
         return NextStep(text=f"Документы цеха: {cmd}.", commands=[cmd])
     return NextStep(text="Все документы готовы: выезд на монтаж по чек-листу.")
 
@@ -892,7 +902,7 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
         lines += _section("Решения клиента", dated(entries("decision")[::-1]), "Пока нет.")
         lines += _section("Сделано", dated(entries("done")[::-1]), "Пока ничего.")
         last_done = o.conn.execute(
-            "SELECT MAX(id) FROM log WHERE order_id = ? AND kind = 'done'", (o.pk,)
+            "SELECT MAX(id) FROM log WHERE order_id = ? AND kind = 'done' AND auto = 0", (o.pk,)
         ).fetchone()[0]
         fresh = [r for r in entries("next", 5) if last_done is None or r["id"] > last_done]
         lines += _section("Дальше", dated(fresh), "Пока ничего.")
@@ -991,7 +1001,9 @@ def brief_save(order: str, brief_path: Path, home: Path | None = None) -> BriefS
             (row["id"], _canonical(brief), json.dumps(check, ensure_ascii=False), ts),
         )
         current = _current_version(conn, row["id"])
-        _insert_log(conn, row["id"], "done", "бриф сохранён", current["version"] if current else None)
+        _insert_log(
+            conn, row["id"], "done", "бриф сохранён", current["version"] if current else None, auto=True
+        )
         conn.execute("UPDATE orders SET updated_at = ? WHERE id = ?", (ts, row["id"]))
         conn.commit()
         result = BriefSaveResult(
