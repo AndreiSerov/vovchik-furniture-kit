@@ -30,6 +30,8 @@ LEGACY_INTERNAL_IMPORTS = {
     "test_input_guards_project.py": {"kitchen.parts"},
     "test_orders_api.py": {"kitchen.store"},
     "test_pdf.py": {"kitchen.pdf"},
+    # `row_layouts` не сходится только на искусственной стене: через проект её не собрать (тикет 45)
+    "test_project_cleanup.py": {"kitchen.common"},
     "test_project_import_diff.py": {"kitchen.project"},
     "test_row_sum_registry.py": {"kitchen.parts"},
     "test_structure_guards.py": {"kitchen.models", "kitchen.parts"},

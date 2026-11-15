@@ -960,6 +960,13 @@ def _data_hash(data: dict) -> str:
         return hashlib.sha256(_canonical(data).encode("utf-8")).hexdigest()
 
 
+def _require_unique_labels(project: Project) -> None:
+    """Повтор метки — ошибка с тем же текстом, что у находки проверок и при импорте."""
+    repeated = duplicate_labels(project)
+    if repeated:
+        raise OrderError([f.message for f in repeated])
+
+
 def _build_parts(
     project: Project,
     home: Path,
@@ -969,9 +976,7 @@ def _build_parts(
     workshop: Workshop | None = None,
 ) -> PartsResult:
     workshop = workshop or load_workshop(home)
-    repeated = duplicate_labels(project)
-    if repeated:  # тот же текст, что в находке проверок и при импорте
-        raise OrderError([f.message for f in repeated])
+    _require_unique_labels(project)
     computed = compute_parts(project, workshop)
     source = source.model_copy(
         update={
@@ -1087,9 +1092,7 @@ def _build_cut(
     workshop: Workshop | None = None,
 ) -> CutResult:
     workshop = workshop or load_workshop(home)
-    repeated = duplicate_labels(project)
-    if repeated:  # тот же текст, что в находке проверок и при импорте
-        raise OrderError([f.message for f in repeated])
+    _require_unique_labels(project)
     computed = compute_parts(project, workshop)
     saw = workshop.equipment.saw
     return CutResult(

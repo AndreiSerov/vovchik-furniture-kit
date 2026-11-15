@@ -542,6 +542,8 @@ class CommonRules(Section):
 class Construction(Section):
     mock: StrictBool
     case_thickness: PosInt = _f("толщина_корпуса")
+    # ДОБАВЛЕНО (МОК): деталь с длиной или шириной меньше — ошибка проверок проекта `part_too_small`
+    min_part_size: PosNum = _f("мин_размер_детали")
     lower: LowerModule = _f("нижний")
     upper: UpperModule = _f("верхний")
     tall: TallModule = _f("пенал")

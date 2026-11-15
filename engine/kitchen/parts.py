@@ -1348,6 +1348,7 @@ def build_module(
     dims = module_dims(module, row.kind, ws)
     out = template.build(module, dims, resolved_materials, ws, BuildContext(appliances, row))
     _check_sound(module, dims, out)
+    _check_part_sizes(out, ws.construction.min_part_size)
     _check_hinge_side(module, out)
     out.parts, drilled = apply_drilling(
         module.label, out.parts, out.joints, out.doors, ws, shelves=out.shelves, drawers=out.drawers
@@ -1375,6 +1376,27 @@ def _check_hinge_side(module: ModuleSpec, out: TemplateOut) -> None:
 def _negative_hardware(hardware: Counter) -> list[str]:
     """Позиции фурнитуры с количеством меньше нуля, «id количество»."""
     return sorted(f"{item} {n}" for item, n in hardware.items() if n < 0)
+
+
+class PartTooSmallError(OrderError):
+    """Деталь меньше `мин_размер_детали`: проверки проекта называют её находкой `part_too_small`."""
+
+    def __init__(self, parts: list[Part], limit: float):
+        self.parts = parts
+        self.limit = limit
+        super().__init__([part_too_small_message(part, limit) for part in parts])
+
+
+def part_too_small_message(part: Part, limit: float) -> str:
+    return f"{part.id} {part.length:g}×{part.width:g} мм: меньше {limit:g} мм — проверьте размеры модуля"
+
+
+def _check_part_sizes(out: TemplateOut, limit: float) -> None:
+    """Деталь, у которой длина или ширина меньше `мин_размер_детали`, — ошибка (толщина не проверяется).
+    Фасады тоже детали. Идёт до присадки: на невозможной детали отверстия мимо детали — следствие."""
+    small = [part for part in out.parts if min(part.length, part.width) < limit]
+    if small:
+        raise PartTooSmallError(small, limit)
 
 
 def _check_sound(module: ModuleSpec, dims: ModuleDims, out: TemplateOut) -> None:
