@@ -388,18 +388,6 @@ def test_status_file_carries_mock_banner(home):
 # --- контракт CLI: испорченный ввод, код 1, без трейсбека, плашка мока ---------------------------------------
 
 
-def _bad_cases(home, tmp_path):
-    imported(home, tmp_path)
-    blocker = tmp_path / "blocker"
-    blocker.write_text("x", encoding="utf-8")
-    petrov = str(FIXTURES / "petrov_project.json")
-    return {
-        "export в папку": ["export", "petrov", "--out", str(tmp_path)],
-        "export в недоступный путь": ["export", "petrov", "--out", str(blocker / "a" / "p.json")],
-        "импорт отклонён": ["import", "petrov", str(project_file(tmp_path, "w.json", order="2026-999"))],
-    }, petrov
-
-
 # --- повторы: что именно повторилось --------------------------------------------------------------------------
 
 
@@ -660,7 +648,20 @@ def _cp1251(name):
     return lambda home: (home / "workshop" / name).write_bytes(_read(home, name).encode("cp1251"))
 
 
+def _repeat_line(name, marker):
+    def spoil(home):
+        lines = _read(home, name).splitlines()
+        index = next(i for i, line in enumerate(lines) if marker in line)
+        lines.insert(index + 1, lines[index])
+        (home / "workshop" / name).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    return spoil
+
+
 BROKEN = {
+    "повторный id фурнитуры": _repeat_line("hardware.yaml", "id: hinge_71B3550"),
+    "повторный id листового материала": _repeat_line("materials.yaml", "id: ldsp_16_white"),
+    "повторный id прибора": _repeat_line("appliances.yaml", "id: oven_60"),
     **{f"{n}:{old}->{new}": _swap(n, old, new) for n, old, new, _ in RANGES},
     "скаляр под списком": lambda h: (h / "workshop" / "hardware.yaml").write_text(
         "mock: true\nпозиции: 5\n", encoding="utf-8"

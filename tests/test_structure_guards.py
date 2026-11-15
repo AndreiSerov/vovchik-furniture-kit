@@ -2,8 +2,10 @@
 
 import ast
 import re
+import typing
 from pathlib import Path
 
+from kitchen import models
 from kitchen.parts import TEMPLATES
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,7 +28,7 @@ LEGACY_INTERNAL_IMPORTS = {
     "test_pdf.py": {"kitchen.pdf"},
     "test_project_import_diff.py": {"kitchen.project"},
     "test_row_sum_registry.py": {"kitchen.parts"},
-    "test_structure_guards.py": {"kitchen.parts"},
+    "test_structure_guards.py": {"kitchen.models", "kitchen.parts"},
     "test_template_registry.py": {"kitchen.parts", "kitchen.project", "kitchen.workshop"},
 }
 
@@ -95,3 +97,49 @@ def test_drawer_part_names_live_only_in_parts():
     assert not problems, "Имена деталей ящика берутся из parts.DRAWER_BOTTOM и DRAWER_BACK:\n" + "\n".join(
         problems
     )
+
+
+# Тикет 33. Поля, которые ограничивает разбор правила или валидатор модели, а не тип.
+BOUNDED_BY_VALIDATOR = {
+    "Pricing.quick_estimate_per_m",
+    "MeterRounding.step_m",
+    "RatioRule.per_unit",
+    "RoundingRule.step",
+}
+
+
+def _has_bound(metadata):
+    return any(getattr(m, "ge", None) is not None or getattr(m, "gt", None) is not None for m in metadata)
+
+
+def _unbounded(annotation, metadata, where, seen):
+    if typing.get_origin(annotation) is typing.Annotated:
+        base, *extra = typing.get_args(annotation)
+        flat = []
+        for item in extra:
+            flat += list(getattr(item, "metadata", [])) or [item]
+        return _unbounded(base, [*metadata, *flat], where, seen)
+    if annotation in (int, float):
+        return [] if _has_bound(metadata) else [where]
+    if isinstance(annotation, type) and issubclass(annotation, models.BaseModel):
+        return _unbounded_fields(annotation, seen)
+    found = []
+    for arg in typing.get_args(annotation):
+        found += _unbounded(arg, [], where, seen)
+    return found
+
+
+def _unbounded_fields(model, seen):
+    if model in seen:
+        return []
+    seen.add(model)
+    found = []
+    for name, field in model.model_fields.items():
+        found += _unbounded(field.annotation, field.metadata, f"{model.__name__}.{name}", seen)
+    return found
+
+
+def test_every_numeric_model_field_has_a_bound():
+    """Число мастерской без ge/gt в типе — молчаливо принятое отрицательное значение."""
+    unbounded = set(_unbounded_fields(models.Workshop, set()))
+    assert unbounded <= BOUNDED_BY_VALIDATOR, sorted(unbounded - BOUNDED_BY_VALIDATOR)

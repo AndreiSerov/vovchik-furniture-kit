@@ -1,4 +1,7 @@
-"""Тикет 33: каждое числовое поле мастерской × (−1, 0, −100000) — ошибка загрузки или честный расчёт Петрова."""
+"""Тикет 33: поле мастерской × (−1, 0) — ошибка загрузки или честный расчёт Петрова.
+
+Сам факт границы у каждого числового поля проверяет `test_structure_guards.py`.
+"""
 
 import json
 import shutil
@@ -20,7 +23,7 @@ FILES = (
     "pricing.yaml",
     "appliances.yaml",
 )
-BAD = (-1, 0, -100000)
+BAD = (-1, 0)
 
 
 def numeric_paths(node, path=()):
@@ -40,7 +43,12 @@ def numeric_paths(node, path=()):
 def _cases():
     for name in FILES:
         data = yaml.safe_load((REPO / "workshop" / name).read_text(encoding="utf-8"))
+        seen = set()
         for path in numeric_paths(data):
+            field = tuple(k for k in path if isinstance(k, str))
+            if field in seen:
+                continue  # граница живёт в типе поля: одного элемента списка достаточно
+            seen.add(field)
             for bad in BAD:
                 yield pytest.param(name, path, bad, id=f"{name}:{'.'.join(map(str, path))}={bad}")
 
