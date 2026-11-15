@@ -193,3 +193,11 @@ def test_diff_module_to_gap_and_label_clash(home):
         home, [{"label": "A", "length": 1200, "rows": [lower(base("ПМ1"), gap("ПМ1"))]}], name="c.json"
     )
     assert "duplicate_label" in codes(home, clash)
+
+
+def test_kitchen_check_sees_gap_findings_like_parts(home):
+    save_brief(home, BRIEF_FRIDGE_600)
+    path = fridge_project(home, 600)
+    out = CliRunner().invoke(app, ["check", "--project", str(path), "--json"])
+    assert "gap_too_small" in {f["code"] for f in json.loads(out.output)["findings"]}
+    assert "gap_too_small" in {f.code for f in api.parts_from_project(path, home).findings}
