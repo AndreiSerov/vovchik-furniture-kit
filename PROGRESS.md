@@ -65,7 +65,7 @@
 ## Этап 6. Скиллы
 
 - [x] 26 — Статические проверки скиллов (6.6) ([спека](docs/specs/stage-6-skills.md))
-- [ ] 36 — Команда `kitchen check` (6.1) ([спека](docs/specs/stage-6-skills.md))
+- [x] 36 — Команда `kitchen check` (6.1) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 30 — Схема брифа и правила `check_brief.py` (6.5) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 40 — Чек-лист выезда (4.4, этап 4) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [ ] 49 — Следующий шаг в `status` (6.4) ([спека](docs/specs/stage-6-skills.md))
