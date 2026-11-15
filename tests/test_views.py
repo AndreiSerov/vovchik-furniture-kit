@@ -480,3 +480,11 @@ def test_views_and_save_lays_pages_out_once(home, monkeypatch):
     monkeypatch.setattr(api, "views_page_layout", lambda *a, **k: calls.append(1) or real(*a, **k))
     api.views_and_save(ORDER, home)
     assert len(calls) == 1
+
+
+def test_views_layout_of_a_result_read_back_from_json_lays_the_pages_out_again(home):
+    result = petrov_views(home)
+    again = api.ViewsResult.model_validate_json(result.model_dump_json())
+    assert [p.model_dump() for p in api.views_layout(again)] == [
+        p.model_dump() for p in api.views_layout(result)
+    ]

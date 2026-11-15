@@ -23,7 +23,15 @@ from kitchen.errors import OrderError
 from kitchen.format import num, plural
 from kitchen.geometry import turn
 from kitchen.models import Workshop
-from kitchen.parts import APPLIANCE_NAMES, ModuleParts, corner_on_left, gap_name, is_facade
+from kitchen.parts import (
+    APPLIANCE_NAMES,
+    ROW_PL_GEN,
+    ROW_PL_NOM,
+    ModuleParts,
+    corner_on_left,
+    gap_name,
+    is_facade,
+)
 from kitchen.pdf import FONT, FONT_BOLD, Area, page_area, register_fonts
 from kitchen.placement import Placement, WallPlace, part_in_room
 from kitchen.project import Project, is_gap
@@ -165,8 +173,7 @@ def build_scene(project: Project, placed: Placement, parts: list[ModuleParts], w
     def appliances(label: str, gap: bool) -> list[str]:
         return [
             gap_name(a.type, 0) if gap else APPLIANCE_NAMES.get(a.type, a.type)
-            for a in project.appliances
-            if a.module == label
+            for a in project.appliances_at(label)
         ]
 
     modules: list[ViewModule] = []
@@ -576,13 +583,11 @@ def _plan(scene: ViewScene, errors: int) -> ViewPage:
             segments.append(
                 Segment(x0=p0[0], y0=p0[1], x1=p1[0], y1=p1[1], line=0.8, dashed=o.row == "upper")
             )
-            row = "нижних" if o.row == "lower" else "верхних"
+            row = ROW_PL_GEN[o.row]
             text = f"смещение {row} {num(round(o.end - o.start))}"
             mid = (sx + dx * (a + b) / 2, sy + dy * (a + b) / 2)
             placer.put(_outside([text], _SMALL, mid, (dx, dy), (nx, ny), horizontal, length), text)
-        depth = ", ".join(
-            f"{'нижние' if k == 'lower' else 'верхние'} {v}" for k, v in sorted(w.depths.items())
-        )
+        depth = ", ".join(f"{ROW_PL_NOM[k]} {v}" for k, v in sorted(w.depths.items()))
         lines = [f"Стена {w.label}, {num(w.length)}"] + ([f"глубина: {depth}"] if depth else [])
         mid = ((sx + ex) / 2, (sy + ey) / 2)
         placer.put(_outside(lines, 8.0, mid, (dx, dy), (nx, ny), horizontal, length, bold=True), lines[0])

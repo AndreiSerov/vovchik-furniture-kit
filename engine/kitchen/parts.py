@@ -46,6 +46,8 @@ __all__ = [
     "ROW_GEN",
     "ROW_LOC",
     "ROW_NOM",
+    "ROW_PL_GEN",
+    "ROW_PL_NOM",
     "TEMPLATES",
     "AssemblyPlan",
     "EdgeTotals",
@@ -1185,6 +1187,8 @@ def accepts(template: str, appliance_type: str, ws: Workshop) -> bool:
 # Названия рядов по падежам: одно место для текстов проверок, расстановки и сравнения версий (тикет 47).
 ROW_NOM = {"lower": "нижний", "upper": "верхний"}
 ROW_GEN = {"lower": "нижнего", "upper": "верхнего"}
+ROW_PL_NOM = {"lower": "нижние", "upper": "верхние"}
+ROW_PL_GEN = {"lower": "нижних", "upper": "верхних"}
 ROW_LOC = {"lower": "нижнем ряду", "upper": "верхнем ряду", "tall": "пенале"}
 
 

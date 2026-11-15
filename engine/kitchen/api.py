@@ -30,7 +30,7 @@ from kitchen.economy import EconomyLine, EconomyVariant, apply_rule
 from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError, ProjectFileError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
-from kitchen.format import plural
+from kitchen.format import num, plural
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
@@ -2461,11 +2461,6 @@ class QuickEstimate(Result):
     rounding: str  # как округлено, словами
 
 
-def _num(x: float) -> int | float:
-    """Целое число — целым в JSON (85000, не 85000.0)."""
-    return int(x) if x == int(x) else x
-
-
 def quick_estimate(meters: float, home: Path | None = None) -> QuickEstimate:
     """Вилка цены по погонным метрам: быстрая_оценка_за_пог_м × метры, концы округлены по `pricing.yaml`."""
     if not (meters > 0 and meters != float("inf")):  # NaN и бесконечность тоже сюда
@@ -2476,9 +2471,9 @@ def quick_estimate(meters: float, home: Path | None = None) -> QuickEstimate:
     rule = pricing.price_rounding
     exact = Decimal(str(meters))  # через строку: без шума плавающей запятой
     return QuickEstimate(
-        meters=_num(meters),
-        per_meter_low=_num(low),
-        per_meter_high=_num(high),
+        meters=num(meters),
+        per_meter_low=num(low),
+        per_meter_high=num(high),
         total_low=rule.apply(exact * Decimal(str(low))),
         total_high=rule.apply(exact * Decimal(str(high))),
         rounding=rule.describe(),

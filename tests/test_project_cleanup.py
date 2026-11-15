@@ -131,7 +131,7 @@ def test_api_builds_the_duplicate_error_in_one_place():
     assert source.count("duplicate_labels(") == 1
 
 
-# --- сходимость раскладки ряда ----------------------------------------------------------------
+# --- сходимость порядка модулей в ряду ----------------------------------------------------------------
 
 
 def test_row_layouts_raises_when_offsets_do_not_settle():

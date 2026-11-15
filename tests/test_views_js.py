@@ -29,6 +29,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _node_required_in_ci():
+    if NODE is None:
+        pytest.fail("в CI нужен node: без него страница 3D не проверяется (scripts/doctor называет его)")
+
+
 @pytest.fixture(scope="module")
 def viewed(tmp_path_factory):
     home = tmp_path_factory.mktemp("home")
