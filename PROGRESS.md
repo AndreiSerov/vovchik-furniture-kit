@@ -50,16 +50,26 @@
 
 ## Этап 5. Проект и 3D
 
-- [ ] 23 — Модули в комнате и 3D (5.1) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 23 — Упрощённое 3D: модули в комнате (5.1) ([спека](docs/specs/stage-5-project-3d.md))
 - [x] 24 — Устаревшие выводы в `status` (5.3) ([спека](docs/specs/stage-5-project-3d.md))
-- [ ] 32 — Пустое место и антресоль над холодильником (5.4) ([спека](docs/specs/stage-5-project-3d.md))
-- [ ] 25 — Черновик раскладки (5.2) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 32 — Пустое место в ряду (5.4) ([спека](docs/specs/stage-5-project-3d.md))
 
 ## Этап 6. Скиллы
 
 - [x] 26 — Статические проверки скиллов (6.6) ([спека](docs/specs/stage-6-skills.md))
+- [ ] 36 — Команда `kitchen check` (6.1) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 27 — Скилл `kitchen-project` (6.1, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 28 — Скилл `kitchen-production` (6.2, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 29 — Скилл `kitchen-estimate` (6.3, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 30 — Доработка `kitchen-brief` (6.5, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 31 — Триггеры и «продолжи заказ Петрова» (6.6) ([спека](docs/specs/stage-6-skills.md))
+
+## Бэклог (после MVP)
+
+Решение 2026-11-15: MVP — от брифа до документов цеха и КП, с упрощённым 3D. Остальное ждёт здесь.
+
+- [ ] 25 — Черновик раскладки (5.2; нужен грилинг) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 37 — Целевое 3D: детали, фасады, столешница (5.1) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 38 — Антресоль над холодильником (5.4) ([спека](docs/specs/stage-5-project-3d.md))
+- [ ] 39 — Раскладка и целевое 3D в `kitchen-project` (6.1) ([спека](docs/specs/stage-6-skills.md))
+- [ ] Отложенные мелкие находки ревью — [`docs/reviews/2026-11-15/deferred.md`](docs/reviews/2026-11-15/deferred.md)

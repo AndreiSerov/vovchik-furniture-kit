@@ -1,0 +1,211 @@
+diff --git a/engine/kitchen/checks.py b/engine/kitchen/checks.py
+index 509c5a2..c592f01 100644
+--- a/engine/kitchen/checks.py
++++ b/engine/kitchen/checks.py
+@@ -12,7 +12,7 @@ from pydantic import BaseModel
+ from kitchen import formulas
+ from kitchen.brief import BriefAppliance
+ from kitchen.brief import appliances as brief_appliances
+-from kitchen.common import row_layouts
++from kitchen.common import corner_offsets, row_layouts
+ from kitchen.errors import KitchenError, WorkshopError
+ from kitchen.models import SheetMaterial, Workshop
+ from kitchen.parts import (
+@@ -55,8 +55,7 @@ def _num(x: float) -> int | float:
+ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
+     """Ширины модулей ряда + угловые смещения с соседней стены + пеналы стены из других рядов = длина стены."""
+     rules = ws.construction.corner_rules
+-    offsets = {"lower": rules.lower_offset, "upper": rules.upper_offset}
+-    extra: dict[tuple[str, str], float] = {}  # (стена, вид ряда) -> смещения и пеналы
++    offsets = corner_offsets(project, ws)  # одно правило величины и стороны смещения — и для раскладки
+     found: list[Finding] = []
+     walls = {w.label for w in project.walls}
+     for wall in project.walls:
+@@ -75,10 +74,9 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
+                         )
+                     )
+                     continue
+-                extra[(adjacent, row.kind)] = extra.get((adjacent, row.kind), 0) + offsets[row.kind]
+     for wall in project.walls:
+-        for row, modules in zip(wall.rows, row_layouts(wall), strict=True):
+-            total = sum(m.width for m in modules) + extra.get((wall.label, row.kind), 0)
++        for row, modules in zip(wall.rows, row_layouts(wall, offsets), strict=True):
++            total = sum(m.width for m in modules) + sum(offsets.get((wall.label, row.kind), (0, 0)))
+             if abs(total - wall.length) > rules.wall_tolerance:
+                 found.append(
+                     Finding(
+diff --git a/engine/kitchen/common.py b/engine/kitchen/common.py
+index 2cb0f2f..a3561c0 100644
+--- a/engine/kitchen/common.py
++++ b/engine/kitchen/common.py
+@@ -14,10 +14,18 @@ from pydantic import BaseModel
+ 
+ from kitchen.errors import OrderError
+ from kitchen.models import Workshop
+-from kitchen.parts import TEMPLATES
++from kitchen.parts import TEMPLATES, corner_on_left
+ from kitchen.project import Project
+ 
+-__all__ = ["CommonItem", "CountertopCut", "compute_common", "is_tall", "plan_countertop", "row_layouts"]
++__all__ = [
++    "CommonItem",
++    "CountertopCut",
++    "compute_common",
++    "corner_offsets",
++    "is_tall",
++    "plan_countertop",
++    "row_layouts",
++]
+ 
+ 
+ class CommonItem(BaseModel):
+@@ -42,12 +50,34 @@ def is_tall(m) -> bool:
+     return TEMPLATES[m.template].both_rows if m.template in TEMPLATES else False
+ 
+ 
+-def row_layouts(wall) -> list[list]:
++def corner_offsets(project: Project, ws: Workshop) -> dict[tuple[str, str], tuple[float, float]]:
++    """Угловые смещения соседних стен: (стена, вид ряда) -> (в начале ряда, в конце). Единственное место, где
++    решается величина и сторона смещения: сумма ряда (`checks`) и раскладка (`row_layouts`) берут его отсюда.
++    Угловой модуль у правого края ряда (последний, единственный) — стена идёт слева направо, соседняя начинается
++    от угла: смещение в начале соседней стены. Первый при других модулях — зеркально, в конце соседней.
++    Угол с несуществующей или своей же стеной не считается (его называет проверка `corner_wall`)."""
++    rules = ws.construction.corner_rules
++    size = {"lower": rules.lower_offset, "upper": rules.upper_offset}
++    labels = {w.label for w in project.walls}
++    found: dict[tuple[str, str], tuple[float, float]] = {}
++    for wall in project.walls:
++        for row in wall.rows:
++            for m in row.modules:
++                if m.corner is None or m.corner.adjacent_wall == wall.label or m.corner.adjacent_wall not in labels:
++                    continue
++                key = (m.corner.adjacent_wall, row.kind)
++                start, end = found.get(key, (0, 0))
++                found[key] = (start, end + size[row.kind]) if corner_on_left(row, m) else (start + size[row.kind], end)
++    return found
++
++
++def row_layouts(wall, offsets: dict[tuple[str, str], tuple[float, float]] | None = None) -> list[list]:
+     """Модули каждого ряда стены по порядку вдоль стены, с пеналами из других рядов: пенал входит в оба ряда
+     (и в ряд со своим пеналом тоже). Единственное место, где решается, что стоит в ряду: сумма ряда
+     (`checks`), цоколь, шина и столешница берут модули отсюда. Место пенала — отступ от начала стены:
+     его ряд считает отступ по своим модулям и пеналам, уже попавшим в этот ряд, поэтому отступы находятся
+-    повторными проходами, пока не перестанут меняться."""
++    повторными проходами, пока не перестанут меняться. `offsets` — результат `corner_offsets`: отступ
++    ряда начинается со смещения соседней стены в начале ряда, а не с нуля."""
+     at: dict[int, float] = {}  # id пенала -> отступ от начала стены
+     layouts: list[list] = []
+     for _ in range(len(wall.rows) * 4 + 2):
+@@ -71,7 +101,7 @@ def row_layouts(wall) -> list[list]:
+                 if is_tall(m) and id(m) not in at
+             ]
+             merged: list = []
+-            x = 0.0
++            x = float((offsets or {}).get((wall.label, row.kind), (0, 0))[0])
+             for m in row.modules:
+                 while talls and talls[0][0] <= x:
+                     tall = talls.pop(0)[1]
+@@ -89,22 +119,23 @@ def row_layouts(wall) -> list[list]:
+     return layouts
+ 
+ 
+-def _row_modules(wall, row) -> list:
++def _row_modules(wall, row, offsets) -> list:
+     """Модули ряда для длин: нижний ряд — с пеналами из других рядов; верхний — свои."""
+     if row.kind != "lower":
+         return list(row.modules)
+-    return row_layouts(wall)[next(i for i, r in enumerate(wall.rows) if r is row)]
++    return row_layouts(wall, offsets)[next(i for i, r in enumerate(wall.rows) if r is row)]
+ 
+ 
+-def _runs(project: Project, kinds: Iterable[str], with_tall: bool) -> list[tuple[str, list[int]]]:
++def _runs(project: Project, ws: Workshop, kinds: Iterable[str], with_tall: bool) -> list[tuple[str, list[int]]]:
+     """Непрерывные участки модулей нужного ряда по стенам: пенал либо входит в участок, либо разрывает его."""
+     runs: list[tuple[str, list[int]]] = []
++    offsets = corner_offsets(project, ws)
+     for wall in project.walls:
+         for row in wall.rows:
+             if row.kind not in kinds:
+                 continue
+             current: list[int] = []
+-            for m in _row_modules(wall, row):
++            for m in _row_modules(wall, row, offsets):
+                 if is_tall(m) and not with_tall:
+                     if current:
+                         runs.append((wall.label, current))
+@@ -171,7 +202,7 @@ def plan_countertop(project: Project, ws: Workshop) -> CountertopCut | None:
+     if top is None:
+         known = ", ".join(sorted(t.id for t in ws.materials.countertops))
+         raise OrderError(f"Столешница «{top_id}» не найдена в materials.yaml (столешницы: {known}).")
+-    runs = _runs(project, ("lower",), with_tall=False)
++    runs = _runs(project, ws, ("lower",), with_tall=False)
+     sheets = _countertop_sheets(runs, top.sheet[0], ws.equipment.saw.kerf_mm)
+     return CountertopCut(
+         item=top_id,
+@@ -201,7 +232,7 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) ->
+         for m in row.modules
+         if m.corner
+     )
+-    lower = _total(_runs(project, ("lower",), with_tall=True)) - dead
++    lower = _total(_runs(project, ws, ("lower",), with_tall=True)) - dead
+     n = _pieces(lower, rules.plinth.piece_length, reserve)
+     items.append(
+         CommonItem(
+@@ -214,7 +245,7 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) ->
+             basis=f"фронт нижних рядов {lower} мм (без глухой части углов {dead} мм) + запас {percent}, штуки по {rules.plinth.piece_length} мм",
+         )
+     )
+-    upper_runs = _runs(project, ("upper",), with_tall=False)
++    upper_runs = _runs(project, ws, ("upper",), with_tall=False)
+     upper = _total(upper_runs)
+     n = _pieces(upper, rules.rail.piece_length, reserve)
+     items.append(
+diff --git a/engine/kitchen/parts.py b/engine/kitchen/parts.py
+index 74d9bb1..d13d221 100644
+--- a/engine/kitchen/parts.py
++++ b/engine/kitchen/parts.py
+@@ -661,7 +661,7 @@ def drawer_depth_shortfall(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -
+     need = max(guide, bottom[1] + thickness)
+     if dims.depth >= need:
+         return None
+-    if dims.depth < guide:
++    if need == guide:
+         why = f"меньше направляющей ящика {guide:g} мм"
+     else:
+         why = f"меньше нужной {need:g} мм (дно ящика {bottom[1]} мм + задняя стенка {thickness} мм)"
+@@ -887,6 +887,13 @@ def build_wall_hood(
+     return out
+ 
+ 
++def corner_on_left(row: Row, module: ModuleSpec) -> bool:
++    """Угловой модуль стоит у левого края ряда: первый при других модулях. Остальные (последний, единственный,
++    стоящий посередине) — у правого. Одно правило стороны: глухая часть модуля и место углового смещения
++    соседней стены (`common.corner_offsets`)."""
++    return len(row.modules) > 1 and row.modules[0] is module
++
++
+ def _build_corner(
+     module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop, row: Row, *, upper: bool
+ ) -> TemplateOut:
+@@ -899,7 +906,7 @@ def _build_corner(
+     gap = c.facades.gap
+     facade_width = dims.width - 3 * gap - rules.upper_filler_width if upper else rules.base_facade_width
+     filler_width = dims.width - 3 * gap - facade_width
+-    blind_left = len(row.modules) > 1 and row.modules[0] is module
++    blind_left = corner_on_left(row, module)
+     filler_x = gap if blind_left else 2 * gap + facade_width
+     facade_x = 2 * gap + filler_width if blind_left else gap
+     if (
+diff --git a/tests/test_checks.py b/tests/test_checks.py
+index 99e5fb3..89080f6 100644
+--- a/tests/test_checks.py
++++ b/tests/test_checks.py
+@@ -100,7 +100,7 @@ def test_drawer_depth_fires_when_module_shallower_than_guide(home):
+     [f] = findings(path, home, "drawer_depth")
+     # предел — дно ящика 490 + задняя стенка 16
+     assert (f.level, f.subject, f.value, f.limit) == ("error", "Н1", 400, 506)
+-    assert "500" in f.message and "400" in f.message
++    assert "506" in f.message and "400" in f.message  # текст называет тот же предел, что limit
+     # ошибка глубины не прячется за вторым сообщением о расчёте того же модуля
+     assert findings(path, home, "module_build") == []
+ 
