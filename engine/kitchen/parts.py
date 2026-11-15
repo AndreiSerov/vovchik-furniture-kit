@@ -39,11 +39,13 @@ __all__ = [
     "build_module",
     "built_niche",
     "compute_parts",
+    "drawer_depth_shortfall",
     "drawer_parts",
     "facade_color",
     "module_dims",
     "niche_item",
     "resolve_materials",
+    "unknown_template_error",
 ]
 
 EDGE_SIDES = ("L1", "L2", "W1", "W2")
@@ -631,17 +633,12 @@ def build_base_bottle(
     return out
 
 
-def drawer_parts(
-    module: ModuleSpec, dims: ModuleDims, ws: Workshop, *, number: int, z: int, top: int
-) -> list[Part]:
-    """Дно и задняя стенка ящика Tandembox за фасадом, нижний край которого `z`, верхний `top` (мм от низа
-    корпуса). Одна функция для `base_drawers` и пенала. Ящик, который не помещается в корпус или за свой
-    фасад, — ошибка «ящик не помещается» с цифрами, а не деталь отрицательного размера."""
+def _drawer_sizes(module: ModuleSpec, dims: ModuleDims, ws: Workshop):
+    """Внутренняя ширина, дно и задняя стенка ящика по формулам мастерской."""
     c = ws.construction
-    t, D = c.case_thickness, dims.depth
-    material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
-    thickness = _required_thickness(material, "деталей ящика")
-    inner = _calc(module, dims, "внутренняя ширина ящика", c.drawers.inner_width, W=dims.width, T=t)
+    inner = _calc(
+        module, dims, "внутренняя ширина ящика", c.drawers.inner_width, W=dims.width, T=c.case_thickness
+    )
     try:
         bottom = formulas.evaluate(c.tandembox.bottom, внутр_ширина=inner)
         back = formulas.evaluate(c.tandembox.back, внутр_ширина=inner)
@@ -649,6 +646,42 @@ def drawer_parts(
         raise OrderError(f"Модуль {module.label}: размеры ящика: {e}.") from e
     if not isinstance(bottom, tuple) or not isinstance(back, tuple):
         raise OrderError(f"Модуль {module.label}: формулы деталей ящика должны задавать два размера.")
+    return inner, bottom, back
+
+
+def drawer_depth_shortfall(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -> tuple[float, str] | None:
+    """Внутренняя глубина — глубина корпуса (задняя стенка накладная, фасад снаружи). Нужная глубина — одно
+    правило для проверок и `drawer_parts`: дно ящика по формуле мастерской плюс толщина задней стенки ящика,
+    но не меньше длины направляющей. Возвращает (нужная глубина, русский текст ошибки) или `None`."""
+    c = ws.construction
+    material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
+    thickness = _required_thickness(material, "деталей ящика")
+    _, bottom, _ = _drawer_sizes(module, dims, ws)
+    guide = c.tandembox.guide_length
+    need = max(guide, bottom[1] + thickness)
+    if dims.depth >= need:
+        return None
+    if dims.depth < guide:
+        why = f"меньше направляющей ящика {guide:g} мм"
+    else:
+        why = f"меньше нужной {need:g} мм (дно ящика {bottom[1]} мм + задняя стенка {thickness} мм)"
+    return need, f"Модуль {module.label}: внутренняя глубина {dims.depth} мм {why}."
+
+
+def drawer_parts(
+    module: ModuleSpec, dims: ModuleDims, ws: Workshop, *, number: int, z: int, top: int
+) -> list[Part]:
+    """Дно и задняя стенка ящика Tandembox за фасадом, нижний край которого `z`, верхний `top` (мм от низа
+    корпуса). Одна функция для `base_drawers` и пенала. Ящик, который не помещается за свой фасад или по
+    глубине корпуса, — ошибка с цифрами, а не деталь отрицательного размера."""
+    c = ws.construction
+    t, D = c.case_thickness, dims.depth
+    material = _material(ws.materials.sheets, c.tandembox.material, "Материал ящика", "листовые")
+    thickness = _required_thickness(material, "деталей ящика")
+    shortfall = drawer_depth_shortfall(module, dims, ws)
+    if shortfall:
+        raise OrderError(shortfall[1])
+    inner, bottom, back = _drawer_sizes(module, dims, ws)
     if min(*bottom, *back) <= 0:
         raise OrderError(
             f"Модуль {module.label}: ящик не помещается: размеры деталей ящика должны быть положительными, "
@@ -656,11 +689,6 @@ def drawer_parts(
         )
     drawer_z = _calc(module, dims, "высота дна ящика", c.drawers.bottom_height, Z=z, T=t)
     drawer_top = drawer_z + max(thickness, back[1])
-    if D - bottom[1] - thickness < 0:
-        raise OrderError(
-            f"Модуль {module.label}: ящик не помещается: дно ящика {bottom[1]} мм и задняя стенка "
-            f"{thickness} мм глубже корпуса {D} мм."
-        )
     if drawer_z < t or drawer_top > top:
         raise OrderError(
             f"Модуль {module.label}: ящик не помещается: ящик занимает высоту от {drawer_z} до {drawer_top} мм, "
@@ -1104,9 +1132,6 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     unknown = sorted(set(hw) - known)
     if unknown:
         raise OrderError(f"Неизвестные позиции фурнитуры (нет в hardware.yaml): {', '.join(unknown)}.")
-    negative = _negative_hardware(hw)
-    if negative:
-        raise OrderError(f"Количество фурнитуры меньше нуля: {', '.join(negative)}.")
     all_parts = [p for m in modules for p in m.parts]
     # площадь фасадов — сумма площадей их деталей; округляется один раз, до 4 знаков
     facade_area = sum((Decimal(str(p.area_m2)) for p in all_parts if p.area_m2 is not None), Decimal(0))
@@ -1120,16 +1145,19 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
     )
 
 
+def unknown_template_error(module: ModuleSpec) -> OrderError:
+    """Ошибка неизвестного шаблона: один текст для расчёта деталей и проверок."""
+    known = ", ".join(sorted(TEMPLATES))
+    return OrderError(f"Модуль {module.label}: неизвестный шаблон «{module.template}» (известные: {known}).")
+
+
 def build_module(
     module: ModuleSpec, row: Row, materials: ProjectMaterials, ws: Workshop, appliances: list[Appliance]
 ) -> TemplateOut:
     """Один модуль → результат шаблона: выбор шаблона, габариты, ряд."""
     template = TEMPLATES.get(module.template)
     if template is None:
-        known = ", ".join(sorted(TEMPLATES))
-        raise OrderError(
-            f"Модуль {module.label}: неизвестный шаблон «{module.template}» (известные: {known})."
-        )
+        raise unknown_template_error(module)
     if template.row_kind != "tall" and template.row_kind != row.kind:
         raise OrderError(
             f"Модуль {module.label}: шаблон {module.template} применяется в "

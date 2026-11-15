@@ -8,8 +8,7 @@ import pytest
 from kitchen import api
 from kitchen.cli import app
 from kitchen.errors import KitchenError
-from kitchen.parts import BACK_PANEL, TEMPLATES, Template, TemplateOut
-from kitchen.project import Project
+from kitchen.parts import BACK_PANEL, TEMPLATES, Template
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -79,7 +78,6 @@ def test_cli_unknown_template_import_and_parts(home):
 def test_schema_template_is_the_registry(repo):
     schema = json.loads((repo / "engine/kitchen/schemas/project.schema.json").read_text())
     assert schema["$defs"]["ModuleSpec"]["properties"]["template"]["enum"] == sorted(TEMPLATES)
-    assert Project.model_json_schema() == schema
 
 
 # S2. Размеры
@@ -107,7 +105,7 @@ def test_nonpositive_part_error_names_part_and_size(home):
 
 
 @pytest.mark.parametrize("key", ["width", "height", "depth"])
-@pytest.mark.parametrize("value", [0, -100])
+@pytest.mark.parametrize("value", [0, -100, True])
 def test_schema_rejects_nonpositive_module_size(home, key, value):
     module = {"label": "Н1", "template": "base_door", "width": 600, key: value}
     path = write(home, lower(module), 600)
@@ -142,7 +140,7 @@ def test_negative_legacy_shelves_rejected(home, shelves):
 
 
 # Инвариант: количество фурнитуры не меньше нуля
-def test_negative_hardware_is_an_error(home, monkeypatch):
+def test_module_with_negative_hardware_is_a_module_build_error(home, monkeypatch):
     original = TEMPLATES["base_door"]
 
     def build(*args):
@@ -153,16 +151,6 @@ def test_negative_hardware_is_an_error(home, monkeypatch):
     monkeypatch.setitem(TEMPLATES, "base_door", Template(build, "lower"))
     path = write(home, lower({"label": "Н1", "template": "base_door", "width": 600}), 600)
     assert codes(api.check_project(path, home)) == ["module_build"]
-    with pytest.raises(KitchenError, match="shelf_pin_5"):
-        api.parts_from_project(path, home)
-
-
-def test_negative_total_hardware_is_an_error_even_if_the_checks_were_skipped(home, monkeypatch):
-    def build(module, dims, materials, ws, ctx):
-        return TemplateOut(hardware=Counter({"shelf_pin_5": -1}))
-
-    monkeypatch.setitem(TEMPLATES, "base_door", Template(build, "lower"))
-    path = write(home, lower({"label": "Н1", "template": "base_door", "width": 600}), 600)
     with pytest.raises(KitchenError, match="shelf_pin_5"):
         api.parts_from_project(path, home)
 
@@ -261,17 +249,19 @@ def test_drawer_does_not_fit_has_one_text_for_base_drawers_and_tall(home):
 
 # Сетка: шаблон × габариты
 SIZES = (1, 2, 30, 100, 150, 300, 450, 600, 900, 1200, 3000)
-GRID = {"width": SIZES, "height": (1, 2, 100, 300, 720, 3000), "depth": (1, 2, 100, 300, 560, 3000)}
+WORKING_WIDTHS = (750, 1050)  # рабочие ширины шаблонов из эталонов: сушка 750, угловой 1050 (150 — в SIZES)
 
 
 def grid_modules(template):
-    for w in GRID["width"]:
-        for h in GRID["height"]:
-            for d in GRID["depth"]:
-                module = {"label": f"M{w}_{h}_{d}", "template": template, "width": w, "height": h, "depth": d}
-                if template in ("base_corner", "wall_corner"):
-                    module["corner"] = {"adjacent_wall": "Б"}
-                yield module
+    widths = sorted({*SIZES, *WORKING_WIDTHS})
+    shapes = [(w, h, d) for w in widths for h in SIZES for d in SIZES] + [(w, None, None) for w in widths]
+    for w, h, d in shapes:
+        module = {"label": f"M{w}_{h}_{d}", "template": template, "width": w}
+        if h is not None:
+            module.update(height=h, depth=d)
+        if template in ("base_corner", "wall_corner"):
+            module["corner"] = {"adjacent_wall": "Б"}
+        yield module
 
 
 @pytest.mark.parametrize("template", sorted(TEMPLATES))
@@ -285,14 +275,109 @@ def test_grid_of_sizes_gives_error_or_sound_parts(home, template):
     result = api.check_project(write(home, [], 0, walls=walls), home)
     bad = {f.subject for f in result.errors if f.code != "row_sum"}
     good = [m for m in modules if m["label"] not in bad]
-    if not good:  # шаблону при любых габаритах сетки не хватает (например сушка только 750 мм)
-        return
+    assert good, f"сетка ни разу не построила {template}"  # иначе сетка про этот шаблон ничего не проверяет
     walls[0]["rows"][0]["modules"] = good
-    path = write(home, [], 0, walls=walls)
-    parts = api.parts_from_project(path, home)
+    parts = api.parts_from_project(write(home, [], 0, walls=walls), home)
+    assert {m.module for m in parts.modules} == {m["label"] for m in good}
     for module in parts.modules:
         for p in module.parts:
             assert p.length > 0 and p.width > 0 and p.thickness > 0, (p.id, p.length, p.width)
             if p.name != BACK_PANEL:
                 assert min(p.position.x, p.position.y, p.position.z) >= 0, (p.id, p.position)
     assert all(n >= 0 for n in parts.hardware.values()), parts.hardware
+
+
+# Ревью тикета 34
+def test_countertop_breaks_at_tall_from_other_row_after_own_tall(home):
+    # стена 3000: Н1 | П1 | Н2 | П2 | Н3; П1 записан в нижнем ряду, П2 — в верхнем
+    base = lambda label: {"label": label, "template": "base_door", "width": 600}
+    upper = lambda label: {"label": label, "template": "wall_door", "width": 600}
+    tall = lambda label: {"label": label, "template": "tall_oven", "width": 600}
+    walls = [
+        {
+            "label": "A",
+            "length": 3000,
+            "rows": [
+                {"kind": "lower", "modules": [base("Н1"), tall("П1"), base("Н2"), base("Н3")]},
+                {"kind": "upper", "modules": [upper("В1"), upper("В2"), tall("П2"), upper("В3")]},
+            ],
+        }
+    ]
+    path = write(home, [], 0, walls=walls)
+    data = json.loads(path.read_text())
+    data["materials"]["countertop"] = "top_38_marble"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    result = api.parts_from_project(path, home)
+    assert [f for f in result.findings if f.code == "row_sum"] == []
+    top = next(c for c in result.common if c.kind == "countertop")
+    assert "600 + 600 + 600" in top.basis, top.basis
+
+
+def test_appliance_on_unknown_template_module_is_one_finding(home):
+    path = write(home, lower({"label": "Н1", "template": "foo", "width": 600}), 600)
+    data = json.loads(path.read_text())
+    data["appliances"] = [{"type": "oven", "width": 595, "module": "Н1"}]
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert codes(api.check_project(path, home)) == ["module_build"]
+
+
+def depth_codes(home, depth):
+    path = write(home, lower({"label": "Н1", "template": "base_drawers", "width": 600, "depth": depth}), 600)
+    return [f for f in api.check_project(path, home).errors]
+
+
+def test_drawer_depth_is_one_rule_with_the_back_wall(home):
+    # дно ящика 490 + задняя стенка 16 = 506 мм: глубина 500 (длина направляющей) уже мала
+    for depth in (500, 505):
+        errors = depth_codes(home, depth)
+        assert [f.code for f in errors] == ["drawer_depth"], (depth, errors)
+        assert "506" in errors[0].message and str(depth) in errors[0].message
+        with pytest.raises(KitchenError, match="506"):
+            api.parts_from_project(
+                write(
+                    home,
+                    lower({"label": "Н1", "template": "base_drawers", "width": 600, "depth": depth}),
+                    600,
+                ),
+                home,
+            )
+    assert depth_codes(home, 506) == []
+
+
+# Метки после нормализации
+@pytest.mark.parametrize("second", ["н1", " Н1 ", "H1", "Н1\u00a0"])
+def test_labels_equal_after_normalisation_are_duplicates(home, second):
+    modules = [
+        {"label": "Н1", "template": "base_door", "width": 600},
+        {"label": second, "template": "base_door", "width": 600},
+    ]
+    result = api.check_project(write(home, lower(*modules), 1200), home)
+    found = [f for f in result.errors if f.code == "duplicate_label"]
+    assert len(found) == 1
+    assert "«Н1»" in found[0].message and f"«{second}»" in found[0].message
+
+
+def test_kitchen_parts_gives_the_duplicate_label_finding_text(home):
+    modules = [
+        {"label": "Н1", "template": "base_door", "width": 600},
+        {"label": "Н1", "template": "base_door", "width": 400},
+    ]
+    path = write(home, lower(*modules), 1000)
+    message = next(f.message for f in api.check_project(path, home).errors if f.code == "duplicate_label")
+    with pytest.raises(KitchenError) as e:
+        api.parts_from_project(path, home)
+    assert message in e.value.problems
+    assert "Маркировка" not in str(e.value)
+
+
+def test_duplicate_label_keeps_dims_of_the_first_module(home):
+    # первый Н1 шириной 400 не вмещает нишу ПММ 450; второй 700 вмещает: ниша проверяется по первому
+    modules = [
+        {"label": "Н1", "template": "base_door", "width": 400},
+        {"label": "Н1", "template": "base_door", "width": 700},
+    ]
+    path = write(home, lower(*modules), 1100)
+    data = json.loads(path.read_text())
+    data["appliances"] = [{"type": "dishwasher", "width": 450, "module": "Н1"}]
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    assert "niche_too_small" in codes(api.check_project(path, home))

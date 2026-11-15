@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from kitchen import brief as brief_check
 from kitchen import store
-from kitchen.checks import Finding
+from kitchen.checks import Finding, duplicate_labels
 from kitchen.checks import check_project as run_checks
 from kitchen.common import CommonItem, CountertopCut, compute_common, plan_countertop
 from kitchen.cutting import MaterialCut, cut_parts, kerf_warnings
@@ -934,6 +934,9 @@ def _build_parts(
     workshop: Workshop | None = None,
 ) -> PartsResult:
     workshop = workshop or load_workshop(home)
+    repeated = duplicate_labels(project)
+    if repeated:  # тот же текст, что в находке проверок и при импорте
+        raise OrderError([f.message for f in repeated])
     computed = compute_parts(project, workshop)
     source = source.model_copy(
         update={
@@ -1057,6 +1060,9 @@ def _build_cut(
     workshop: Workshop | None = None,
 ) -> CutResult:
     workshop = workshop or load_workshop(home)
+    repeated = duplicate_labels(project)
+    if repeated:  # тот же текст, что в находке проверок и при импорте
+        raise OrderError([f.message for f in repeated])
     computed = compute_parts(project, workshop)
     saw = workshop.equipment.saw
     return CutResult(

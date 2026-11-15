@@ -3,20 +3,15 @@
 Ключи английские (GLOSSARY.md); неизвестные ключи отклоняются.
 """
 
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
 
 from kitchen.errors import OrderError
-from kitchen.models import Num
+from kitchen.models import Num, PosNum
 from kitchen.workshop import translate
 
 __all__ = ["ModuleSpec", "Project", "ProjectMaterials", "Row", "Wall", "parse_project"]
-
-
-# Размер больше нуля. Не `models.PosNum`: у него `BeforeValidator`, и pydantic пишет в схему `gt` вместо
-# `exclusiveMinimum`. Строгий режим секции и так не принимает true/false как число.
-PosNum = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 
 
 class Section(BaseModel):

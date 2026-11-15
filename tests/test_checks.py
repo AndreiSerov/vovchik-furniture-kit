@@ -98,7 +98,8 @@ def single(home, template, width=600, row="lower", **extra):
 def test_drawer_depth_fires_when_module_shallower_than_guide(home):
     path = single(home, "base_drawers", depth=400)
     [f] = findings(path, home, "drawer_depth")
-    assert (f.level, f.subject, f.value, f.limit) == ("error", "Н1", 400, 500)
+    # предел — дно ящика 490 + задняя стенка 16
+    assert (f.level, f.subject, f.value, f.limit) == ("error", "Н1", 400, 506)
     assert "500" in f.message and "400" in f.message
     # ошибка глубины не прячется за вторым сообщением о расчёте того же модуля
     assert findings(path, home, "module_build") == []
@@ -119,7 +120,7 @@ def test_drawer_depth_uses_workshop_guide_length(home):
 def test_drawer_depth_also_checks_tall_drawer(home):
     path = single(home, "tall_oven", depth=450)
     [f] = findings(path, home, "drawer_depth")
-    assert (f.value, f.limit) == (450, 500)
+    assert (f.value, f.limit) == (450, 506)
 
 
 # --- вспомогательное для тестов техники (сами тесты — в test_checks_brief.py) ---------------
