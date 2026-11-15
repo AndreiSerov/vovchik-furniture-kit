@@ -23,6 +23,7 @@ FIELDS_NOT_IN_GOLDEN = {
     "findings",
     "common",
     "facade_area_by_color",
+    "gaps",  # пустые места рядов (тикет 32): эталоны их не знают
 }
 # Поля детали, которых нет в эталонах: отверстия присадки (тикет 19) дополняют деталь, эталоны их не знают.
 PART_FIELDS_NOT_IN_GOLDEN = {"holes", "base_edges"}
