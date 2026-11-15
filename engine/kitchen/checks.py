@@ -475,9 +475,33 @@ def _no_back(built: list[tuple[ModuleSpec, TemplateOut]]) -> list[Finding]:
     ]
 
 
+def _countertop_overrides(project: Project) -> list[Finding]:
+    """Столешница одна на проект (`common.size_countertop`): переопределение у ряда или модуля цену, раскрой и
+    закупку не меняло бы, а КП расходилось бы с ценой, поэтому проект с ним отклоняется."""
+    found: list[Finding] = []
+    for wall in project.walls:
+        for row in wall.rows:
+            places = [(f"ряд {_KIND_RU[row.kind]} на стене «{wall.label}»", wall.label, row.materials)]
+            places += [(f"Модуль {m.label}", m.label, m.materials) for m in row.modules]
+            for where, subject, overrides in places:
+                if overrides is not None and overrides.countertop is not None:
+                    found.append(
+                        Finding(
+                            code="countertop_override",
+                            level="error",
+                            subject=subject,
+                            message=(
+                                f"{where[:1].upper() + where[1:]}: столешница задаётся только для всего проекта "
+                                "(materials.countertop), переопределение у ряда или модуля не поддерживается."
+                            ),
+                        )
+                    )
+    return found
+
+
 def check_project(project: Project, ws: Workshop, brief: dict | None = None) -> list[Finding]:
     """Все проверки проекта, ошибки и предупреждения вместе. `brief` — последний бриф заказа (или `None`)."""
-    found = duplicate_labels(project) + _row_sums(project, ws)
+    found = duplicate_labels(project) + _row_sums(project, ws) + _countertop_overrides(project)
     dims, built = _build(project, ws, found)
     failed = {f.subject for f in found if f.code == "module_build"}
     found += _niches(project, ws, dims, None if brief is None else brief_appliances(brief), failed)

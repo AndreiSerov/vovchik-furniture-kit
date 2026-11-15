@@ -9,8 +9,9 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from pydantic import BaseModel, Field
 
+from kitchen.common import size_countertop
 from kitchen.economy import EconomyVariant
-from kitchen.errors import InputError
+from kitchen.errors import InputError, OrderError
 from kitchen.models import Master, Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
@@ -78,8 +79,9 @@ class QuoteEconomy(BaseModel):
 class QuoteBody(BaseModel):
     """Всё, что видит клиент. Одна модель для `quote.pdf`, `quote.json` и `--json`.
 
-    `body`, `facades_lower`, `facades_upper`, `countertop` — одно значение или несколько с метками модулей
-    («RAL 3020 (Н1–Н5), RAL 7044 (П1)»); группа без модулей — `None` и в КП не печатается."""
+    `body`, `facades_lower`, `facades_upper` — одно значение или несколько с метками модулей
+    («RAL 3020 (Н1–Н5), RAL 7044 (П1)»); группа без модулей — `None` и в КП не печатается. `countertop` —
+    название столешницы проекта (без меток) или `None`, если столешницы в цене нет."""
 
     master: QuoteMaster
     days: int
@@ -145,6 +147,20 @@ def _enumerate(items: list[str]) -> str:
     return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " и " + items[-1]
 
 
+def _hardware_phrase(name: str, many: str | None, count: int) -> str:
+    """«выдвижным ведром»; два и больше — «двумя выдвижными вёдрами» (форма — `для_клиента_мн`)."""
+    if count == 1:
+        return name
+    return _counted(count, "m", many, many) if many else f"{name} ({count} шт.)"
+
+
+def _appliance(appliance) -> str | None:
+    """Прибор словами брифа; «другая техника» слов не имеет: пишется модель прибора, если есть, иначе ничего."""
+    if appliance.type == "other":
+        return appliance.model or None
+    return APPLIANCE_NAMES[appliance.type]
+
+
 def describe_module(module: ModuleSpec, row: Row, built: ModuleParts, project: Project, ws: Workshop) -> str:
     """«нижний модуль с тремя ящиками, 600 мм; техника: мойка». Ящики, двери и полки считаются из деталей
     модуля (то же, что идёт в раскрой); карусель, ведро, сушка и подъёмный фасад — по фурнитуре модуля и
@@ -152,6 +168,7 @@ def describe_module(module: ModuleSpec, row: Row, built: ModuleParts, project: P
     template = TEMPLATES[module.template]
     hardware = build_module(module, row, project.materials, ws, project.appliances).hardware
     named = {i.id: i.client_name for i in ws.hardware.items if i.client_name}
+    plural_names = {i.id: i.client_name_many for i in ws.hardware.items if i.client_name_many}
     lifted = ws.construction.upper_rules.lift in hardware
     names = [p.name for p in built.parts]
     drawers = names.count(DRAWER_BOTTOM)
@@ -164,9 +181,12 @@ def describe_module(module: ModuleSpec, row: Row, built: ModuleParts, project: P
         extras.append(_counted(doors, "f", "дверью", "дверями"))
     if shelves:
         extras.append(_counted(shelves, "f", "полкой", "полками"))
-    extras += [named[h] for h in hardware if h in named]
+    for h, count in hardware.items():
+        if h in named:
+            extras.append(_hardware_phrase(named[h], plural_names.get(h), count))
     text = template.title + (f" с {_enumerate(extras)}" if extras else "") + f", {module.width:g} мм"
-    kinds = [APPLIANCE_NAMES[a.type] for a in project.appliances if a.module == module.label]
+    kinds = [_appliance(a) for a in project.appliances if a.module == module.label]
+    kinds = [k for k in kinds if k]
     return text + (f"; техника: {', '.join(kinds)}" if kinds else "")
 
 
@@ -203,7 +223,11 @@ def _group(values: list[tuple[str, str]]) -> str | None:
 
 
 def _name(items, item_id: str) -> str:
-    return next((i.name for i in items if i.id == item_id), item_id)
+    """Название материала для клиента. Неизвестный id — ошибка: сырой id клиенту не показывают."""
+    for item in items:
+        if item.id == item_id:
+            return item.name
+    raise OrderError(f"Материал «{item_id}» не найден в materials.yaml: в КП его назвать нечем.")
 
 
 def _prepayment(price: int, share: float) -> int:
@@ -231,10 +255,10 @@ def build_quote(
     price: int,
     economy: EconomyVariant | None,
 ) -> QuoteBody:
-    """КП из проекта, деталей модулей и цены сметы того же снимка проекта. Материалы и цвета — по модулям,
-    как их видит расчёт деталей (`parts.resolve_materials`)."""
+    """КП из проекта, деталей модулей и цены сметы того же снимка проекта. Корпус и цвета фасадов — по модулям,
+    как их видит расчёт деталей (`parts.resolve_materials`); столешница — одна на проект, как в цене."""
     by_label = {m.module: m for m in built}
-    modules, body, lower, upper, tops = [], [], [], [], []
+    modules, body, lower, upper = [], [], [], []
     for wall in project.walls:
         for row in wall.rows:
             for module in row.modules:
@@ -248,13 +272,14 @@ def build_quote(
                     )
                 )
                 m = resolve_materials(module, row, project.materials)
-                body.append((label, _name(ws.materials.sheets, m.body)))
-                is_lower = lower_facades(module, row)
-                facade = _name(ws.materials.facades, m.facades_lower if is_lower else m.facades_upper)
-                color = m.facades_lower_color if is_lower else m.facades_upper_color
-                (lower if is_lower else upper).append((label, f"{facade}, {color}" if color else facade))
-                if is_lower and m.countertop:
-                    tops.append((label, _name(ws.materials.countertops, m.countertop)))
+                if TEMPLATES[module.template].carcass:  # корпус — только у модулей с корпусом (не ПММ)
+                    body.append((label, _name(ws.materials.sheets, m.body)))
+                if "фасад" in {p.name for p in by_label[label].parts}:
+                    is_lower = lower_facades(module, row)
+                    facade = _name(ws.materials.facades, m.facades_lower if is_lower else m.facades_upper)
+                    color = m.facades_lower_color if is_lower else m.facades_upper_color
+                    (lower if is_lower else upper).append((label, f"{facade}, {color}" if color else facade))
+    top = size_countertop(project, ws)  # та же столешница, что в цене, раскрое и закупке
     share = ws.pricing.prepayment
     prepayment = _prepayment(price, share)
     return QuoteBody(
@@ -264,7 +289,7 @@ def build_quote(
         body=_group(body),
         facades_lower=_group(lower),
         facades_upper=_group(upper),
-        countertop=_group(tops),
+        countertop=top.name if top and top.sheet_count else None,
         price=price,
         prepayment_share=share,
         prepayment=prepayment,

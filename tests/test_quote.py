@@ -637,3 +637,152 @@ def test_replacement_line_ends_with_modules_in_brackets_and_a_full_stop(small_ec
     for r in quote.economy.replacements:
         word = "модуль" if len(r.modules) == 1 else "модули"
         assert f"({word} {', '.join(r.modules)})." in text
+
+
+# --- второй возврат тикета 18 -------------------------------------------------
+
+
+def test_countertop_in_quote_is_the_priced_countertop_not_an_override(tmp_path):
+    """КП берёт столешницу из `common.size_countertop`, как цена, раскрой и закупка."""
+    shutil.copytree(REPO / "workshop", tmp_path / "workshop")
+    path = write_project(tmp_path, with_materials())
+    quote = api.quote_from_project(path, 20, tmp_path)
+    assert quote.countertop == api.cut_from_project(path, tmp_path).countertop.name
+    assert quote.countertop == "Столешница Egger 38 мм, мрамор Леванто"
+
+
+def test_no_countertop_in_price_means_no_line_in_quote(tmp_path):
+    project = with_materials()
+    del project["materials"]["countertop"]
+    assert small_quote(tmp_path, project).countertop is None
+    upper_only = with_materials()
+    upper_only["walls"][0]["rows"] = upper_only["walls"][0]["rows"][1:]
+    (tmp_path / "b").mkdir()
+    assert (
+        small_quote(tmp_path / "b", upper_only).countertop is None
+    )  # нижних модулей нет: столешницы в цене нет
+
+
+@pytest.mark.parametrize("where", ["row_lower:row", "row_lower:1", "row_upper:row"])
+def test_countertop_override_is_an_import_error(home, where):
+    api.order_new(SMALL_ORDER, client="Сидоров С. С.", home=home)
+    path = write_project(home, with_materials(**{where: {"countertop": "top_38_marble"}}), "import.json")
+    with pytest.raises(OrderError) as e:
+        api.import_project(SMALL_ORDER, path, home=home)
+    assert "столешница задаётся только для всего проекта" in "".join(e.value.problems)
+    assert not api.status(SMALL_ORDER, home).project_version
+
+
+def test_petrov_has_no_countertop_overrides_and_imports(home):
+    api.brief_save(ORDER, BRIEF, home)
+    api.import_project(ORDER, PETROV, home=home)
+    assert api.status(ORDER, home).project_version == 1
+
+
+def test_unknown_project_countertop_is_an_error(tmp_path):
+    project = with_materials()
+    project["materials"]["countertop"] = "top_nonexistent"
+    with pytest.raises(OrderError) as e:
+        small_quote(tmp_path, project)
+    assert "top_nonexistent" in "".join(e.value.problems)
+
+
+def test_unknown_body_material_is_an_error_not_a_raw_id_in_quote(tmp_path):
+    project = with_materials()
+    project["materials"]["body"] = "ldsp_missing"
+    with pytest.raises(OrderError) as e:
+        small_quote(tmp_path, project)
+    assert "ldsp_missing" in "".join(e.value.problems) and "materials.yaml" in "".join(e.value.problems)
+
+
+def test_days_are_declined_in_cli_text(home):
+    for days, words in ((1, "1 рабочий день"), (21, "21 рабочий день"), (22, "22 рабочих дня")):
+        result = runner.invoke(app, ["quote", "--project", str(PETROV), "--days", str(days)])
+        assert result.exit_code == 0 and f"Срок изготовления и монтажа: {words}" in result.output, (
+            result.output
+        )
+
+
+def test_days_equals_space_value_with_order_is_a_russian_error_with_exit_1(home):
+    import_order(home)
+    for args in (["--days=", "35"], ["--days=", "x"]):
+        result = runner.invoke(app, ["quote", "sidorov", *args])
+        assert result.exit_code == 1, result.output
+        assert "рабочих дней" in result.output and "Usage" not in result.output
+
+
+def test_days_365_is_allowed_and_help_names_the_value(tmp_path):
+    assert small_quote(tmp_path, days=365).days == 365
+    assert re.search(r"--days\s+N\b", runner.invoke(app, ["quote", "--help"]).output)
+
+
+def test_dishwasher_panel_is_not_listed_under_body(tmp_path):
+    project = with_materials()
+    project["walls"][0]["length"] = 1800
+    project["walls"][0]["rows"][0]["modules"].append(
+        {"label": "Н3", "template": "dishwasher_panel", "width": 450, "materials": {"body": "ldsp_16_oak"}}
+    )
+    project["appliances"].append({"type": "dishwasher", "width": 450, "module": "Н3"})
+    quote = small_quote(tmp_path, project)
+    assert "(Н3)" not in (quote.body or "") and "дуб" not in (quote.body or ""), quote.body
+    assert {m.label: m.text for m in quote.modules}["Н3"] == (
+        "фасад посудомоечной машины, 450 мм; техника: посудомойка"
+    )
+    assert "Н3" not in quote.facades_lower or quote.facades_lower.count("(") <= 1  # фасад у ПММ есть
+
+
+def test_petrov_dishwasher_line_is_exact(petrov):
+    quote, _, _ = petrov
+    assert {m.label: m.text for m in quote.modules}["Н6"] == (
+        "фасад посудомоечной машины, 450 мм; техника: посудомойка"
+    )
+
+
+def test_two_label_run_is_listed_not_joined(tmp_path):
+    project = with_materials()
+    project["walls"][0]["rows"] = project["walls"][0]["rows"][:1]
+    project["walls"][0]["length"] = 1800
+    project["appliances"] = []
+    mods = [{"label": f"Н{n}", "template": "base_door", "width": 450, "shelves": 1} for n in range(1, 5)]
+    mods[0]["materials"] = {"body": "ldsp_16_oak"}
+    mods[1]["materials"] = {"body": "ldsp_16_oak"}
+    project["walls"][0]["rows"][0]["modules"] = mods
+    white, oak = "ЛДСП Egger 16 мм, белый W1000 ST9", "ЛДСП Egger 16 мм, дуб Галифакс H1180"
+    assert small_quote(tmp_path, project).body == f"{oak} (Н1, Н2), {white} (Н3, Н4)"
+
+
+def test_client_text_with_a_full_stop_gets_one_stop_in_pdf(small_economy):
+    _, quote, _, _, _ = small_economy
+    text = pdf_text(quote.outputs[0].file)
+    assert quote.economy.replacements and ". (" not in text and ".)" not in text and ".." not in text
+    for r in quote.economy.replacements:
+        assert r.client_text.endswith(".") and r.client_text.rstrip(".") + " (" in text
+
+
+def test_several_shelves_are_counted_in_words(tmp_path):
+    project = copy.deepcopy(SMALL)
+    project["walls"][0]["rows"][1]["modules"][1]["contents"] = {"shelves": 2}
+    quote = small_quote(tmp_path, project)
+    assert {m.label: m.text for m in quote.modules}[
+        "В2"
+    ] == "верхний модуль с двумя дверями и двумя полками, 750 мм"
+
+
+def test_two_same_inserts_are_counted_by_number(tmp_path):
+    project = copy.deepcopy(SMALL)
+    project["walls"][0]["rows"][0]["modules"][1]["contents"] = {"inserts": ["bin_2sec", "bin_2sec"]}
+    quote = small_quote(tmp_path, project)
+    assert {m.label: m.text for m in quote.modules}["Н2"] == (
+        "модуль под мойку с двумя дверями и двумя выдвижными вёдрами, 750 мм; техника: мойка"
+    )
+
+
+def test_other_appliance_without_model_is_left_out_and_with_model_is_named(tmp_path):
+    project = copy.deepcopy(SMALL)
+    project["appliances"].append({"type": "other", "width": 300, "module": "Н1"})
+    text = {m.label: m.text for m in small_quote(tmp_path, project).modules}["Н1"]
+    assert text == "нижний модуль с тремя ящиками, 600 мм" and "другая" not in text
+    project["appliances"][-1]["model"] = "Bosch XYZ"
+    (tmp_path / "b").mkdir()
+    named = {m.label: m.text for m in small_quote(tmp_path / "b", project).modules}["Н1"]
+    assert named.endswith("техника: Bosch XYZ")

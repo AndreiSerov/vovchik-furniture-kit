@@ -557,6 +557,9 @@ class HardwareItem(Section):
     price: NonNegNum = _f("цена")
     shop: str = _f("магазин")
     client_name: str | None = Field(default=None, alias="для_клиента", min_length=1)
+    client_name_many: str | None = Field(
+        default=None, alias="для_клиента_мн", min_length=1
+    )  # «выдвижными вёдрами»
 
 
 class Hardware(Section):

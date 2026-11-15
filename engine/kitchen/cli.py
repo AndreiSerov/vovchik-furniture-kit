@@ -503,7 +503,7 @@ def _render_quote(r: api.QuoteResult) -> str:
         f"Итого: {api.money(r.price)}",
         f"Предоплата ({api.percent(r.prepayment_share)}): {api.money(r.prepayment)}",
         f"Остаток: {api.money(r.balance)}",
-        f"Срок изготовления и монтажа: {r.days} рабочих дней",
+        f"Срок изготовления и монтажа: {api.plural(r.days, 'рабочий день', 'рабочих дня', 'рабочих дней')}",
     ]
     if r.economy:
         e = r.economy
@@ -519,10 +519,11 @@ class _QuoteCommand(TyperCommand):
     """`--days` без значения падает в разборе опций раньше нашей проверки: ошибка тоже по-русски."""
 
     def parse_args(self, ctx, args):
+        given = list(args)  # разбор съедает список: проверять после ошибки нечего
         try:
             return super().parse_args(ctx, args)
         except Exception as e:  # UsageError живёт во внутреннем модуле typer: берём по тексту
-            if "--days" in str(e):
+            if "--days" in str(e) or "--days=" in given:  # «--days= 35»: пустое значение и лишний аргумент
                 fail(InputError(api.DAYS_ERROR))
             raise
 
@@ -537,6 +538,7 @@ def quote(
         str | None,
         typer.Option(
             "--days",
+            metavar="N",
             help="Срок изготовления и монтажа в рабочих днях: целое от 1 до 365 (обязательно).",
         ),
     ] = None,
