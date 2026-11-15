@@ -223,3 +223,127 @@ def test_views_layout_keeps_every_label_inside_the_sheet_and_apart(home):
         pages = api.views_layout(result)
         assert len(pages) == 1 + len(result.scene.walls)
         assert_labels_fit(pages)
+
+
+def unmock(home):
+    for p in (home / "workshop").glob("*.yaml"):
+        p.write_text(p.read_text(encoding="utf-8").replace("mock: true", "mock: false"), encoding="utf-8")
+
+
+def import_v2(home):
+    project = json.loads(PETROV.read_text(encoding="utf-8"))
+    project["ceiling_height"] = 2650
+    path = home / "v2.json"
+    path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    api.import_project(ORDER, path, home=home)
+
+
+def test_watermark_and_banner_on_every_page_when_mock_and_none_without(home):
+    petrov_order(home)
+    for text in pages_of(api.views_and_save(ORDER, home)):
+        assert text.count(MOCK_BANNER) == 2 and "версия проекта 1" in text  # знак и строка колонтитула
+    unmock(home)
+    result = api.views_and_save(ORDER, home)
+    assert not result.mock
+    for text in pages_of(result):
+        assert "МОК" not in text and "версия проекта 1" in text
+
+
+def test_output_is_registered_and_becomes_stale_after_new_version(home):
+    petrov_order(home)
+    api.views_and_save(ORDER, home)
+    outputs = [o for o in api.list_outputs(ORDER, home) if o.kind == "views"]
+    assert [(o.path, o.source_version) for o in outputs] == [(f"orders/{ORDER}/out/kitchen-views.pdf", 1)]
+    import_v2(home)
+    status = api.status(ORDER, home)
+    assert [s.command for s in status.stale if s.kind == "views"] == [f"kitchen 3d {ORDER}"]
+    assert "виды кухни" in status.text
+    api.views_and_save(ORDER, home)
+    assert not [s for s in api.status(ORDER, home).stale if s.kind == "views"]
+
+
+def test_from_order_writes_nothing(home):
+    petrov_order(home)
+    result = api.views_from_order(ORDER, home)
+    assert result.output is None and result.source.version == 1
+    assert not (home / "orders" / ORDER / "out" / "kitchen-views.pdf").exists()
+    assert api.list_outputs(ORDER, home) == []
+
+
+def test_pdf_is_deterministic_for_one_date(home):
+    from datetime import date
+
+    petrov_order(home)
+    first = Path(api.views_and_save(ORDER, home, on=date(2026, 11, 15)).output.file).read_bytes()
+    second = Path(api.views_and_save(ORDER, home, on=date(2026, 11, 15)).output.file).read_bytes()
+    assert first == second
+
+
+def test_project_with_check_errors_is_drawn_with_a_banner_on_every_page(home):
+    # сумма ряда не сходится: стена A длиннее модулей на 100 мм — ошибка проверок, виды рисуются
+    data = json.loads(PETROV.read_text(encoding="utf-8"))
+    data["walls"][0]["length"] = 2900
+    path = home / "p.json"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    result = api.views_from_project(path, home)
+    errors = len(result.errors)
+    assert errors >= 1
+    banner = f"Проверки: {errors} {'ошибка' if errors == 1 else 'ошибки'} — сверьте проект"
+    for page in api.views_layout(result):
+        assert banner in [label.text for label in page.labels], page.title
+    assert all(banner not in [lb.text for lb in p.labels] for p in api.views_layout(petrov_views(home)))
+
+
+def test_placement_error_refuses_with_its_text_and_writes_no_file(home):
+    from tests.test_placement import petrov
+
+    petrov_order(home)
+    # верх пенала 2800 выше потолка 2700: проверки проходят, расстановка нет
+    project = petrov(П1={"height": 2700})
+    path = home / "v2.json"
+    path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    assert api.import_project(ORDER, path, home=home).version == 2
+    result = runner.invoke(app, ["3d", "petrov"])
+    assert result.exit_code != 0
+    assert "Верх верхних модулей 2800 мм выше потолка 2700 мм." in result.output
+    assert not (home / "orders" / ORDER / "out" / "kitchen-views.pdf").exists()
+
+
+def test_corner_overlap_refuses_the_views(home):
+    from tests.test_placement import corner, mod, write
+
+    walls = [
+        {"label": "A", "length": 1650, "rows": [
+            {"kind": "lower", "modules": [mod("Н1", "base_door", 600), corner("Н4", "base_corner", 1050, "Б")]},
+            {"kind": "upper", "modules": [mod("В1", "wall_door", 1650)]},
+        ]},
+        {"label": "Б", "length": 1800, "rows": [
+            {"kind": "lower", "modules": [mod("Н5", "base_door", 1200)]},
+            {"kind": "upper", "modules": [mod("В5", "wall_door", 1800)]},
+        ]},
+    ]  # fmt: skip
+    import pytest
+    from kitchen.errors import OrderError
+
+    with pytest.raises(OrderError) as e:
+        api.views_from_project(write(home, walls), home)
+    assert e.value.problems == [
+        "В1 (стена A) и В5 (стена Б) пересекаются в углу: нужен верхний угловой модуль или отступ верхнего ряда"
+    ]
+
+
+def test_cli_prints_tall_heights_warning_after_the_checks_line(home):
+    from tests.test_placement import mod, write
+
+    walls = [{"label": "A", "length": 1800, "rows": [
+        {"kind": "lower", "modules": [
+            mod("П1", "tall_oven", 600, height=2100), mod("П2", "tall_oven", 600, height=2300),
+            mod("Н1", "base_door", 600),
+        ]},
+        {"kind": "upper", "modules": [mod("В1", "wall_door", 600)]},
+    ]}]  # fmt: skip
+    result = runner.invoke(app, ["3d", "--project", str(write(home, walls))])
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    checks = next(i for i, line in enumerate(lines) if line.startswith("Проверки:"))
+    assert lines[checks + 1] == "Пеналы разной высоты: П1 2100 мм, П2 2300 мм — верх верхних по П2 (2400 мм)."
