@@ -340,12 +340,12 @@ class Chain(BaseModel):
     """Цепочка ширин ряда на виде стены: ширины модулей, пустых мест и угловых смещений по порядку."""
 
     row: RowKind
-    values: list[float]
+    values: list[int | float]
 
 
 class Level(BaseModel):
     name: str
-    z: float
+    z: int | float
 
 
 class ViewPage(BaseModel):
