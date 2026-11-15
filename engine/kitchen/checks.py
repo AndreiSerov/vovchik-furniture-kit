@@ -13,8 +13,8 @@ from pydantic import BaseModel
 from kitchen import formulas
 from kitchen.brief import BriefAppliance
 from kitchen.brief import appliances as brief_appliances
-from kitchen.common import row_layouts
-from kitchen.errors import KitchenError, OrderError, WorkshopError
+from kitchen.common import corner_offsets, is_tall, row_layouts, row_positions
+from kitchen.errors import KitchenError, WorkshopError
 from kitchen.models import SheetMaterial, Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
@@ -35,7 +35,6 @@ from kitchen.parts import (
     niche_item,
     part_too_small_message,
     unknown_template_error,
-    upper_corner_offset,
 )
 from kitchen.project import Gap, ModuleSpec, Project, is_gap
 
@@ -62,8 +61,6 @@ def _num(x: float) -> int | float:
 def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
     """Ширины модулей ряда + угловые смещения с соседней стены + пеналы стены из других рядов = длина стены."""
     rules = ws.construction.corner_rules
-    extra: dict[tuple[str, str], float] = {}  # (стена, вид ряда) -> смещения и пеналы
-    unknown: set[tuple[str, str]] = set()  # ряды, чьё угловое смещение не посчитать
     found: list[Finding] = []
     walls = {w.label for w in project.walls}
     for wall in project.walls:
@@ -81,20 +78,15 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
                             message=f"Модуль {m.label}: соседняя стена «{adjacent}» должна существовать и отличаться от стены «{wall.label}».",
                         )
                     )
-                    continue
-                try:
-                    offset = rules.lower_offset if row.kind == "lower" else upper_corner_offset(m, row, ws)
-                except OrderError:
-                    # габариты углового не строятся (дробные мм) — причину называет module_build,
-                    # сумму соседнего ряда без смещения не считаем, чтобы не было ложного row_sum
-                    unknown.add((adjacent, row.kind))
-                    continue
-                extra[(adjacent, row.kind)] = extra.get((adjacent, row.kind), 0) + offset
+    offsets = corner_offsets(project, ws)  # одно правило величины и стороны смещения — и для раскладки
     for wall in project.walls:
-        for row, modules in zip(wall.rows, row_layouts(wall), strict=True):
-            if (wall.label, row.kind) in unknown:
+        for row, modules in zip(wall.rows, row_layouts(wall, offsets), strict=True):
+            if (wall.label, row.kind) in offsets.unknown:
+                # габариты углового не строятся (дробные мм) — причину называет module_build,
+                # сумму соседнего ряда без смещения не считаем, чтобы не было ложного row_sum
                 continue
-            total = sum(m.width for m in modules) + extra.get((wall.label, row.kind), 0)
+            mine = offsets.of(wall.label, row.kind)
+            total = sum(m.width for m in modules) + mine.start + mine.end
             if abs(total - wall.length) > rules.wall_tolerance:
                 found.append(
                     Finding(
@@ -110,6 +102,58 @@ def _row_sums(project: Project, ws: Workshop) -> list[Finding]:
                         limit=wall.length,
                     )
                 )
+    return found
+
+
+_ROW_OF = {"lower": "нижнего", "upper": "верхнего"}
+
+
+def _tall_overlaps(project: Project, ws: Workshop) -> list[Finding]:
+    """Пенал занимает оба ряда (тикет 23, решение мастера 2026-11-15): на своём месте (отступ в своём ряду) он
+    не должен стоять на угловом смещении другого ряда той же стены и пересекать модуль другого ряда, который
+    «перешагнул» его место. Одна находка на пенал: первым — смещение, затем модули по порядку рядов."""
+    offsets = corner_offsets(project, ws)
+    found: list[Finding] = []
+    for wall in project.walls:
+        placed = row_positions(wall, offsets)
+        for row, entries in zip(wall.rows, placed, strict=True):
+            for a, tall in entries:
+                if not any(tall is e for e in row.modules) or not is_tall(tall):
+                    continue
+                b = a + tall.width
+                hit: tuple[str, str] | None = None
+                for kind in ("lower", "upper"):
+                    if kind == row.kind or (wall.label, kind) in offsets.unknown:
+                        continue
+                    o = offsets.of(wall.label, kind)
+                    if o.at_start and a < o.start:
+                        hit = (o.at_start[0], kind)
+                    elif o.at_end and b > wall.length - o.end:
+                        hit = (o.at_end[0], kind)
+                    if hit:
+                        break
+                for other, others in zip(wall.rows, placed, strict=True):
+                    if hit or other is row:
+                        continue
+                    for x, entry in others:
+                        if entry is tall:
+                            break
+                        own = any(entry is e for e in other.modules)
+                        if own and x < b and a < x + entry.width:
+                            hit = (entry.label, other.kind)
+                            break
+                if hit:
+                    found.append(
+                        Finding(
+                            code="tall_overlap",
+                            level="error",
+                            subject=tall.label,
+                            message=(
+                                f"Пенал {tall.label} (x {_num(a)}–{_num(b)} на стене {wall.label}) стоит на месте "
+                                f"углового смещения или пересекает модуль {hit[0]} {_ROW_OF[hit[1]]} ряда."
+                            ),
+                        )
+                    )
     return found
 
 
@@ -640,6 +684,7 @@ def check_project(project: Project, ws: Workshop, brief: dict | None = None) -> 
     found = (
         duplicate_labels(project)
         + _row_sums(project, ws)
+        + _tall_overlaps(project, ws)
         + _gap_widths(project)
         + _countertop_overrides(project)
     )
