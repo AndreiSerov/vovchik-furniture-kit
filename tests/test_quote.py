@@ -920,3 +920,12 @@ def test_countertop_override_is_a_check_finding_and_reaches_parts(home, where):
     assert [
         f.code for f in api.parts_from_project(path, home).findings if f.code == "countertop_override"
     ] == ["countertop_override"]
+
+
+def test_inserts_are_described_in_project_order(tmp_path):
+    project = copy.deepcopy(SMALL)
+    project["walls"][0]["rows"][0]["modules"][1]["contents"] = {"inserts": ["dryer_750", "bin_2sec"]}
+    quote = small_quote(tmp_path, project)
+    assert {m.label: m.text for m in quote.modules}["Н2"] == (
+        "модуль под мойку с двумя дверями, сушкой для посуды и выдвижным ведром, 750 мм; техника: мойка"
+    )

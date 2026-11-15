@@ -48,7 +48,7 @@
 
 - [x] 19 — Присадка: конфирматы и петли (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [x] 20 — Присадка: направляющие и полкодержатели (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
-- [ ] 22 — Сборочный лист (4.4) ([спека](docs/specs/stage-4-drilling-assembly.md))
+- [x] 22 — Сборочный лист (4.4) ([спека](docs/specs/stage-4-drilling-assembly.md))
 
 Чек-лист выезда (40) и уборка этапа 4 (46) ждут схему брифа (30) и стоят в этапе 6 после неё.
 

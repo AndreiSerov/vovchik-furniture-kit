@@ -539,6 +539,11 @@ class CommonRules(Section):
     countertop: CountertopRules = _f("столешница")
 
 
+# Этапы сборки модуля (тикет 22): фиксированный набор движка, порядок — ключ `сборка` construction.yaml.
+AssemblyStage = Literal["корпус", "задняя_стенка", "полки", "ящики", "фасады", "ручки", "опоры"]
+ASSEMBLY_STAGES: tuple[str, ...] = AssemblyStage.__args__  # type: ignore[attr-defined]
+
+
 class Construction(Section):
     mock: StrictBool
     case_thickness: PosInt = _f("толщина_корпуса")
@@ -571,6 +576,19 @@ class Construction(Section):
     edging: ConstructionEdging = _f("кромка")
     tandembox: Tandembox = _f("ящик_tandembox")
     drilling: DrillingRules = _f("присадка")  # ДОБАВЛЕНО (МОК): правила присадки (тикет 19)
+    assembly: list[AssemblyStage] = _f("сборка")  # ДОБАВЛЕНО (МОК): порядок этапов сборки (тикет 22)
+
+    @field_validator("assembly")
+    @classmethod
+    def _assembly_each_stage_once(cls, stages: list[str]) -> list[str]:
+        """Каждый этап набора назван ровно один раз: повтор и пропуск — ошибка с именем этапа."""
+        repeated = sorted({s for s in stages if stages.count(s) > 1}, key=stages.index)
+        missing = [s for s in ASSEMBLY_STAGES if s not in stages]
+        problems = [f"этап «{s}» назван больше одного раза" for s in repeated]
+        problems += [f"этапа «{s}» нет в списке" for s in missing]
+        if problems:
+            raise ValueError("; ".join(problems) + f" (нужны все: {', '.join(ASSEMBLY_STAGES)})")
+        return stages
 
     @model_validator(mode="after")
     def _steps_sorted(self) -> "Construction":
@@ -677,6 +695,8 @@ class HardwareItem(Section):
     client_name_many: str | None = Field(
         default=None, alias="для_клиента_мн", min_length=1
     )  # «выдвижными вёдрами»
+    # где позиция ставится (тикет 22): сборочный лист — «цех», чек-лист выезда — «объект»; нет ключа — «цех»
+    installed: Literal["цех", "объект"] = Field(default="цех", alias="ставится")
 
 
 class Hardware(Section):
