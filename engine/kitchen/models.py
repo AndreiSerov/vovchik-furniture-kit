@@ -630,7 +630,9 @@ class Pricing(Section):
     consumables_share: NonNegNum = _f("расходники_от_материалов")
     materials_delivery: NonNegNum = _f("доставка_материалов")
     price_rounding: Annotated[RoundingRule, BeforeValidator(parse_rounding)] = _f("округление_цены")
-    prepayment: NonNegNum = _f("предоплата")
+    prepayment: Annotated[Num, Field(ge=0, le=1)] = _f(
+        "предоплата"
+    )  # доля итога КП; больше 1 — отрицательный остаток
     quick_estimate_per_m: tuple[Num, Num] = _f("быстрая_оценка_за_пог_м")
 
     @field_validator("quick_estimate_per_m")
@@ -716,6 +718,21 @@ class Economy(Section):
         return self
 
 
+# --- master.yaml ------------------------------------------------------------
+
+
+class Master(Section):
+    """Реквизиты мастера для КП."""
+
+    mock: StrictBool
+    name: str = Field(alias="имя", min_length=1)
+    phone: str = Field(alias="телефон", min_length=1)
+    city: str = Field(alias="город", min_length=1)
+    status: Literal["самозанятый", "ИП"] = _f("статус")
+    inn: str = Field(alias="инн", pattern=r"^[0-9]{12}$")
+    offer_days: PosInt = _f("срок_действия_предложения_дней")
+
+
 class Workshop(BaseModel):
     """Мастерская целиком. Заполняется загрузчиком, не из YAML напрямую."""
 
@@ -727,6 +744,7 @@ class Workshop(BaseModel):
     pricing: Pricing
     appliances: Appliances
     economy: Economy
+    master: Master
     mock_files: list[str]
 
     @property

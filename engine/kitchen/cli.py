@@ -13,6 +13,8 @@ import typer
 
 from kitchen import api
 from kitchen.errors import InputError, KitchenError
+from kitchen.quote import parse_days
+from kitchen.quote_pdf import money
 from kitchen.result import MOCK_BANNER, Result
 
 app = typer.Typer(help="Движок мастерской: проверка данных, заказы, раскрой, смета.", no_args_is_help=True)
@@ -493,6 +495,62 @@ def estimate(
     except KitchenError as e:
         fail(e)
     emit(result, _render_order_estimate, json)
+
+
+def _render_quote(r: api.QuoteResult) -> str:
+    lines = [
+        "КП:",
+        _render_source(r.source),
+        f"Итого: {money(r.price)}",
+        f"Предоплата ({r.prepayment_share * 100:.4g}%): {money(r.prepayment)}",
+        f"Остаток: {money(r.balance)}",
+        f"Срок изготовления и монтажа: {r.days} рабочих дней",
+    ]
+    if r.economy:
+        e = r.economy
+        lines.append(
+            f"Экономия: цена как в проекте {money(e.price_as_is)}, цена «экономии» {money(e.price)}, "
+            f"разница {money(e.saving)}"
+        )
+    lines += [f"Файл: {output.file} (версия проекта {output.source_version})" for output in r.outputs]
+    return "\n".join(lines)
+
+
+@app.command("quote")
+def quote(
+    order: Annotated[
+        str | None,
+        typer.Argument(help="Заказ: номер, номер-фамилия или фамилия. Либо --project."),
+    ] = None,
+    days: Annotated[
+        str | None,
+        typer.Option(
+            "--days", help="Срок изготовления и монтажа в рабочих днях: целое больше нуля (обязательно)."
+        ),
+    ] = None,
+    project: Annotated[
+        Path | None, typer.Option("--project", help="Файл project.json (без БД, файлы не пишутся).")
+    ] = None,
+    economy: Annotated[
+        bool, typer.Option("--economy", help="Добавить вариант «экономия»: две цены и список замен.")
+    ] = False,
+    json: JsonOpt = False,
+) -> None:
+    """КП клиенту: состав, итог, предоплата, срок, без себестоимости и наценки. Заказ — ещё quote.pdf и quote.json."""
+    try:
+        if (order is None) == (project is None):
+            raise InputError(
+                "Укажите либо заказ (kitchen quote petrov --days 35), либо файл: --project project.json."
+            )
+        term = parse_days(days)
+        result = (
+            api.quote_and_save(order, term, economy=economy)
+            if order is not None
+            else api.quote_from_project(project, term, economy=economy)
+        )
+    except KitchenError as e:
+        fail(e)
+    emit(result, _render_quote, json)
 
 
 def _render_production(r: api.ProductionResult) -> str:

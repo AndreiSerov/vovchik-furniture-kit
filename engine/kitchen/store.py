@@ -255,7 +255,14 @@ def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
 # --- выводы -----------------------------------------------------------------
 
 OutputKind = Literal[
-    "cutting", "edging", "purchase_md", "purchase_json", "estimate_md", "estimate_json"
+    "cutting",
+    "edging",
+    "purchase_md",
+    "purchase_json",
+    "estimate_md",
+    "estimate_json",
+    "quote_pdf",
+    "quote_json",
 ]  # виды выводов; этапы 2-4 добавляют свои
 CUTTING: OutputKind = "cutting"
 EDGING: OutputKind = "edging"
@@ -263,6 +270,8 @@ PURCHASE_MD: OutputKind = "purchase_md"
 PURCHASE_JSON: OutputKind = "purchase_json"
 ESTIMATE_MD: OutputKind = "estimate_md"
 ESTIMATE_JSON: OutputKind = "estimate_json"
+QUOTE_PDF: OutputKind = "quote_pdf"
+QUOTE_JSON: OutputKind = "quote_json"
 
 
 class Recompute(NamedTuple):
@@ -270,6 +279,7 @@ class Recompute(NamedTuple):
 
     label: str
     command: str
+    args: str = ""  # подсказка к команде, без которой её не запустить: срок КП вписывает мастер
 
 
 # Реестр «вид вывода → команда пересчёта» (тикет 24). Новый OutputKind без записи роняет
@@ -281,6 +291,8 @@ OUTPUT_RECOMPUTE: dict[OutputKind, Recompute] = {
     PURCHASE_JSON: Recompute("закупка (json)", "purchase"),
     ESTIMATE_MD: Recompute("смета (md)", "estimate"),
     ESTIMATE_JSON: Recompute("смета (json)", "estimate"),
+    QUOTE_PDF: Recompute("КП (pdf)", "quote", "--days <рабочих дней>"),
+    QUOTE_JSON: Recompute("КП (json)", "quote", "--days <рабочих дней>"),
 }
 
 

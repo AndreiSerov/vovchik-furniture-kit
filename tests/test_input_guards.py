@@ -26,6 +26,7 @@ FILES = (
     "pricing.yaml",
     "appliances.yaml",
     "economy.yaml",
+    "master.yaml",
 )
 ENGLISH = ("Input should", "greater_than", "finite_number", "Value error", "validation error")
 

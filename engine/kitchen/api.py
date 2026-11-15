@@ -30,6 +30,8 @@ from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Work
 from kitchen.parts import EdgeTotals, ModuleParts, Part, compute_parts
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
+from kitchen.quote import QuoteBody, build_quote, check_days
+from kitchen.quote_pdf import write_quote
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
@@ -62,6 +64,7 @@ __all__ = [
     "ProductionResult",
     "PurchaseResult",
     "QuickEstimate",
+    "QuoteResult",
     "StaleOutput",
     "StatusResult",
     "ValidationContext",
@@ -95,6 +98,9 @@ __all__ = [
     "purchase_and_save",
     "purchase_from_order",
     "quick_estimate",
+    "quote_and_save",
+    "quote_from_order",
+    "quote_from_project",
     "resolve_home",
     "status",
     "validate_wrapper",
@@ -708,7 +714,16 @@ def _stale_outputs(
             kind=r["kind"],
             path=r["path"],
             source_version=r["source_version"],
-            command=f"kitchen {OUTPUT_RECOMPUTE[r['kind']].command} {order_ref}",
+            command=" ".join(
+                part
+                for part in (
+                    "kitchen",
+                    OUTPUT_RECOMPUTE[r["kind"]].command,
+                    order_ref,
+                    OUTPUT_RECOMPUTE[r["kind"]].args,
+                )
+                if part
+            ),
         )
         for r in rows
     ]
@@ -1454,18 +1469,27 @@ def _with_economy(
     return result.model_copy(update={"economy": variant})
 
 
+def _estimate_run(
+    project: Project,
+    home: Path,
+    source: PartsSource,
+    brief: sqlite3.Row | None,
+    warnings: list[str],
+    workshop: Workshop,
+    economy: bool,
+) -> tuple[EstimateResult, PartsResult]:
+    """Смета снимка проекта и его детали: одна цепочка для сметы и КП, цена у них одна."""
+    parts = _build_parts(project, home, source, brief, warnings, workshop)
+    cut = _build_cut(project, home, source, brief, warnings, workshop)
+    result = _estimate(project, parts, cut, workshop)
+    return _with_economy(result, project, home, workshop, economy), parts
+
+
 def estimate_from_order(order: str, home: Path | None = None, economy: bool = False) -> EstimateResult:
     """Смета текущей версии проекта; `economy` добавляет вариант «экономия» (копия, версия не меняется)."""
     home = home or resolve_home()
     project, source, brief, warnings = _order_project(order, home)
-    workshop = load_workshop(home)
-    result = _estimate(
-        project,
-        _build_parts(project, home, source, brief, warnings, workshop),
-        _build_cut(project, home, source, brief, warnings, workshop),
-        workshop,
-    )
-    return _with_economy(result, project, home, workshop, economy)
+    return _estimate_run(project, home, source, brief, warnings, load_workshop(home), economy)[0]
 
 
 def _project_file(path: Path) -> tuple[Project, PartsSource]:
@@ -1485,15 +1509,8 @@ def estimate_from_project(path: Path, home: Path | None = None, economy: bool = 
     """`kitchen estimate --project <файл>`: смета проекта из файла, без файлов выводов и записи в БД."""
     home = home or resolve_home()
     project, source = _project_file(path)
-    workshop = load_workshop(home)
     brief = _brief_of_project(home, project.order)
-    result = _estimate(
-        project,
-        _build_parts(project, home, source, brief, [], workshop),
-        _build_cut(project, home, source, brief, [], workshop),
-        workshop,
-    )
-    return _with_economy(result, project, home, workshop, economy)
+    return _estimate_run(project, home, source, brief, [], load_workshop(home), economy)[0]
 
 
 def economy_parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
@@ -1603,6 +1620,87 @@ def estimate_and_save(order: str, home: Path | None = None, economy: bool = Fals
     home = home or resolve_home()
     result, files = _estimate_files(home, estimate_from_order(order, home, economy))
     _save_outputs(home, result.source, files)
+    return result
+
+
+class QuoteResult(QuoteBody, Result):
+    """КП: то, что видит клиент. Цена — из сметы того же снимка проекта; себестоимости и наценки нет."""
+
+    source: PartsSource
+    outputs: list[OutputInfo] = Field(default_factory=list)
+
+
+def _quote(
+    project: Project,
+    home: Path,
+    source: PartsSource,
+    brief: sqlite3.Row | None,
+    warnings: list[str],
+    days: int,
+    economy: bool,
+) -> QuoteResult:
+    days = check_days(days)  # срок проверяется до расчёта: без него КП не выдать
+    workshop = load_workshop(home)
+    estimate, parts = _estimate_run(project, home, source, brief, warnings, workshop, economy)
+    body = build_quote(
+        project, parts.modules, workshop, days=days, price=estimate.price, economy=estimate.economy
+    )
+    return QuoteResult(
+        **body.model_dump(),
+        source=estimate.source,
+        mock=estimate.mock,
+        mock_files=estimate.mock_files,
+    )
+
+
+def quote_from_order(order: str, days: int, home: Path | None = None, economy: bool = False) -> QuoteResult:
+    """КП текущей версии проекта заказа. `days` — срок изготовления и монтажа в рабочих днях, вписывает мастер."""
+    home = home or resolve_home()
+    check_days(days)
+    project, source, brief, warnings = _order_project(order, home)
+    return _quote(project, home, source, brief, warnings, days, economy)
+
+
+def quote_from_project(path: Path, days: int, home: Path | None = None, economy: bool = False) -> QuoteResult:
+    """`kitchen quote --project <файл>`: КП проекта из файла, без файлов выводов и записи в БД."""
+    home = home or resolve_home()
+    check_days(days)
+    project, source = _project_file(path)
+    return _quote(project, home, source, _brief_of_project(home, project.order), [], days, economy)
+
+
+def quote_and_save(
+    order: str, days: int, home: Path | None = None, economy: bool = False, on: date | None = None
+) -> QuoteResult:
+    """КП заказа: `quote.pdf` и `quote.json` из одной модели, обе записи — в реестре выводов заказа."""
+    home = home or resolve_home()
+    result = quote_from_order(order, days, home, economy)
+    outputs = [
+        _output_info(home, result.source, store.QUOTE_PDF, "quote.pdf"),
+        _output_info(home, result.source, store.QUOTE_JSON, "quote.json"),
+    ]
+    result = result.model_copy(update={"outputs": outputs})
+    _save_outputs(
+        home,
+        result.source,
+        [
+            (
+                outputs[0],
+                lambda path: write_quote(
+                    path,
+                    result,
+                    order=result.source.order,
+                    version=result.source.version,
+                    mock=result.mock,
+                    on=on or store.today(),
+                ),
+            ),
+            (
+                outputs[1],
+                lambda path: path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8"),
+            ),
+        ],
+    )
     return result
 
 

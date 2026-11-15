@@ -1,4 +1,4 @@
-"""Тикет 17: `economy.yaml` — восьмой файл мастерской, правила замен, загрузка и плашка мока."""
+"""Тикет 17: `economy.yaml` — один из файлов мастерской, правила замен, загрузка и плашка мока."""
 
 import pytest
 from kitchen import api
@@ -16,6 +16,7 @@ OTHER_FILES = (
     "labor",
     "pricing",
     "appliances",
+    "master",
 )
 
 
@@ -34,7 +35,7 @@ def load_errors(home):
 
 def test_economy_file_is_a_mock_workshop_file_with_five_rules(home):
     workshop = api.load_workshop(home)
-    assert "economy.yaml" in workshop.mock_files and len(workshop.mock_files) == 8
+    assert "economy.yaml" in workshop.mock_files and len(workshop.mock_files) == 9
     assert [r.id for r in workshop.economy.rules] == [
         "carousel_to_shelf",
         "drawers_to_doors",

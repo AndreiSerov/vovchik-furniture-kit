@@ -21,6 +21,7 @@ from kitchen.models import ApplianceItem, EdgeRule, Num, Workshop
 from kitchen.project import Appliance, ModuleSpec, Project, ProjectMaterials, Row
 
 __all__ = [
+    "APPLIANCE_NAMES",
     "APPLIANCE_ROWS",
     "BACK_PANEL",
     "DRAWER_BACK",
@@ -556,6 +557,7 @@ class Template:
     appliances: tuple[str, ...] = ()  # виды техники, под которые шаблон строит нишу
     both_rows: bool = False  # модуль записан в одном ряду стены и занимает оба (пенал)
     default_depth: Callable[[Workshop], int] | None = None  # глубина по умолчанию вместо глубины ряда
+    title: str = field(kw_only=True)  # русское название для строки состава КП: «нижний модуль», «пенал»
 
 
 def _plain(build: Callable[[ModuleSpec, ModuleDims, ProjectMaterials, Workshop], TemplateOut]):
@@ -996,23 +998,50 @@ def build_hood_of_project(
 
 TEMPLATES = {
     "tall_oven": Template(
-        build_tall_oven, "tall", drawers=True, appliances=("oven", "microwave"), both_rows=True
+        build_tall_oven,
+        "tall",
+        drawers=True,
+        appliances=("oven", "microwave"),
+        both_rows=True,
+        title="пенал",
     ),
-    "base_door": Template(_plain(build_base_door), "lower"),
-    "base_corner": Template(build_base_corner, "lower"),
+    "base_door": Template(_plain(build_base_door), "lower", title="нижний модуль"),
+    "base_corner": Template(build_base_corner, "lower", title="нижний угловой модуль"),
     "wall_corner": Template(
-        build_wall_corner, "upper", default_depth=lambda ws: ws.construction.corner_rules.upper_depth
+        build_wall_corner,
+        "upper",
+        default_depth=lambda ws: ws.construction.corner_rules.upper_depth,
+        title="верхний угловой модуль",
     ),
-    "wall_door": Template(_plain(build_wall_door), "upper"),
-    "wall_lift": Template(_plain(build_wall_lift), "upper"),
-    "wall_hood": Template(build_hood_of_project, "upper", appliances=("hood",)),
-    "wall_dryer": Template(_plain(build_wall_dryer), "upper"),
-    "base_sink": Template(_plain(build_base_sink), "lower", appliances=("sink",)),
-    "base_bottle": Template(_plain(build_base_bottle), "lower"),
-    "base_drawers": Template(_plain(build_base_drawers), "lower", drawers=True),
+    "wall_door": Template(_plain(build_wall_door), "upper", title="верхний модуль"),
+    "wall_lift": Template(_plain(build_wall_lift), "upper", title="верхний модуль-подъёмник"),
+    "wall_hood": Template(build_hood_of_project, "upper", appliances=("hood",), title="модуль над вытяжкой"),
+    "wall_dryer": Template(_plain(build_wall_dryer), "upper", title="верхний модуль-сушка"),
+    "base_sink": Template(_plain(build_base_sink), "lower", appliances=("sink",), title="модуль под мойку"),
+    "base_bottle": Template(_plain(build_base_bottle), "lower", title="нижний модуль-бутылочница"),
+    "base_drawers": Template(_plain(build_base_drawers), "lower", drawers=True, title="нижний модуль"),
     "dishwasher_panel": Template(
-        _plain(build_dishwasher_panel), "lower", carcass=False, appliances=("dishwasher",)
+        _plain(build_dishwasher_panel),
+        "lower",
+        carcass=False,
+        appliances=("dishwasher",),
+        title="фасад посудомоечной машины",
     ),
+}
+
+# Русские названия видов техники для строки состава КП (ключи — `models.APPLIANCE_KINDS`, сверяет тест).
+APPLIANCE_NAMES = {
+    "sink": "мойка",
+    "hob": "варочная панель",
+    "cooker": "плита",
+    "oven": "духовка",
+    "microwave": "СВЧ",
+    "dishwasher": "посудомоечная машина",
+    "washing_machine": "стиральная машина",
+    "coffee_machine": "кофемашина",
+    "wine_cooler": "винный шкаф",
+    "other": "другая техника",
+    "hood": "вытяжка",
 }
 
 # Явная несовместимость вида техники с рядом модуля: вытяжка только вверху, остальное только внизу
