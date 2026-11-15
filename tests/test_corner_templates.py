@@ -72,7 +72,7 @@ def test_corner_rejects_impossible_geometry(home, base_door_project):
 def test_corner_manual_golden(home, base_door_project):
     # ПРОВЕРИТЬ МАСТЕРУ. Низ: дно/царги 1018, заглушка 594, фасад 450;
     # кромка 7114 + 9×30 = 7384 мм, закупка 8,2 м. Карусель одна.
-    # Верх: дно/крыша 568×600, полка 566×580, заглушка 150, фасад 444;
+    # Верх (глубина верхних 320, тикет 50): дно/крыша 568×320, полка 566×300, заглушка 150, фасад 444;
     # кромка 4874 + 9×30 = 5144 мм, закупка 5,7 м.
     for template, width, kind in (("base_corner", 1050, "lower"), ("wall_corner", 600, "upper")):
         corner_project(base_door_project, template, width, kind)

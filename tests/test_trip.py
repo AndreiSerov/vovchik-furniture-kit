@@ -78,13 +78,15 @@ def brief_with_installation(home, **fields):
 
 
 def test_petrov_modules_section_lists_all_13_in_project_order(home):
+    # 13 модулей и пустое место ПМ1 за верхним угловым стены Б (тикет 50)
     petrov(home)
     r = api.trip_from_order(ORDER, home)
-    assert section(r, "Модули").title == "Модули (13)"
+    assert section(r, "Модули").title == "Модули (14)"
     items = texts(r, "Модули")
     parts = api.parts_from_order(ORDER, home)
-    assert len(items) == 13
-    assert sorted(i.split(" — ")[0] for i in items) == sorted(m.module for m in parts.modules)
+    assert len(items) == 14
+    assert sorted(i.split(" — ")[0] for i in items) == sorted([*(m.module for m in parts.modules), "ПМ1"])
+    assert "ПМ1 — пустое место, 264 мм" in items
     assert "П1 — пенал, 600 мм" in items
     assert "Н6 — фасад посудомоечной машины, 450 мм" in items
 
@@ -246,7 +248,7 @@ def test_petrov_pdf_has_header_sections_and_a_box_on_every_item(home):
     assert "Чек-лист выезда" in text
     assert "Клиент: Петров, +7 900 000-00-00" in text
     for title in (
-        "Модули (13)",
+        "Модули (14)",
         "Общие позиции",
         "Фурнитура для монтажа",
         "Техника клиента",
@@ -333,7 +335,7 @@ def test_cli_order_text_and_json(home):
     assert lines[0] == MOCK and lines[-1] == MOCK
     assert "Чек-лист выезда:" in lines and "версия 1 проекта" in text.output
     assert "Клиент: Петров, +7 900 000-00-00" in lines
-    assert "Модули (13):" in lines and "  П1 — пенал, 600 мм" in lines
+    assert "Модули (14):" in lines and "  П1 — пенал, 600 мм" in lines
     assert "☐" not in text.output
     assert any("trip-checklist.pdf" in line for line in lines)
 
@@ -446,7 +448,7 @@ def test_elevator_labels_come_from_the_brief_schema(home, raw, label):
 def test_petrov_modules_keep_the_project_order(home):
     petrov(home)
     labels = [t.split(" — ")[0] for t in texts(api.trip_from_order(ORDER, home), "Модули")]
-    assert labels == ["П1", "Н1", "Н2", "Н3", "Н4", "В1", "В2", "В3", "В4", "Н5", "Н6", "В5", "В6"]
+    assert labels == ["П1", "Н1", "Н2", "Н3", "Н4", "В1", "В2", "В3", "В4", "Н5", "Н6", "ПМ1", "В5", "В6"]
 
 
 @pytest.mark.parametrize(("drop", "expected"), [("phone", "Петров, —"), ("name", "—, +7 900 000-00-00")])

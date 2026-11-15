@@ -154,25 +154,25 @@ def test_diff_lines(home):
     n6 = next(m for m in modules if m["label"] == "Н6")
     old_width = int(n6["width"])
     n6["width"] = old_width - 100
-    modules.append(gap("ПМ1"))
+    modules.append(gap("ПМ2"))
     save(new)
     assert api.diff_project("petrov", 1, 2, home).changes == [
         f"Н6: ширина {old_width} → {old_width - 100}",
-        f"ПМ1: добавлено пустое место 600 мм (Б, нижний, {len(modules)})",
+        f"ПМ2: добавлено пустое место 600 мм (Б, нижний, {len(modules)})",
     ]
     newer = copy.deepcopy(new)
-    next(m for m in lower_b(newer) if m["label"] == "ПМ1")["width"] = 650
-    newer["appliances"].append({"type": "fridge", "width": 600, "module": "ПМ1"})
+    next(m for m in lower_b(newer) if m["label"] == "ПМ2")["width"] = 650
+    newer["appliances"].append({"type": "fridge", "width": 600, "module": "ПМ2"})
     save(newer)
     assert api.diff_project("petrov", 2, 3, home).changes == [
-        "ПМ1: ширина 600 → 650",
-        "ПМ1: техника не задано → холодильник",
+        "ПМ2: ширина 600 → 650",
+        "ПМ2: техника не задано → холодильник",
     ]
     gone = copy.deepcopy(newer)
     lower_b(gone).pop()
     gone["appliances"].pop()
     save(gone)
-    assert api.diff_project("petrov", 3, 4, home).changes == ["ПМ1: удалено пустое место"]
+    assert api.diff_project("petrov", 3, 4, home).changes == ["ПМ2: удалено пустое место"]
     assert api.diff_project("petrov", 4, 4, home).changes == []
     out = CliRunner().invoke(app, ["diff", "petrov", "v4", "v4"]).output
     assert "Изменений модулей и пустых мест нет." in out

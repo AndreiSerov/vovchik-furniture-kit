@@ -173,7 +173,9 @@ def test_petrov_quantities(home):
     parts = api.parts_from_project(FIXTURES / "petrov_project.json", home)
     assert got["cut"].quantity == 82  # 71 ЛДСП + 11 ХДФ; фасады и столешница не считаются
     project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
-    labels = [m["label"] for w in project["walls"] for r in w["rows"] for m in r["modules"]]
+    labels = [
+        m["label"] for w in project["walls"] for r in w["rows"] for m in r["modules"] if not m.get("gap")
+    ]
     assert got["install"].quantity == len(labels) == len(parts.modules)
     assert got["drill"].quantity == 81  # 63 ЛДСП корпуса (71 − 8 деталей ящиков) + 18 фасадов
     assert got["case_assembly"].quantity == 12  # 13 модулей без ПММ

@@ -56,7 +56,7 @@
 
 - [x] 24 — Устаревшие выводы в `status` (5.3) ([спека](docs/specs/stage-5-project-3d.md))
 - [x] 32 — Пустое место в ряду (5.4) ([спека](docs/specs/stage-5-project-3d.md))
-- [ ] 50 — Верхний угловой по глубине верхних (1.5, 5.1) ([спека](docs/specs/stage-5-project-3d.md))
+- [x] 50 — Верхний угловой по глубине верхних (1.5, 5.1) ([спека](docs/specs/stage-5-project-3d.md))
 - [ ] 23 — Расстановка модулей в комнате (5.1) ([спека](docs/specs/stage-5-project-3d.md))
 - [ ] 41 — Виды кухни в PDF и команда `kitchen 3d` (5.1) ([спека](docs/specs/stage-5-project-3d.md))
 - [ ] 42 — 3D в HTML (5.1) ([спека](docs/specs/stage-5-project-3d.md))

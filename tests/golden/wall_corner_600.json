@@ -1,6 +1,6 @@
 {
   "_проверить_мастеру": "ПРОВЕРИТЬ МАСТЕРУ: эталон посчитан вручную, мастер не подтвердил",
-  "_выкладка": "Верх: дно/крыша 568×600, полка 566×580, заглушка 150, фасад 444; кромка 4874 + 9×30 = 5144 мм, закупка 5,7 м.",
+  "_выкладка": "Верх (тикет 50, глубина верхних 320): дно/крыша 568×320, полка 566×300, заглушка 150, фасад 444; кромка 4874 + 9×30 = 5144 мм (передняя кромка дна, крыши и полки по 568/568/566 мм, как у верхних), закупка 5,7 м.",
   "order": "2026-047-petrov",
   "modules": [
     {
@@ -12,7 +12,7 @@
           "module": "В1",
           "name": "боковина",
           "length": 720,
-          "width": 600,
+          "width": 320,
           "thickness": 16,
           "material": "ldsp_16_white",
           "texture": false,
@@ -38,7 +38,7 @@
           "module": "В1",
           "name": "боковина",
           "length": 720,
-          "width": 600,
+          "width": 320,
           "thickness": 16,
           "material": "ldsp_16_white",
           "texture": false,
@@ -63,16 +63,16 @@
           "id": "В1-дно",
           "module": "В1",
           "name": "дно",
-          "length": 600,
-          "width": 568,
+          "length": 568,
+          "width": 320,
           "thickness": 16,
           "material": "ldsp_16_white",
           "texture": false,
           "edges": {
-            "L1": "",
+            "L1": "edge_08_white",
             "L2": "",
             "W1": "",
-            "W2": "edge_08_white"
+            "W2": ""
           },
           "position": {
             "x": 16,
@@ -80,8 +80,8 @@
             "z": 0
           },
           "orientation": {
-            "length": "y",
-            "width": "x",
+            "length": "x",
+            "width": "y",
             "thickness": "z"
           }
         },
@@ -89,16 +89,16 @@
           "id": "В1-крыш",
           "module": "В1",
           "name": "крыша",
-          "length": 600,
-          "width": 568,
+          "length": 568,
+          "width": 320,
           "thickness": 16,
           "material": "ldsp_16_white",
           "texture": false,
           "edges": {
-            "L1": "",
+            "L1": "edge_08_white",
             "L2": "",
             "W1": "",
-            "W2": "edge_08_white"
+            "W2": ""
           },
           "position": {
             "x": 16,
@@ -106,8 +106,8 @@
             "z": 704
           },
           "orientation": {
-            "length": "y",
-            "width": "x",
+            "length": "x",
+            "width": "y",
             "thickness": "z"
           }
         },
@@ -115,16 +115,16 @@
           "id": "В1-полка",
           "module": "В1",
           "name": "полка",
-          "length": 580,
-          "width": 566,
+          "length": 566,
+          "width": 300,
           "thickness": 16,
           "material": "ldsp_16_white",
           "texture": false,
           "edges": {
-            "L1": "",
+            "L1": "edge_08_white",
             "L2": "",
             "W1": "",
-            "W2": "edge_08_white"
+            "W2": ""
           },
           "position": {
             "x": 17,
@@ -132,8 +132,8 @@
             "z": 300
           },
           "orientation": {
-            "length": "y",
-            "width": "x",
+            "length": "x",
+            "width": "y",
             "thickness": "z"
           }
         },
@@ -180,7 +180,7 @@
           },
           "position": {
             "x": 448,
-            "y": 600,
+            "y": 320,
             "z": 2
           },
           "orientation": {
@@ -206,7 +206,7 @@
           },
           "position": {
             "x": 2,
-            "y": 600,
+            "y": 320,
             "z": 2
           },
           "orientation": {
@@ -222,12 +222,12 @@
   "hardware": {
     "confirmat_7x50": 8,
     "confirmat_cap_white": 8,
-    "shelf_pin_5": 4,
-    "screw_3_5x16": 30,
+    "handle_profile": 1,
     "hanger_camar807": 2,
     "hinge_71B3550": 2,
     "plate_173L6100": 2,
-    "handle_profile": 1
+    "screw_3_5x16": 30,
+    "shelf_pin_5": 4
   },
   "edges": {
     "edge_08_white": {
