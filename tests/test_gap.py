@@ -252,3 +252,11 @@ def test_gap_width_600_and_600_point_0_make_no_new_version(home):
     text = path.read_text(encoding="utf-8").replace('"width": 600,', '"width": 600.0,')
     path.write_text(text, encoding="utf-8")
     assert api.import_project("petrov", path, home=home).changed is False
+
+
+def test_schema_error_names_the_key_as_written_in_the_file(home):
+    walls = [{"label": "A", "length": 600, "rows": [lower(base("Н1", 0)), upper(gap("ПМ2", 0))]}]
+    with pytest.raises(OrderError) as e:
+        api.check_project(write(home, walls), home)
+    assert "«walls[0].rows[0].modules[0].width»" in str(e.value)
+    assert "«walls[0].rows[1].modules[0].width»" in str(e.value)

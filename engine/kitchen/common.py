@@ -10,7 +10,7 @@ from collections.abc import Iterable
 from decimal import ROUND_CEILING, Decimal
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from kitchen.errors import OrderError
 from kitchen.models import Workshop
@@ -162,7 +162,9 @@ class CountertopSize(BaseModel):
     total_length_mm: (
         int  # сумма ширин нижних модулей без пенала, угол без смещения, плюс места под столешницей
     )
-    gaps_mm: int = 0  # пустые места, не вошедшие в длину
+    gaps_mm: int = Field(
+        default=0, exclude=True
+    )  # пустые места, не вошедшие в длину; только для основания, не в JSON
 
 
 def size_countertop(project: Project, ws: Workshop) -> CountertopSize | None:

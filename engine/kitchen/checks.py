@@ -223,11 +223,11 @@ def _inner_width(dims: ModuleDims, ws: Workshop) -> int:
     )
 
 
-def _gap_appliance(
-    appliance, gap: Gap, row_kind: str, paired: BriefAppliance | None, ws: Workshop
+def _gap_appliances(
+    apps: list, gap: Gap, row_kind: str, paired: dict[int, BriefAppliance | None], ws: Workshop
 ) -> list[Finding]:
     """Техника в пустом месте: только нижний ряд, только отдельностоящие виды из `construction.yaml`, ширина
-    места не меньше ширины техники (бриф, иначе проект) плюс зазор. Нишу пустое место не строит."""
+    места не меньше суммы ширин всей техники места (бриф, иначе проект) плюс зазор. Нишу пустое место не строит."""
     rules = ws.construction.gap
     if row_kind != "lower":
         return [
@@ -238,48 +238,62 @@ def _gap_appliance(
                 message=f"Место {gap.label} в верхнем ряду: технику ставят только в пустое место нижнего ряда",
             )
         ]
-    if appliance.type not in rules.appliances:
-        allowed = ", ".join(gap_name(kind, 0) for kind in rules.appliances)
-        named = APPLIANCE_NAMES.get(appliance.type, appliance.type)
-        return [
-            Finding(
-                code="gap_appliance",
-                level="error",
-                subject=gap.label,
-                message=(
-                    f"В пустом месте {gap.label} может стоять только отдельностоящая техника ({allowed}), "
-                    f"а привязан «{named}»"
-                ),
-            )
-        ]
     found: list[Finding] = []
-    from_brief = paired is not None and paired.width is not None
-    width = paired.width if from_brief else appliance.width
-    need = _num(width + rules.clearance)
-    if gap.width < need:
-        found.append(
-            Finding(
-                code="gap_too_small",
-                level="error",
-                subject=gap.label,
-                message=(
-                    f"Место {gap.label}: {_num(gap.width)} мм, а {gap_name(appliance.type, 1)} "
-                    f"по {'брифу' if from_brief else 'проекту'} нужно {need} мм "
-                    f"({_num(width)} + зазор {rules.clearance})"
-                ),
-                value=need,
-                limit=_num(gap.width),
+    fits = []
+    for appliance in apps:
+        if appliance.type not in rules.appliances:
+            allowed = ", ".join(gap_name(kind, 0) for kind in rules.appliances)
+            named = APPLIANCE_NAMES.get(appliance.type, appliance.type)
+            found.append(
+                Finding(
+                    code="gap_appliance",
+                    level="error",
+                    subject=gap.label,
+                    message=(
+                        f"В пустом месте {gap.label} может стоять только отдельностоящая техника ({allowed}), "
+                        f"а привязан «{named}»"
+                    ),
+                )
             )
-        )
-    if appliance.type == "fridge" and paired is not None and paired.built_in:
-        found.append(
-            Finding(
-                code="gap_built_in",
-                level="warning",
-                subject=gap.label,
-                message=f"Холодильник в брифе встраиваемый, а в проекте стоит в пустом месте {gap.label}",
+        else:
+            fits.append(appliance)
+    if fits:
+        briefed = [
+            paired[id(a)] is not None and paired[id(a)].width is not None  # type: ignore[union-attr]
+            for a in fits
+        ]
+        widths = [paired[id(a)].width if has else a.width for a, has in zip(fits, briefed)]  # type: ignore[union-attr]
+        need = _num(sum(widths) + rules.clearance)
+        if gap.width < need:
+            source = (
+                "по брифу" if all(briefed) else ("по проекту" if not any(briefed) else "по брифу и проекту")
             )
-        )
+            names = " и ".join(gap_name(a.type, 1) for a in fits)
+            found.append(
+                Finding(
+                    code="gap_too_small",
+                    level="error",
+                    subject=gap.label,
+                    message=(
+                        f"Место {gap.label}: {_num(gap.width)} мм, а {names} "
+                        f"{source} нужно {need} мм "
+                        f"({' + '.join(str(_num(w)) for w in widths)} + зазор {rules.clearance})"
+                    ),
+                    value=need,
+                    limit=_num(gap.width),
+                )
+            )
+    for appliance in fits:
+        pair = paired[id(appliance)]
+        if appliance.type == "fridge" and pair is not None and pair.built_in:
+            found.append(
+                Finding(
+                    code="gap_built_in",
+                    level="warning",
+                    subject=gap.label,
+                    message=f"Холодильник в брифе встраиваемый, а в проекте стоит в пустом месте {gap.label}",
+                )
+            )
     return found
 
 
@@ -313,9 +327,12 @@ def _niches(
             for b in brief
             for w in b.warnings
         ]
+    for label, (gap, row_kind) in gaps.items():
+        placed = [a for a in project.appliances if a.module == label and label not in dims]
+        if placed:
+            found += _gap_appliances(placed, gap, row_kind, paired, ws)
     for a in project.appliances:
         if a.module in gaps and a.module not in dims:
-            found += _gap_appliance(a, *gaps[a.module], paired[id(a)], ws)
             continue
         if a.module not in dims:
             if a.module in failed:  # модуль не рассчитался: причина уже названа находкой `module_build`

@@ -201,3 +201,44 @@ def test_kitchen_check_sees_gap_findings_like_parts(home):
     out = CliRunner().invoke(app, ["check", "--project", str(path), "--json"])
     assert "gap_too_small" in {f["code"] for f in json.loads(out.output)["findings"]}
     assert "gap_too_small" in {f.code for f in api.parts_from_project(path, home).findings}
+
+
+def two_appliances_project(home, gap_width):
+    row = lower(gap("ПМ1", gap_width), base("Н1"))
+    walls = [{"label": "A", "length": gap_width + 600, "rows": [row]}]
+    apps = [
+        {"type": "dishwasher", "width": 450, "module": "ПМ1"},
+        {"type": "washing_machine", "width": 560, "module": "ПМ1"},
+    ]
+    return write(home, walls, appliances=apps)
+
+
+def test_gap_with_two_appliances_must_fit_their_sum_plus_clearance(home):
+    [f] = gap_findings(home, two_appliances_project(home, 600))
+    assert (f.code, f.level, f.subject, f.value, f.limit) == ("gap_too_small", "error", "ПМ1", 1030, 600)
+    assert "посудомойке" in f.message and "стиральной машине" in f.message
+    assert "450 + 560 + зазор 20" in f.message
+    assert gap_findings(home, two_appliances_project(home, 1050)) == []
+
+
+def test_quote_names_gap_appliances_in_accusative(home):
+    walls = [{"label": "A", "length": 1200, "rows": [lower(gap("ПМ1", 600), base("Н1"))]}]
+    apps = [{"type": "dishwasher", "width": 450, "module": "ПМ1"}]
+    quote = api.quote_from_project(write(home, walls, appliances=apps), 14, home)
+    assert quote.modules[0].text == "место под посудомойку, 600 мм"
+
+
+def test_built_in_dishwasher_in_gap_is_not_gap_built_in(home):
+    brief = sergey()
+    del brief["appliances"]["hood"]
+    brief["appliances"]["items"] = c([{"type": "dishwasher", "width_mm": 450, "built_in": True}])
+    path = home / "brief.json"
+    path.write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
+    api.brief_save(ORDER, path, home)
+    project = fridge_project(home, 620, appliance={"type": "dishwasher", "width": 450, "module": "ПМ1"})
+    assert "gap_built_in" not in codes(home, project)
+
+
+def test_empty_brief_fridge_is_not_a_brief_appliance(home):
+    save_brief(home, {"location": ""})
+    assert "appliance_not_in_brief" in codes(home, fridge_project(home, 620))
