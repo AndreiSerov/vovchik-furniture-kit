@@ -33,6 +33,7 @@ from kitchen.result import MOCK_BANNER, Result
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
 __all__ = [
+    "OUTPUT_RECOMPUTE",
     "BriefSaveResult",
     "BriefShowResult",
     "CheckResult",
@@ -58,6 +59,7 @@ __all__ = [
     "ProductionResult",
     "PurchaseResult",
     "QuickEstimate",
+    "StaleOutput",
     "StatusResult",
     "ValidationContext",
     "ValidationResult",
@@ -187,12 +189,25 @@ class ExportResult(Result):
     project: dict[str, Any]
 
 
+class StaleOutput(BaseModel):
+    """Устаревший вывод: версия-источник меньше текущей версии проекта."""
+
+    kind: store.OutputKind
+    path: str  # относительно KITCHEN_HOME, как в БД
+    source_version: int
+    command: str  # команда пересчёта целиком, `kitchen cut <заказ>`
+
+
 class StatusResult(Result):
     order: str
     stage: str
     project_version: int | None
     path: str
     text: str
+    stale: list[StaleOutput] = Field(default_factory=list)
+
+
+OUTPUT_RECOMPUTE = store.OUTPUT_RECOMPUTE
 
 
 LOG_KINDS = ("done", "decision", "next", "note")
@@ -674,6 +689,38 @@ def _section(title: str, lines: list[str], empty: str) -> list[str]:
     return [f"## {title}", "", *(lines or [empty]), ""]
 
 
+def _stale_outputs(
+    conn: sqlite3.Connection, order_pk: int, order_ref: str, current_version: int | None
+) -> list[StaleOutput]:
+    """Выводы, чья версия-источник меньше текущей версии проекта (смена данных мастерской не в счёт)."""
+    if current_version is None:
+        return []
+    rows = conn.execute(
+        "SELECT kind, path, source_version FROM outputs WHERE order_id = ? AND source_version < ? ORDER BY id",
+        (order_pk, current_version),
+    ).fetchall()
+    unknown = sorted({r["kind"] for r in rows if r["kind"] not in OUTPUT_RECOMPUTE})
+    if unknown:
+        raise OrderError(
+            f"В БД есть выводы неизвестного вида: {', '.join(unknown)}. "
+            "Их записал более новый движок — обновите kitchen."
+        )
+    return [
+        StaleOutput(
+            kind=r["kind"],
+            path=r["path"],
+            source_version=r["source_version"],
+            command=f"kitchen {OUTPUT_RECOMPUTE[r['kind']].command} {order_ref}",
+        )
+        for r in rows
+    ]
+
+
+def _stale_line(s: StaleOutput) -> str:
+    label = OUTPUT_RECOMPUTE[s.kind].label
+    return f"- {label} `{s.path}`: версия {s.source_version}, пересчитать: `{s.command}`"
+
+
 def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> StatusResult:
     """Собирает status.md. Даты в нём — по местному времени (`tz` — для тестов)."""
 
@@ -704,6 +751,8 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
         lines += ["## Этап", "", stage, "", "## Версия проекта", ""]
         lines += [f"Версия {cur['version']} от {day(cur['created_at'])}."] if cur else ["Проекта ещё нет."]
         lines.append("")
+        stale = _stale_outputs(o.conn, o.pk, o.ref, cur["version"] if cur else None)
+        lines += _section("Устарело", [_stale_line(s) for s in stale], "Пока ничего.")
         lines += _section("Решения клиента", dated(entries("decision")[::-1]), "Пока нет.")
         lines += _section("Сделано", dated(entries("done")[::-1]), "Пока ничего.")
         lines += _section("Дальше", dated(entries("next", 5)), "Пока не записано.")
@@ -720,6 +769,7 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
             project_version=cur["version"] if cur else None,
             path=str(target),
             text=text,
+            stale=stale,
             **mock,
         )
 

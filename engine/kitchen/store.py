@@ -7,7 +7,7 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, tzinfo
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from kitchen.errors import OrderError
 from kitchen.workshop import resolve_home
@@ -263,6 +263,25 @@ PURCHASE_MD: OutputKind = "purchase_md"
 PURCHASE_JSON: OutputKind = "purchase_json"
 ESTIMATE_MD: OutputKind = "estimate_md"
 ESTIMATE_JSON: OutputKind = "estimate_json"
+
+
+class Recompute(NamedTuple):
+    """Как пересчитать вывод: название вида для человека и команда CLI (`kitchen <command> <заказ>`)."""
+
+    label: str
+    command: str
+
+
+# Реестр «вид вывода → команда пересчёта» (тикет 24). Новый OutputKind без записи роняет
+# tests/test_status_stale.py; команда должна существовать в CLI.
+OUTPUT_RECOMPUTE: dict[OutputKind, Recompute] = {
+    CUTTING: Recompute("карта раскроя", "cut"),
+    EDGING: Recompute("карта кромления", "edges"),
+    PURCHASE_MD: Recompute("закупка (md)", "purchase"),
+    PURCHASE_JSON: Recompute("закупка (json)", "purchase"),
+    ESTIMATE_MD: Recompute("смета (md)", "estimate"),
+    ESTIMATE_JSON: Recompute("смета (json)", "estimate"),
+}
 
 
 def register_output(

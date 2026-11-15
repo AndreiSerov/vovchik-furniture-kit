@@ -273,7 +273,7 @@ def test_status_stage_rule(order, tmp_path):
 
 def test_status_empty_sections_say_so(order):
     text = api.status(order).text
-    assert "Проекта ещё нет" in text and "Пока ничего" in text
+    assert "Проекта ещё нет" in text and "## Сделано\n\nПока ничего." in text
 
 
 # --- мок --------------------------------------------------------------------
