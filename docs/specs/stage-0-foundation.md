@@ -1,6 +1,6 @@
 # Этап 0. Основа
 
-Статус: `ready-for-agent`
+Статус: `done`
 Источник: `00-source-brief.md`, этап 0; ADR 0001–0004.
 
 ## Problem Statement
@@ -117,32 +117,32 @@
 
 **What to build:** мастер ставит `kitchen` в систему, запускает `kitchen check-workshop` из любой папки и видит сводку по шести файлам мастерской и плашку «МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА»; испорченный YAML даёт русскую ошибку с файлом, ключом и значением. В репо есть правила агента, трекер, DECISIONS.md и MOCKS.md.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:** —
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Пакет `kitchen` устанавливается (`uv tool install -e .`), команда `kitchen` работает вне репо через `KITCHEN_HOME` и внутри репо без него; без мастерской — русская ошибка
-- [ ] Шесть мок-файлов ровно со значениями ТЗ (в `hardware.yaml` список под `позиции:`)
-- [ ] MOCKS.md перечисляет каждое значение-заглушку по файлам и где оно влияет
-- [ ] Загрузчик на pydantic с алиасами русских ключей; перекрёстные ссылки проверяются; `is_mock` и `mock_files`
-- [ ] Плашка мока первой и последней строкой текстового вывода, `mock`/`mock_files` в `--json`
-- [ ] `AGENTS.md`: принципы в редакции грилинга, карта репо, таблица скиллов; PROGRESS.md со всеми тикетами 01–31; DECISIONS.md (в т.ч. «учёт остатков не делаем»)
-- [ ] `.gitignore` для `orders/`, README с установкой; сборка zip убрана
-- [ ] Тесты через API и контрактные тесты CLI зелёные, `scripts/check` проходит
+- [x] Пакет `kitchen` устанавливается (`uv tool install -e .`), команда `kitchen` работает вне репо через `KITCHEN_HOME` и внутри репо без него; без мастерской — русская ошибка
+- [x] Шесть мок-файлов ровно со значениями ТЗ (в `hardware.yaml` список под `позиции:`)
+- [x] MOCKS.md перечисляет каждое значение-заглушку по файлам и где оно влияет
+- [x] Загрузчик на pydantic с алиасами русских ключей; перекрёстные ссылки проверяются; `is_mock` и `mock_files`
+- [x] Плашка мока первой и последней строкой текстового вывода, `mock`/`mock_files` в `--json`
+- [x] `AGENTS.md`: принципы в редакции грилинга, карта репо, таблица скиллов; PROGRESS.md со всеми тикетами 01–31; DECISIONS.md (в т.ч. «учёт остатков не делаем»)
+- [x] `.gitignore` для `orders/`, README с установкой; сборка zip убрана
+- [x] Тесты через API и контрактные тесты CLI зелёные, `scripts/check` проходит
 
 ## Тикет 02 — `scripts/link-skills` (0.1)
 
 **What to build:** скиллы из `skills/` видны Claude Code, Codex и Qwen в этом репо после одной команды; `--hermes` ставит их в Hermes.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:** —
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Симлинки `skills/kitchen-*` в `.claude/skills/`, `.agents/skills/`, `.qwen/skills/`; `.agents/` и `.qwen/` в `.gitignore`
-- [ ] Идемпотентно, чужие скиллы и файлы не трогает
-- [ ] `--hermes` ставит ссылки в `~/.hermes/skills/` (тест на подменённом HOME; реальный запуск — `manual`)
-- [ ] `scripts/sync-skills` вызывает его в конце; `scripts/doctor` сообщает о битых ссылках
-- [ ] Тест во временной папке зелёный
+- [x] Симлинки `skills/kitchen-*` в `.claude/skills/`, `.agents/skills/`, `.qwen/skills/`; `.agents/` и `.qwen/` в `.gitignore`
+- [x] Идемпотентно, чужие скиллы и файлы не трогает
+- [x] `--hermes` ставит ссылки в `~/.hermes/skills/` (тест на подменённом HOME; реальный запуск — `manual`)
+- [x] `scripts/sync-skills` вызывает его в конце; `scripts/doctor` сообщает о битых ссылках
+- [x] Тест во временной папке зелёный
 
 ## Тикет 03 — Хранилище заказов (0.4)
 
@@ -150,15 +150,15 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] БД по `KITCHEN_DB` или `$KITCHEN_HOME/orders/kitchen.db`, номер схемы в БД
-- [ ] `kitchen import`: новая версия только при изменении; неверный JSON отклоняется, текущая версия цела
-- [ ] `kitchen export` пишет `project.json` с номером версии
-- [ ] `kitchen log` с типами `done`/`decision`/`next`/`note`
-- [ ] `kitchen status` печатает и пишет `orders/<заказ>/status.md`: этап, версия, решения клиента, сделано с датами, дальше
-- [ ] Поиск по номеру, `номер-фамилия`, подстроке фамилии (кириллица и латиница); неоднозначность — ошибка со списком
-- [ ] Тесты через API и контракт CLI зелёные
+- [x] БД по `KITCHEN_DB` или `$KITCHEN_HOME/orders/kitchen.db`, номер схемы в БД
+- [x] `kitchen import`: новая версия только при изменении; неверный JSON отклоняется, текущая версия цела
+- [x] `kitchen export` пишет `project.json` с номером версии
+- [x] `kitchen log` с типами `done`/`decision`/`next`/`note`
+- [x] `kitchen status` печатает и пишет `orders/<заказ>/status.md`: этап, версия, решения клиента, сделано с датами, дальше
+- [x] Поиск по номеру, `номер-фамилия`, подстроке фамилии (кириллица и латиница); неоднозначность — ошибка со списком
+- [x] Тесты через API и контракт CLI зелёные
 
 ## Тикет 04 — Бриф в БД и быстрая вилка (0.5)
 
@@ -166,8 +166,8 @@
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `kitchen brief save <номер-фамилия> <brief.json>` проверяет бриф `check_brief.py`, создаёт заказ (или следующий номер года при одной фамилии), пишет журнал
-- [ ] `kitchen quick-estimate --meters N` — вилка с округлением и пометкой мока
-- [ ] `tests/test_check_brief.py` зелёный, новые тесты зелёные
+- [x] `kitchen brief save <номер-фамилия> <brief.json>` проверяет бриф `check_brief.py`, создаёт заказ (или следующий номер года при одной фамилии), пишет журнал
+- [x] `kitchen quick-estimate --meters N` — вилка с округлением и пометкой мока
+- [x] `tests/test_check_brief.py` зелёный, новые тесты зелёные
