@@ -16,7 +16,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from kitchen import brief as brief_check
-from kitchen import store
+from kitchen import placement, store
 from kitchen.assembly import AssemblyModule, build_assembly
 from kitchen.assembly_pdf import AssemblyPageLayout, layout, write_assembly
 from kitchen.checks import Finding, duplicate_labels
@@ -32,6 +32,7 @@ from kitchen.errors import InputError, KitchenError, OrderError, ProjectFileErro
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
 from kitchen.parts import APPLIANCE_NAMES, PURPOSE_RU, EdgeTotals, ModuleParts, Part, PartsGap, compute_parts
+from kitchen.placement import GapPlace, ModulePlace, SceneObject, WallPlace, place_project
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
 from kitchen.quote import DAYS_ERROR, QuoteBody, build_quote, check_days, money, parse_days, percent, plural
@@ -77,6 +78,7 @@ __all__ = [
     "PageLayout",
     "PartsResult",
     "PartsSource",
+    "PlacementResult",
     "ProductionResult",
     "PurchaseResult",
     "QuickEstimate",
@@ -119,9 +121,12 @@ __all__ = [
     "order_new",
     "order_show",
     "parse_days",
+    "part_in_room",
     "parts_from_order",
     "parts_from_project",
     "percent",
+    "placement_from_order",
+    "placement_from_project",
     "plural",
     "production_and_save",
     "purchase_and_save",
@@ -2235,6 +2240,59 @@ def check_order(order: str, home: Path | None = None) -> CheckResult:
     home = home or resolve_home()
     project, source, latest, warnings = _order_project(order, home)
     return _check_result(project, source, latest, warnings[0] if warnings else None, load_workshop(home))
+
+
+# --- расстановка в комнате ----------------------------------------------------
+
+
+class PlacementResult(Result):
+    """Расстановка модулей проекта в комнате (тикет 23): стены, модули с коробками, версия-источник.
+    Только API: команд и файлов нет, её читают виды (41) и HTML (42)."""
+
+    order: str
+    source: PartsSource
+    walls: list[WallPlace]
+    modules: list[ModulePlace]
+    gaps: list[GapPlace]
+    top_of_uppers: int  # верх верхних модулей от пола, мм
+    findings: list[Finding]  # ошибки расстановки при готовых положениях: `corner_overlap`
+    scene: list[SceneObject]  # модель сцены: модули, стены, пол
+
+
+def part_in_room(place: ModulePlace, part: Part) -> SceneObject:
+    """Деталь модуля (`parts`) в комнате той же расстановкой, что и модуль: контракт для видов и HTML."""
+    return placement.part_in_room(place, part)
+
+
+def _placement(project: Project, source: PartsSource, workshop: Workshop) -> PlacementResult:
+    _require_unique_labels(project)
+    placed = place_project(project, workshop)
+    return PlacementResult(
+        order=project.order,
+        source=source,
+        walls=placed.walls,
+        modules=placed.modules,
+        gaps=placed.gaps,
+        top_of_uppers=placed.top_of_uppers,
+        findings=placed.findings,
+        scene=placed.scene,
+        mock=workshop.is_mock,
+        mock_files=workshop.mock_files,
+    )
+
+
+def placement_from_project(path: Path, home: Path | None = None) -> PlacementResult:
+    """Расстановка проекта из файла (черновик до импорта)."""
+    home = home or resolve_home()
+    project, source = _project_file(path)
+    return _placement(project, source, load_workshop(home))
+
+
+def placement_from_order(order: str, home: Path | None = None) -> PlacementResult:
+    """Расстановка текущей версии проекта заказа."""
+    home = home or resolve_home()
+    project, source, _, _ = _order_project(order, home)
+    return _placement(project, source, load_workshop(home))
 
 
 # --- быстрая вилка ------------------------------------------------------------

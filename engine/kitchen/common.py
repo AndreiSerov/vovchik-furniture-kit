@@ -7,6 +7,7 @@
 """
 
 from collections.abc import Iterable
+from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, Decimal
 from typing import Literal
 
@@ -14,10 +15,21 @@ from pydantic import BaseModel, Field
 
 from kitchen.errors import OrderError
 from kitchen.models import Workshop
-from kitchen.parts import TEMPLATES, gap_width
+from kitchen.parts import TEMPLATES, corner_on_left, gap_width, upper_corner_offset
 from kitchen.project import Project, is_gap
 
-__all__ = ["CommonItem", "CountertopSize", "compute_common", "is_tall", "row_layouts", "size_countertop"]
+__all__ = [
+    "CommonItem",
+    "CornerOffsets",
+    "CountertopSize",
+    "RowOffsets",
+    "compute_common",
+    "corner_offsets",
+    "is_tall",
+    "row_layouts",
+    "row_positions",
+    "size_countertop",
+]
 
 
 class CommonItem(BaseModel):
@@ -44,11 +56,67 @@ def is_tall(m) -> bool:
     return TEMPLATES[m.template].both_rows if m.template in TEMPLATES else False
 
 
-def row_layouts(wall) -> list[list]:
+@dataclass
+class RowOffsets:
+    """Угловые смещения соседних стен в одном ряду стены: в начале и в конце ряда, мм, и угловые модули,
+    которые их дают (метки)."""
+
+    start: float = 0
+    end: float = 0
+    at_start: list[str] = field(default_factory=list)
+    at_end: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CornerOffsets:
+    """Угловые смещения проекта по (стена, вид ряда). `unknown` — ряды, чьё смещение не посчитать: габариты
+    углового не строятся (дробные мм); причину называет `module_build`."""
+
+    rows: dict[tuple[str, str], RowOffsets] = field(default_factory=dict)
+    unknown: set[tuple[str, str]] = field(default_factory=set)
+
+    def of(self, wall: str, kind: str) -> RowOffsets:
+        return self.rows.get((wall, kind), RowOffsets())
+
+
+def corner_offsets(project: Project, ws: Workshop) -> CornerOffsets:
+    """Угловые смещения соседних стен — единственное место, где решаются величина и сторона смещения: сумма
+    ряда (`checks`), раскладка рядов (`row_layouts`) и расстановка в комнате берут его отсюда. Нижнее —
+    `угловые_модули.смещение_нижнего`, верхнее — `parts.upper_corner_offset`. Сторона — `parts.corner_on_left`:
+    угловой у правого края ряда (последний, единственный) — стена идёт слева направо, соседняя начинается от
+    угла: смещение в начале соседней стены; у левого (первый при других) — в её конце. Угол с несуществующей
+    или своей же стеной не считается (его называет проверка `corner_wall`)."""
+    rules = ws.construction.corner_rules
+    labels = {w.label for w in project.walls}
+    found = CornerOffsets()
+    for wall in project.walls:
+        for row in wall.rows:
+            for m in row.cabinets:
+                adjacent = m.corner.adjacent_wall if m.corner else None
+                if adjacent is None or adjacent == wall.label or adjacent not in labels:
+                    continue
+                key = (adjacent, row.kind)
+                try:
+                    size = rules.lower_offset if row.kind == "lower" else upper_corner_offset(m, row, ws)
+                except OrderError:
+                    found.unknown.add(key)
+                    continue
+                offsets = found.rows.setdefault(key, RowOffsets())
+                if corner_on_left(row, m):
+                    offsets.end += size
+                    offsets.at_end.append(m.label)
+                else:
+                    offsets.start += size
+                    offsets.at_start.append(m.label)
+    return found
+
+
+def row_layouts(wall, offsets: CornerOffsets | None = None) -> list[list]:
     """Модули каждого ряда стены по порядку вдоль стены, с пеналами из других рядов: пенал входит в оба ряда
     (и в ряд со своим пеналом тоже). Единственное место, где решается, что стоит в ряду: сумма ряда
-    (`checks`), цоколь, шина и столешница берут модули отсюда. Место пенала — отступ от начала стены:
-    его ряд считает отступ по своим модулям и пеналам, уже попавшим в этот ряд, поэтому отступы находятся
+    (`checks`), цоколь, шина, столешница и расстановка берут модули отсюда. Место пенала — отступ от начала
+    стены: его ряд считает отступ по своим модулям и пеналам, уже попавшим в этот ряд, начиная с углового
+    смещения соседней стены в начале ряда (`offsets` — результат `corner_offsets`), поэтому отступы находятся
     повторными проходами, пока не перестанут меняться. Отступ пенала записывается сразу, как только ряд его
     посчитал: следующий ряд того же прохода уже видит его (иначе пеналы в разных рядах на одном месте
     менялись бы местами на каждом проходе). Не сошлось за отведённое число проходов — ошибка."""
@@ -76,7 +144,7 @@ def row_layouts(wall) -> list[list]:
                 if is_tall(m) and id(m) not in at
             ]
             merged: list = []
-            x = 0.0
+            x = float(offsets.of(wall.label, row.kind).start) if offsets else 0.0
             for m in row.modules:
                 while talls and talls[0][0] <= x:
                     tall = talls.pop(0)[1]
@@ -96,41 +164,56 @@ def row_layouts(wall) -> list[list]:
     )
 
 
-def _row_modules(wall, row) -> list:
+def row_positions(wall, offsets: CornerOffsets) -> list[list[tuple[float, object]]]:
+    """`row_layouts` с отступом каждой записи от начала стены: ряд начинается с углового смещения в его
+    начале, записи идут вплотную. Своё место пенала — отступ в его собственном ряду."""
+    found: list[list[tuple[float, object]]] = []
+    for row, merged in zip(wall.rows, row_layouts(wall, offsets), strict=True):
+        x = float(offsets.of(wall.label, row.kind).start)
+        placed: list[tuple[float, object]] = []
+        for entry in merged:
+            placed.append((x, entry))
+            x += entry.width
+        found.append(placed)
+    return found
+
+
+def _row_modules(wall, row, offsets: CornerOffsets) -> list:
     """Модули ряда для длин: нижний ряд — с пеналами из других рядов; верхний — свои."""
     if row.kind != "lower":
         return list(row.modules)
-    return row_layouts(wall)[next(i for i, r in enumerate(wall.rows) if r is row)]
+    return row_layouts(wall, offsets)[next(i for i, r in enumerate(wall.rows) if r is row)]
 
 
-def _entries(project: Project, kinds: Iterable[str], with_tall: bool) -> list:
+def _entries(project: Project, ws: Workshop, kinds: Iterable[str], with_tall: bool) -> list:
     """Записи рядов нужного вида по всем стенам (модули и пустые места); пенал входит только при `with_tall`.
     Нижний ряд берёт пеналы стены из других рядов; на стене без нижнего ряда пенал тоже стоит на цоколе."""
     found: list = []
+    offsets = corner_offsets(project, ws)
     for wall in project.walls:
         lowers = [row for row in wall.rows if row.kind == "lower"]
         for row in wall.rows:
             if row.kind in kinds:
-                found += [m for m in _row_modules(wall, row) if with_tall or not is_tall(m)]
+                found += [m for m in _row_modules(wall, row, offsets) if with_tall or not is_tall(m)]
         if with_tall and "lower" in kinds and not lowers:
             found += [m for row in wall.rows for m in row.modules if is_tall(m)]
     return found
 
 
-def _length(project: Project, kinds: Iterable[str], with_tall: bool) -> int:
+def _length(project: Project, ws: Workshop, kinds: Iterable[str], with_tall: bool) -> int:
     """Сумма ширин модулей рядов нужного вида по всем стенам, без пустых мест."""
     return sum(
         int(m.width)  # целую ширину обеспечивает `module_dims`
-        for m in _entries(project, kinds, with_tall)
+        for m in _entries(project, ws, kinds, with_tall)
         if not is_gap(m)
     )
 
 
-def _gaps_mm(project: Project, kinds: Iterable[str], *, under_top: bool | None = None) -> int:
+def _gaps_mm(project: Project, ws: Workshop, kinds: Iterable[str], *, under_top: bool | None = None) -> int:
     """Сумма ширин пустых мест рядов нужного вида; `under_top` отбирает места по `under_countertop`."""
     return sum(
         gap_width(m)
-        for m in _entries(project, kinds, False)
+        for m in _entries(project, ws, kinds, False)
         if is_gap(m) and (under_top is None or m.under_countertop == under_top)
     )
 
@@ -178,7 +261,9 @@ def size_countertop(project: Project, ws: Workshop) -> CountertopSize | None:
         known = ", ".join(sorted(t.id for t in ws.materials.countertops))
         raise OrderError(f"Столешница «{top_id}» не найдена в materials.yaml (столешницы: {known}).")
     # места под общей столешницей входят в её длину, остальные — нет
-    total = _length(project, ("lower",), with_tall=False) + _gaps_mm(project, ("lower",), under_top=True)
+    total = _length(project, ws, ("lower",), with_tall=False) + _gaps_mm(
+        project, ws, ("lower",), under_top=True
+    )
     return CountertopSize(
         item=top_id,
         name=top.name,
@@ -186,7 +271,7 @@ def size_countertop(project: Project, ws: Workshop) -> CountertopSize | None:
         sheet_width=top.sheet[1],
         sheet_count=_ceil(Decimal(total) / top.sheet[0]),
         total_length_mm=total,
-        gaps_mm=_gaps_mm(project, ("lower",), under_top=False),
+        gaps_mm=_gaps_mm(project, ws, ("lower",), under_top=False),
     )
 
 
@@ -207,8 +292,8 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
         for m in row.cabinets
         if m.corner
     )
-    lower = _length(project, ("lower",), with_tall=True) - dead
-    lower_gaps = _gaps_mm(project, ("lower",))
+    lower = _length(project, ws, ("lower",), with_tall=True) - dead
+    lower_gaps = _gaps_mm(project, ws, ("lower",))
     n = _pieces(lower, rules.plinth.piece_length, reserve)
     items.append(
         CommonItem(
@@ -221,8 +306,8 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
             basis=f"фронт нижних рядов {lower} мм (без глухой части углов {dead} мм{_tail(lower_gaps)}) + запас {percent}, штуки по {rules.plinth.piece_length} мм",
         )
     )
-    upper = _length(project, ("upper",), with_tall=False)
-    upper_gaps = _gaps_mm(project, ("upper",))
+    upper = _length(project, ws, ("upper",), with_tall=False)
+    upper_gaps = _gaps_mm(project, ws, ("upper",))
     n = _pieces(upper, rules.rail.piece_length, reserve)
     items.append(
         CommonItem(

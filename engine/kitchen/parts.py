@@ -62,6 +62,7 @@ __all__ = [
     "build_module",
     "built_niche",
     "compute_parts",
+    "corner_on_left",
     "drawer_depth_shortfall",
     "drawer_parts",
     "facade_color",
@@ -965,6 +966,13 @@ def build_wall_hood(
     return out
 
 
+def corner_on_left(row: Row, module: ModuleSpec) -> bool:
+    """Угловой модуль стоит у левого края ряда: первый при других записях ряда. Остальные (последний,
+    единственный) — у правого. Одно правило стороны (DECISIONS «Угловые модули»): глухая часть модуля и место
+    углового смещения соседней стены (`common.corner_offsets`), а по нему — какой конец стены с каким соединён."""
+    return len(row.modules) > 1 and row.modules[0] is module
+
+
 def _build_corner(
     module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop, row: Row, *, upper: bool
 ) -> TemplateOut:
@@ -977,7 +985,7 @@ def _build_corner(
     gap = c.facades.gap
     facade_width = dims.width - 3 * gap - rules.upper_filler_width if upper else rules.base_facade_width
     filler_width = dims.width - 3 * gap - facade_width
-    blind_left = len(row.modules) > 1 and row.modules[0] is module
+    blind_left = corner_on_left(row, module)
     filler_x = gap if blind_left else 2 * gap + facade_width
     facade_x = 2 * gap + filler_width if blind_left else gap
     if (
@@ -1228,7 +1236,7 @@ def upper_corner_offset(module: ModuleSpec, row: Row, ws: Workshop) -> int:
     """Смещение верхнего ряда соседней стены от верхнего углового модуля (решение мастера 2026-11-15 после
     ревью тикета 50): глубина углового модуля (своя `depth`, иначе `верхний.глубина`) плюс толщина стенки ЛДСП —
     `construction.толщина_корпуса`, та же, что у боковин (решение координатора по словам мастера), без зазора.
-    Её зовёт сумма ряда (`checks`); раскладка рядов смещения не считает."""
+    Её зовёт `common.corner_offsets`: из него берут смещение сумма ряда, раскладка рядов и расстановка."""
     return module_dims(module, row.kind, ws).depth + ws.construction.case_thickness
 
 
