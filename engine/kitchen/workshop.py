@@ -14,6 +14,7 @@ from kitchen.models import (
     APPLIANCE_KINDS,
     Appliances,
     Construction,
+    Economy,
     Equipment,
     Hardware,
     Labor,
@@ -30,6 +31,7 @@ FILES: tuple[str, ...] = (
     "labor.yaml",
     "pricing.yaml",
     "appliances.yaml",
+    "economy.yaml",
 )
 
 NOT_FOUND = (
@@ -123,6 +125,7 @@ _EXPECT = {
     "list_type": "ожидался список",
     "tuple_type": "ожидался список из нескольких значений",
     "too_short": "в списке не хватает значений",
+    "string_too_short": "строка не должна быть пустой",
     "too_long": "в списке лишние значения",
     "finite_number": "ожидалось конечное число (не inf и не nan)",
     "model_type": "ожидался раздел с вложенными ключами",
@@ -276,10 +279,43 @@ def _cross_refs(w: Workshop) -> list[str]:
                 f"materials.yaml: ключ «кромка_к_материалу»: «{material_id}: {edge_id}» — нет такой "
                 f"кромки в кромке materials.yaml (есть: {', '.join(sorted(edge_ids))})."
             )
+    probs += _economy_refs(w, hw_ids)
     return probs
 
 
-M = TypeVar("M", Equipment, Construction, Materials, Hardware, Labor, Pricing, Appliances)
+def _economy_refs(w: Workshop, hw_ids: set[str]) -> list[str]:
+    """Шаблоны и вставки правил `economy.yaml` существуют; шаблон замены стоит в том же ряду, что исходный."""
+    from kitchen.parts import TEMPLATES  # локально: `parts` импортирует `project`, а тот — этот модуль
+
+    probs = []
+    known = ", ".join(sorted(TEMPLATES))
+    for i, rule in enumerate(w.economy.rules):
+        for j, case in enumerate(rule.cases):
+            where = f"замены[{i}].случаи[{j}]"
+            for key, template in (("где.шаблон", case.where.template), ("на.шаблон", case.change.template)):
+                if template is not None and template not in TEMPLATES:
+                    probs.append(
+                        f"economy.yaml: ключ «{where}.{key}»: значение «{template}» — нет такого шаблона (есть: {known})."
+                    )
+            old, new = TEMPLATES.get(case.where.template), TEMPLATES.get(case.change.template or "")
+            if old and new and old.row_kind != new.row_kind:
+                probs.append(
+                    f"economy.yaml: ключ «{where}.на.шаблон»: «{case.change.template}» стоит в другом ряду, "
+                    f"чем «{case.where.template}» ({new.row_kind} вместо {old.row_kind})."
+                )
+            for key, insert in (
+                ("где.вставка", case.where.insert),
+                ("на.убрать_вставку", case.change.remove_insert),
+            ):
+                if insert is not None and insert not in hw_ids:
+                    probs.append(
+                        f"economy.yaml: ключ «{where}.{key}»: значение «{insert}» — нет такого id в позициях "
+                        f"hardware.yaml (есть: {', '.join(sorted(hw_ids))})."
+                    )
+    return probs
+
+
+M = TypeVar("M", Equipment, Construction, Materials, Hardware, Labor, Pricing, Appliances, Economy)
 
 
 @dataclass
@@ -315,6 +351,7 @@ def load(home: Path) -> Loaded:
     labor = parse("labor.yaml", Labor)
     pricing = parse("pricing.yaml", Pricing)
     appliances = parse("appliances.yaml", Appliances)
+    economy = parse("economy.yaml", Economy)
 
     # Файл, который не прочитался или не прошёл проверку, считаем моком, пока он явно не `mock: false`.
     mock_files = [
@@ -333,6 +370,7 @@ def load(home: Path) -> Loaded:
         and labor
         and pricing
         and appliances
+        and economy
     ):
         workshop = Workshop(
             equipment=equipment,
@@ -342,6 +380,7 @@ def load(home: Path) -> Loaded:
             labor=labor,
             pricing=pricing,
             appliances=appliances,
+            economy=economy,
             mock_files=mock_files,
         )
         problems = _cross_refs(workshop)

@@ -7,7 +7,7 @@ from kitchen import api
 from tests.conftest import FIELDS_NOT_IN_GOLDEN, load_golden
 
 
-def corner_project(path, template, width, kind):
+def corner_project(path, template, width, kind, contents=None):
     project = json.loads(path.read_text(encoding="utf-8"))
     if not any(wall["label"] == "Б" for wall in project["walls"]):
         project["walls"].append({"label": "Б", "length": 1800, "rows": []})
@@ -19,6 +19,7 @@ def corner_project(path, template, width, kind):
             "template": template,
             "width": width,
             "corner": {"adjacent_wall": "Б"},
+            **({"contents": contents} if contents is not None else {}),
         }
     ]
     path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
@@ -148,3 +149,31 @@ def test_corner_rejects_missing_or_same_adjacent_wall(home, base_door_project):
         base_door_project.write_text(json.dumps(project))
         with pytest.raises(OrderError, match="соседн"):
             api.parts_from_project(base_door_project, home)
+
+
+def test_base_corner_with_shelf_manual_golden(home, base_door_project):
+    # ПРОВЕРИТЬ МАСТЕРУ. Тикет 17: угловой без карусели с одной полкой и полкодержателями, эталон — вручную
+    # (`tests/golden/base_corner_1050_shelf.json`); эталон без замены (`base_corner_1050`) не меняется.
+    corner_project(base_door_project, "base_corner", 1050, "lower", {"shelves": 1, "inserts": []})
+    result = api.parts_from_project(base_door_project, home)
+    assert "corner_carousel" not in result.hardware and result.hardware["shelf_pin_5"] == 4
+    assert result.model_dump(exclude=FIELDS_NOT_IN_GOLDEN, exclude_none=True) == load_golden(
+        "base_corner_1050_shelf"
+    )
+
+
+def test_base_corner_with_zero_shelves_keeps_carousel(home, base_door_project):
+    corner_project(base_door_project, "base_corner", 1050, "lower", {"shelves": 0})
+    result = api.parts_from_project(base_door_project, home)
+    assert result.hardware["corner_carousel"] == 1 and "shelf_pin_5" not in result.hardware
+
+
+def test_base_corner_shelf_and_carousel_together_is_an_error(home, base_door_project):
+    import pytest
+    from kitchen.errors import OrderError
+
+    corner_project(
+        base_door_project, "base_corner", 1050, "lower", {"shelves": 1, "inserts": ["corner_carousel"]}
+    )
+    with pytest.raises(OrderError, match="неподдерживаемое наполнение"):
+        api.parts_from_project(base_door_project, home)

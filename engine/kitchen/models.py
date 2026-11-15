@@ -666,6 +666,56 @@ class Appliances(Section):
         return self
 
 
+# --- economy.yaml -----------------------------------------------------------
+
+
+class EconomyWhere(Section):
+    """Какие модули подходят правилу: шаблон, по желанию — подъёмник в наполнении или вставка."""
+
+    template: str = _f("шаблон")
+    lift: StrictBool | None = Field(default=None, alias="подъёмник")
+    insert: str | None = Field(default=None, alias="вставка")
+
+
+class EconomyChange(Section):
+    """Что меняется в копии модуля. Новый шаблон собирает наполнение заново: остаётся только указанное."""
+
+    template: str | None = Field(default=None, alias="шаблон")
+    shelves: NonNegInt | None = Field(default=None, alias="полок")
+    remove_lift: StrictBool = Field(default=False, alias="убрать_подъёмник")
+    remove_insert: str | None = Field(default=None, alias="убрать_вставку")
+
+    @model_validator(mode="after")
+    def _not_empty(self) -> "EconomyChange":
+        if self.template is None and self.shelves is None and not self.remove_lift and not self.remove_insert:
+            raise ValueError(
+                "ключ «на»: пусто, укажите хотя бы одно из «шаблон», «полок», «убрать_подъёмник», «убрать_вставку»"
+            )
+        return self
+
+
+class EconomyCase(Section):
+    where: EconomyWhere = _f("где")
+    change: EconomyChange = _f("на")
+
+
+class EconomyRule(Section):
+    id: str = Field(min_length=1)
+    name: str = Field(alias="название", min_length=1)
+    client_text: str = Field(alias="текст_клиенту", min_length=1)
+    cases: list[EconomyCase] = Field(alias="случаи", min_length=1)
+
+
+class Economy(Section):
+    mock: StrictBool
+    rules: list[EconomyRule] = _f("замены")
+
+    @model_validator(mode="after")
+    def _ids_unique(self) -> "Economy":
+        _unique_ids(self.rules, "замены", "замены")
+        return self
+
+
 class Workshop(BaseModel):
     """Мастерская целиком. Заполняется загрузчиком, не из YAML напрямую."""
 
@@ -676,6 +726,7 @@ class Workshop(BaseModel):
     labor: Labor
     pricing: Pricing
     appliances: Appliances
+    economy: Economy
     mock_files: list[str]
 
     @property
