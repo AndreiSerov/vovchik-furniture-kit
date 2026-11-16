@@ -297,6 +297,52 @@ def check_no_formulas(skill: str, lines: list[str]) -> list[str]:
     return problems
 
 
+# Форма скилла (спека 6.4): статус в начале, журнал в конце, устаревшее и плашка мока.
+# Требование — (сообщение «нет …», проверка по строкам кода и тексту тела).
+Shape = Callable[[list[str], str], bool]
+
+
+def _step(command: str, kind: str | None = None) -> Shape:
+    call = re.compile(rf"(?<![\w./-]){command}(?!\w)")
+    flag = re.compile(rf"--kind[ =]{kind}(?!\w)") if kind else None
+    return lambda code, _text: any(call.search(c) and (flag is None or flag.search(c)) for c in code)
+
+
+def _word(word: str) -> Shape:
+    return lambda _code, text: word in text
+
+
+STATUS = ("нет шага kitchen status", _step(r"kitchen\s+status"))
+LOG_DONE = ("нет шага kitchen log с --kind done", _step(r"kitchen\s+log", "done"))
+LOG_NEXT = ("нет шага kitchen log с --kind next", _step(r"kitchen\s+log", "next"))
+STALE = ("нет раздела «Устарело»", _word("Устарело"))
+MOCK = ("нет плашки «МОК-ДАННЫЕ»", _word("МОК-ДАННЫЕ"))
+WORKING_SKILL = [STATUS, LOG_DONE, LOG_NEXT, STALE, MOCK]
+
+SHAPE_REQUIREMENTS: dict[str, list[tuple[str, Shape]]] = {
+    "kitchen-project": WORKING_SKILL,
+    "kitchen-production": WORKING_SKILL,
+    "kitchen-estimate": WORKING_SKILL,
+    "kitchen-brief": [
+        ("нет шага kitchen brief save", _step(r"kitchen\s+brief\s+save")),
+        LOG_NEXT,
+        MOCK,
+    ],
+    "kitchen-order": [STATUS, STALE],
+}
+# kitchen-brief — до тикета 43, kitchen-order — до тикета 31.
+SHAPE_EXEMPT = {"kitchen-brief", "kitchen-order"}
+
+
+def check_shape(skill: str, lines: list[str]) -> list[str]:
+    if skill in SHAPE_EXEMPT:
+        return []
+    _, start = split_frontmatter(lines)
+    code = [text for _, text in code_lines(lines, start)]
+    text = "\n".join(lines[start:])
+    return [f"{skill}: {message}" for message, ok in SHAPE_REQUIREMENTS.get(skill, []) if not ok(code, text)]
+
+
 def normalise_phrase(text: str) -> str:
     text = " ".join(text.lower().replace("ё", "е").split())
     return text.strip(" .,!?:;…")
@@ -373,6 +419,7 @@ def lint(root: Path = DEFAULT_ROOT, app: typer.Typer | None = None) -> list[str]
         problems += check_frontmatter(folder.name, lines)
         problems += check_commands(folder.name, lines, tree)
         problems += check_no_formulas(folder.name, lines)
+        problems += check_shape(folder.name, lines)
     problems += check_triggers(root / TRIGGERS_FILE, found)
     return problems
 
