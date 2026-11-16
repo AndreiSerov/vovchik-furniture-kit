@@ -157,6 +157,19 @@ kitchen quote --project project.json --days 35 # КП черновика из ф
 
 КП — документ клиенту: реквизиты мастера из `workshop/master.yaml` (мок), состав кухни по модулям словами («Н1 — нижний модуль с тремя ящиками, 600 мм»), корпус, цвета фасадов, столешница, итог, предоплата по `предоплата` из `pricing.yaml`, остаток, срок и срок действия предложения. Итог — цена `kitchen estimate` той же версии проекта. Себестоимости, наценки, труда и сумм по строкам в КП нет. Срок изготовления и монтажа вписывает мастер: `--days N` (целое число рабочих дней от 1 до 365, обязательно), движок его не считает. `--economy` добавляет цену «как в проекте», цену «экономии», разницу и тексты замен для клиента. Файлы привязаны к версии проекта: после новой версии они попадают в раздел «Устарело» в `status.md` с командой пересчёта. Если данные мастерской — моки, PDF несёт водяной знак и плашку «МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА».
 
+## ИИ-визуализация
+
+Скилл `kitchen-visualization` делает ИИ-визуализацию — картинку примерного вида кухни в комнате клиента по фото комнаты, образца и материалов. Это не проект и не виды кухни: картинка не в масштабе. Движок `kitchen` ему не нужен: скрипт работает в любой папке, uv сам ставит Pillow и PyYAML.
+
+```sh
+uv run skills/kitchen-visualization/scripts/visualize.py catalog   # формы кухни из workshop/sample-catalog/
+uv run skills/kitchen-visualization/scripts/visualize.py generate \
+  --room room.jpg --sample sample.jpg --material фасады=front.jpg --material столешница=top.jpg \
+  --shape corner --wishes "фасады без ручек" --out orders/<заказ>/ai-visualization
+```
+
+Настройки лежат в `.env` (не в git): `OPENAI_API_KEY` или `OPENROUTER_API_KEY` и `VISUALIZATION_WATERMARK` — водяной знак мастера, имя и телефон (обязателен). Необязательные: `VISUALIZATION_PROVIDER` (`openai` по умолчанию или `openrouter`), `VISUALIZATION_MODEL`, `VISUALIZATION_QUALITY`, `VISUALIZATION_WATERMARK_LOGO`, `VISUALIZATION_CATALOG`. Рядом с картинками сохраняются JSON с промптом, моделью и входами и копии фото в `inputs/`.
+
 ## Разработка
 
 ```sh
