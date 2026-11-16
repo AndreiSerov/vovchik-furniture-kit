@@ -157,6 +157,43 @@ def test_kitchen_production_eval_setup_really_makes_the_cut_map_stale(home):
     assert stale["cutting"].command == f"kitchen cut {order}"
 
 
+def test_kitchen_production_commands_print_the_ready_markers_the_skill_quotes(home):
+    from kitchen import api
+    from kitchen.cli import app
+    from typer.testing import CliRunner
+
+    from tests.conftest import REPO
+
+    order = "2026-047-petrov"
+    fixtures = REPO / "tests" / "fixtures"
+    api.brief_save(order, fixtures / "petrov_brief.json", home)
+    api.import_project(order, fixtures / "petrov_project.json", home=home)
+    body = (skill_lint.DEFAULT_ROOT / "kitchen-production" / "SKILL.md").read_text(encoding="utf-8")
+    step4 = body.split("4. **")[1].split("5. **")[0]
+    commands = re.findall(r"`kitchen (production|cut|edges|assembly|trip|parts|drilling) <заказ>`", body)
+    assert {"production", "cut", "edges", "assembly", "trip", "parts"} <= set(commands)
+    assert "Детали проекта" in step4 and "Источник" in step4
+    for command in commands:
+        out = CliRunner().invoke(app, [command, order]).output
+        if command == "parts":
+            assert re.search(r"^Детали проекта .+:$", out, re.MULTILINE), command
+            assert re.search(r"^Источник: .*версия \d+ проекта", out, re.MULTILINE), command
+        else:
+            assert re.search(r"^(Файл|.+ PDF): ", out, re.MULTILINE), command
+            assert re.search(r"версия проекта \d+", out), command
+
+
+def test_kitchen_production_step_1_stops_without_a_project_and_wording_guards():
+    body = (skill_lint.DEFAULT_ROOT / "kitchen-production" / "SKILL.md").read_text(encoding="utf-8")
+    step1 = body.split("1. **")[1].split("2. **")[0]
+    assert "«Проекта ещё нет» — остановись" in step1
+    assert "не остановка" not in step1
+    step2 = body.split("2. **")[1].split("3. **")[0]
+    assert "шаги 3, 4 с его командой" in step2
+    assert "если напечатаны" in body
+    assert "<документ>: посчитан из версии K, пересчитан из версии N" in body
+
+
 def test_brief_and_order_requirements_work_when_not_exempt(tmp_path, monkeypatch):
     monkeypatch.setattr(skill_lint, "SHAPE_EXEMPT", set())
 
