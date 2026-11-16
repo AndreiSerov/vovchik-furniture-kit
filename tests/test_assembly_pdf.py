@@ -12,6 +12,8 @@ from kitchen.errors import KitchenError
 from pypdf import PdfReader
 from typer.testing import CliRunner
 
+from tests.test_assembly import edit
+
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ORDER = "2026-047-petrov"
 MOCK = "МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА"
@@ -160,7 +162,7 @@ def test_cli_order_text_and_json(home):
     assert set(data) >= {"source", "output", "warnings", "mock", "modules"}
     assert set(data["modules"][0]) >= {"label", "title", "parts", "hardware", "appliances", "steps"}
     assert set(data["modules"][0]["parts"][0]) == {"mark", "name", "size", "material"}
-    assert set(data["modules"][0]["hardware"][0]) == {"id", "name", "quantity", "unit"}
+    assert set(data["modules"][0]["hardware"][0]) == {"id", "name", "quantity", "unit", "installed"}
     text = runner.invoke(app, ["assembly", "petrov"])
     assert text.exit_code == 0, text.output
     lines = text.output.strip().splitlines()
@@ -255,8 +257,11 @@ def test_carcass_module_without_workshop_hardware_says_none(home):
 
 
 def test_wrapped_step_continues_with_hanging_indent(home):
+    """Шаг «Петли» с длинным названием из каталога не помещается в строку (шаг ящиков стал короче, тикет 53)."""
     petrov(home)
+    long_name = "Петля Blum Clip Top Blumotion 110° накладная с ответной планкой и заглушкой, усиленная серия"
+    edit(home, "hardware.yaml", "Петля Blum Clip Top Blumotion 110° накладная", long_name)
     pages = api.assembly_layout(api.assembly_from_order(ORDER, home))
     lines = [line for page in pages for line in page.lines]
-    i = next(i for i, ln in enumerate(lines) if ln.text.startswith("5. Направляющие") and "Н1-" in ln.text)
-    assert lines[i + 1].text.startswith("Н1-дно-ящ-3") and lines[i + 1].x > lines[i].x
+    i = next(i for i, ln in enumerate(lines) if ln.text.startswith("4. Петли") and "усиленная" in ln.text)
+    assert lines[i + 1].text.startswith("— 4 шт, фасады:") and lines[i + 1].x > lines[i].x
