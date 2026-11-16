@@ -2,6 +2,8 @@
   "phrases": [
     {"text": "Клиент написал: хотим угловую кухню, вот переписка. Составь бриф", "skill": "kitchen-brief"},
     {"text": "Подготовь вопросы клиенту к замеру кухни", "skill": "kitchen-brief"},
-    {"text": "Проведи интервью с заказчиком кухни", "skill": "kitchen-brief"}
+    {"text": "Проведи интервью с заказчиком кухни", "skill": "kitchen-brief"},
+    {"text": "Поменяй ширину Н2 у Петрова на 450", "skill": "kitchen-project"},
+    {"text": "Покажи 3D кухни Петрова", "skill": "kitchen-project"}
   ]
 }

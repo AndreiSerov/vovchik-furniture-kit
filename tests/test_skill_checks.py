@@ -4,6 +4,7 @@
 Здесь те же правила работают на скиллах-нарушителях из `fixtures/skills_lint/`.
 """
 
+import json
 import re
 import subprocess
 import sys
@@ -39,6 +40,11 @@ VIOLATIONS = {
         "kitchen-bad: строка 6: арифметика с переменной «W - 4» (формулы — только в движке)",
         "kitchen-bad: строка 6: присваивание формулы «H = a * b» (формулы — только в движке)",
     ],
+    "shape_no_status": ["kitchen-project: нет шага kitchen status"],
+    "shape_no_done": ["kitchen-project: нет шага kitchen log с --kind done"],
+    "shape_no_next": ["kitchen-project: нет шага kitchen log с --kind next"],
+    "shape_no_stale": ["kitchen-project: нет раздела «Устарело»"],
+    "shape_no_mock": ["kitchen-project: нет плашки «МОК-ДАННЫЕ»"],
     "trigger_duplicate": ["triggers.json: фраза 2: дубль фразы 1 «  составь  БРИФ» (скилл kitchen-bad)"],
     "trigger_unknown_skill": ["triggers.json: фраза 2: неизвестный скилл «kitchen-nope»"],
     "skill_without_phrase": ["kitchen-bad: нет ни одной фразы в triggers.json"],
@@ -63,7 +69,7 @@ def test_every_violator_fixture_has_an_expected_message():
     assert cases == set(VIOLATIONS)
 
 
-@pytest.mark.parametrize("case", ["ok_empty_triggers", "ok_no_triggers_file"])
+@pytest.mark.parametrize("case", ["ok_empty_triggers", "ok_no_triggers_file", "ok_shape"])
 def test_empty_trigger_set_passes(case):
     assert skill_lint.lint(BAD / case) == []
 
@@ -72,6 +78,82 @@ def test_real_skills_pass_without_exceptions():
     problems = skill_lint.lint()
     assert not problems, "\n".join(problems)
     assert (skill_lint.DEFAULT_ROOT / "kitchen-brief" / "SKILL.md").is_file()
+
+
+def test_kitchen_project_skill_has_its_triggers_and_names_the_ticket_commands():
+    root = skill_lint.DEFAULT_ROOT
+    phrases = json.loads((root / "triggers.json").read_text(encoding="utf-8"))["phrases"]
+    mine = {p["text"] for p in phrases if p["skill"] == "kitchen-project"}
+    assert mine == {"Поменяй ширину Н2 у Петрова на 450", "Покажи 3D кухни Петрова"}
+    body = (root / "kitchen-project" / "SKILL.md").read_text(encoding="utf-8")
+    for command in ("status", "check", "export", "import", "diff", "3d", "log"):
+        assert f"kitchen {command} " in body, command
+    assert "kitchen check --project" in body
+
+
+def test_kitchen_project_skill_regression_guards():
+    body = (skill_lint.DEFAULT_ROOT / "kitchen-project" / "SKILL.md").read_text(encoding="utf-8")
+    assert "Нет заказа или проекта — скажи об этом и остановись" not in body
+    assert "v0" not in body
+    assert "Проекта ещё нет" in body
+    if "3d --project" in body:
+        assert "Файл не записан" in body
+
+
+def test_brief_and_order_requirements_work_when_not_exempt(tmp_path, monkeypatch):
+    monkeypatch.setattr(skill_lint, "SHAPE_EXEMPT", set())
+
+    def fresh(n):
+        d = tmp_path / str(n)
+        d.mkdir()
+        return d
+
+    assert lint_named(fresh(1), "kitchen-brief", "Пусто.\n") == [
+        "kitchen-brief: нет шага kitchen brief save",
+        "kitchen-brief: нет шага kitchen log с --kind next",
+        "kitchen-brief: нет плашки «МОК-ДАННЫЕ»",
+    ]
+    assert lint_named(fresh(2), "kitchen-order", "Пусто.\n") == [
+        "kitchen-order: нет шага kitchen status",
+        "kitchen-order: нет раздела «Устарело»",
+    ]
+    brief = "`kitchen brief save <заказ> <файл>`, `kitchen log <заказ> x --kind next`, МОК-ДАННЫЕ.\n"
+    order = "`kitchen status <заказ>`, Устарело.\n"
+    assert lint_named(fresh(3), "kitchen-brief", brief) == []
+    assert lint_named(fresh(4), "kitchen-order", order) == []
+
+
+def test_frontmatter_words_do_not_count(tmp_path):
+    d = tmp_path / "kitchen-project"
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        "---\nname: kitchen-project\ndescription: Устарело и МОК-ДАННЫЕ\n---\n\n"
+        "`kitchen status <заказ>`, `kitchen log <заказ> x --kind done`, `kitchen log <заказ> y --kind next`.\n",
+        encoding="utf-8",
+    )
+    assert skill_lint.lint(tmp_path) == [
+        "kitchen-project: нет раздела «Устарело»",
+        "kitchen-project: нет плашки «МОК-ДАННЫЕ»",
+    ]
+
+
+def test_kind_with_equals_and_fenced_continued_log_count(tmp_path):
+    body = (
+        "Устарело, МОК-ДАННЫЕ, `kitchen status <заказ>`.\n\n"
+        "`kitchen log <заказ> x --kind=done`\n\n"
+        '```\nkitchen log <заказ> \\\n  --kind next "y"\n```\n'
+    )
+    assert lint_named(tmp_path, "kitchen-project", body) == []
+
+
+def test_kitchen_project_eval_describes_the_petrov_scenario():
+    path = skill_lint.DEFAULT_ROOT / "kitchen-project" / "evals" / "evals.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["skill_name"] == "kitchen-project"
+    (case,) = data["evals"]
+    assert "сделай Н2 шириной 450" in case["prompt"]
+    assert "scripts/petrov-sandbox" in case["prompt"]
+    assert len(case["assertions"]) >= 5
 
 
 def test_command_added_to_the_cli_counts_as_existing(tmp_path):
@@ -107,6 +189,52 @@ def test_wall_labels_dates_and_order_numbers_are_not_arithmetic(tmp_path):
     assert skill_lint.lint(tmp_path) == []
 
 
+def lint_named(tmp_path, name, body):
+    d = tmp_path / name
+    d.mkdir()
+    (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\n\n{body}", encoding="utf-8")
+    return skill_lint.lint(tmp_path)
+
+
+def test_shape_requires_status_log_stale_and_mock_banner(tmp_path):
+    assert lint_named(tmp_path, "kitchen-estimate", "Пусто.\n") == [
+        "kitchen-estimate: нет шага kitchen status",
+        "kitchen-estimate: нет шага kitchen log с --kind done",
+        "kitchen-estimate: нет шага kitchen log с --kind next",
+        "kitchen-estimate: нет раздела «Устарело»",
+        "kitchen-estimate: нет плашки «МОК-ДАННЫЕ»",
+    ]
+
+
+def test_brief_and_order_wait_for_their_tickets():
+    assert {"kitchen-brief", "kitchen-order"} <= skill_lint.SHAPE_EXEMPT
+    assert set(skill_lint.SHAPE_REQUIREMENTS) == {
+        "kitchen-project",
+        "kitchen-production",
+        "kitchen-estimate",
+        "kitchen-brief",
+        "kitchen-order",
+    }
+
+
+def test_exempt_skill_without_shape_passes(tmp_path):
+    assert lint_named(tmp_path, "kitchen-brief", "Пусто.\n") == []
+
+
+def test_skill_outside_the_list_has_no_shape_requirements(tmp_path):
+    assert lint_named(tmp_path, "kitchen-other", "Пусто.\n") == []
+
+
+def test_log_kinds_must_sit_on_a_kitchen_log_call(tmp_path):
+    body = (
+        "`kitchen status <заказ>`, «Устарело», «МОК-ДАННЫЕ».\n"
+        "`kitchen log <заказ> x --kind done`, а `--kind next` стоит отдельно.\n"
+    )
+    assert lint_named(tmp_path, "kitchen-project", body) == [
+        "kitchen-project: нет шага kitchen log с --kind next"
+    ]
+
+
 def run_lint(*args):
     return subprocess.run(
         [sys.executable, "-m", "kitchen.skill_lint", *args], check=False, capture_output=True, text=True
@@ -123,3 +251,25 @@ def test_command_line_fails_on_a_violator_and_passes_on_real_skills():
 def test_scripts_check_runs_the_skill_lint_on_an_active_line():
     text = (REPO / "scripts" / "check").read_text(encoding="utf-8")
     assert re.search(r"^uv run python -m kitchen\.skill_lint\s*$", text, re.MULTILINE)
+
+
+def test_frontmatter_code_spans_do_not_count_as_steps(tmp_path):
+    d = tmp_path / "kitchen-project"
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        "---\nname: kitchen-project\ndescription: Сначала `kitchen status <заказ>`.\n---\n\n"
+        "Устарело, МОК-ДАННЫЕ, `kitchen log <заказ> x --kind done`, `kitchen log <заказ> y --kind next`.\n",
+        encoding="utf-8",
+    )
+    assert skill_lint.lint(tmp_path) == ["kitchen-project: нет шага kitchen status"]
+
+
+def test_step_needs_whole_words(tmp_path):
+    body = (
+        "Устарело, МОК-ДАННЫЕ, `notkitchen status <заказ>`.\n"
+        "`kitchen log <заказ> x --kind donex`, `kitchen log <заказ> y --kind next`.\n"
+    )
+    assert lint_named(tmp_path, "kitchen-project", body) == [
+        "kitchen-project: нет шага kitchen status",
+        "kitchen-project: нет шага kitchen log с --kind done",
+    ]

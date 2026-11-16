@@ -54,7 +54,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 | Скилл | Когда | Статус |
 |---|---|---|
 | `kitchen-brief` | переписка или интервью с клиентом, бриф к замеру | есть |
-| `kitchen-project` | проект кухни: стены, модули, материалы | планируется |
+| `kitchen-project` | проект кухни: стены, модули, материалы | есть |
 | `kitchen-production` | раскрой, кромка, закупка, присадка, сборка | планируется |
 | `kitchen-estimate` | смета, КП, вилка цены | планируется |
 
