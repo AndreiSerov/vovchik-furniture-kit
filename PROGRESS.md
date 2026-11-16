@@ -85,7 +85,7 @@
 
 ## Этап 7. ИИ-визуализация
 
-- [ ] 56 — Скилл `kitchen-visualization`: ИИ-визуализация по фото комнаты, образца и материалов ([спека](docs/specs/stage-7-ai-visualization.md)); живой вызов — manual
+- [x] 56 — Скилл `kitchen-visualization`: ИИ-визуализация по фото комнаты, образца и материалов ([спека](docs/specs/stage-7-ai-visualization.md)); живой вызов — manual, не запускался (нет ключа в `.env`)
 
 ## Бэклог (после MVP)
 

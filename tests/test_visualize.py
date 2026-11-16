@@ -697,3 +697,82 @@ def test_material_path_with_equals_sign(photos, tmp_path, capsys):
     argv = ["generate", "--room", str(photos["room"]), "--material", str(odd), "--out", str(tmp_path / "out")]
     assert vz.main(argv, env=ENV, send=FakeSend(openai_answer())) == 0
     assert json.loads(capsys.readouterr().out)["inputs"][1]["role"] == "material"
+
+
+# Ревью 3: испорченные картинки и странные значения каталога — весь класс, а не случаи
+
+
+@pytest.mark.parametrize(("pos", "value"), [(11, 0), (35, 0)])
+def test_broken_png_from_service_is_russian_error(photos, tmp_path, capsys, pos, value):
+    raw = bytearray(result_png())
+    raw[pos] = value
+    body = json.dumps({"data": [{"b64_json": base64.b64encode(bytes(raw)).decode()}]}).encode()
+    assert vz.main(args(photos, tmp_path / "out"), env=ENV, send=FakeSend(body)) == 2
+    assert capsys.readouterr().err.startswith("Ошибка: ")
+
+
+def corrupted(data: bytes, seed: int) -> bytes:
+    """Детерминированная порча: несколько байт заменены, иногда хвост обрезан."""
+    import random
+
+    rnd = random.Random(seed)
+    raw = bytearray(data)
+    for _ in range(rnd.randint(1, 4)):
+        raw[rnd.randrange(len(raw))] = rnd.randrange(256)
+    if rnd.random() < 0.3:
+        raw = raw[: rnd.randrange(8, len(raw))]
+    return bytes(raw)
+
+
+@pytest.mark.parametrize("fmt", ["PNG", "JPEG"])
+def test_any_corrupted_image_gives_picture_or_user_error(fmt):
+    buf = io.BytesIO()
+    Image.new("RGB", (60, 40), (90, 140, 200)).save(buf, fmt)
+    for seed in range(400):
+        try:
+            vz.watermark(corrupted(buf.getvalue(), seed), "М", mock=False)
+        except vz.UserError:
+            pass
+
+
+def test_broken_logo_fails_before_request(photos, tmp_path, capsys):
+    raw = bytearray(result_png())
+    raw[35] = 0
+    logo = tmp_path / "logo.png"
+    logo.write_bytes(bytes(raw))
+    send = FakeSend(b"{}")
+    env = {**ENV, "VISUALIZATION_WATERMARK_LOGO": str(logo)}
+    assert vz.main(args(photos, tmp_path / "out"), env=env, send=send) == 2
+    assert send.calls == [] and "Логотип" in capsys.readouterr().err
+
+
+def test_truncated_photo_fails_before_request(photos, tmp_path, capsys):
+    room = tmp_path / "cut.jpg"
+    room.write_bytes(photos["sample"].read_bytes()[:40])
+    send = FakeSend(openai_answer())
+    assert vz.main(args({**photos, "room": room}, tmp_path / "out"), env=ENV, send=send) == 2
+    assert send.calls == [] and "повреждена" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "shapes:\n  - id: [corner]\n",
+        "shapes:\n  - id: {a: 1}\n",
+        'shapes:\n  - id: corner\n    фото: ["a\\0b.png"]\n',
+        "shapes:\n  - id: corner\n    фото: [[a.png]]\n",
+    ],
+)
+def test_odd_catalog_values_are_user_error(tmp_path, capsys, text):
+    (tmp_path / "catalog.yaml").write_text(text, encoding="utf-8")
+    assert vz.main(["catalog", "--catalog", str(tmp_path)], env={}) == 2
+    assert capsys.readouterr().err.startswith("Ошибка: ")
+
+
+@pytest.mark.parametrize(
+    ("provider", "body"), [("openai", {"data": 5}), ("openrouter", {"choices": {"a": 1}})]
+)
+def test_odd_answer_shape_is_russian_error(photos, tmp_path, capsys, provider, body):
+    env = {**ENV, "VISUALIZATION_PROVIDER": provider}
+    assert vz.main(args(photos, tmp_path / "out"), env=env, send=FakeSend(json.dumps(body).encode())) == 2
+    assert capsys.readouterr().err.startswith("Ошибка: ")

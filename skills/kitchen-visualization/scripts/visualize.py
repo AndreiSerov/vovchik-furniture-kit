@@ -44,7 +44,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageFont
 
 FONT = Path(__file__).resolve().parents[1] / "assets" / "DejaVuSans.ttf"
 MOCK_LINE = "МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА"
@@ -106,6 +106,8 @@ def load_env(start: Path, environ: Mapping[str, str]) -> dict[str, str]:
                 merged = parse_dotenv(candidate.read_text(encoding="utf-8"))
             except UnicodeDecodeError as err:
                 raise UserError(f"{candidate}: файл не в UTF-8, пересохраните его в UTF-8.") from err
+            except OSError as err:
+                raise UserError(f"{candidate}: файл не читается: {err.strerror}") from err
             break
     merged.update(environ)
     return merged
@@ -138,19 +140,25 @@ def load_catalog(folder: Path) -> dict:
         raise UserError(f"{path}: файл не в UTF-8, пересохраните его в UTF-8.") from err
     except yaml.YAMLError as err:
         raise UserError(f"{path}: YAML не разбирается: {err}") from err
+    except OSError as err:
+        raise UserError(f"{path}: файл не читается: {err.strerror}") from err
     if not isinstance(data, dict) or not isinstance(data.get("shapes", []), list):
         raise UserError(f"{path}: нужен словарь с mock и списком shapes.")
     shapes, missing = [], []
     for n, item in enumerate(data.get("shapes") or [], 1):
-        if not isinstance(item, dict) or item.get("id") not in SHAPES:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or item["id"] not in SHAPES:
             raise UserError(f"{path}: форма {n}: id должен быть одним из {', '.join(SHAPES)}.")
         names = item.get("фото") or []
-        if not isinstance(names, list):
+        if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
             raise UserError(f"{path}: форма {item['id']}: фото — список имён файлов в квадратных скобках.")
         photos = []
         for name in names:
-            photo = (folder / str(name)).resolve()
-            (photos if photo.is_file() else missing).append(str(photo))
+            try:
+                photo = (folder / name).resolve()
+                found = photo.is_file()
+            except (OSError, ValueError) as err:
+                raise UserError(f"{path}: форма {item['id']}: неверное имя фото «{name}».") from err
+            (photos if found else missing).append(str(photo))
         shapes.append(
             {
                 "id": item["id"],
@@ -181,11 +189,29 @@ def mime_of(data: bytes) -> str | None:
 def read_photo(path: Path) -> tuple[bytes, str]:
     if not path.is_file():
         raise UserError(f"Фото не найдено: {path}")
-    data = path.read_bytes()
+    try:
+        data = path.read_bytes()
+    except OSError as err:
+        raise UserError(f"Фото не читается: {path}: {err.strerror}") from err
     mime = mime_of(data)
     if mime is None:
         raise UserError(f"{path} — не картинка PNG, JPEG или WebP (фото HEIC с iPhone сохраните как JPEG).")
+    if decode_image(data) is None:
+        raise UserError(f"{path} — картинка повреждена, пришлите фото ещё раз.")
     return data, mime
+
+
+def decode_image(data: bytes) -> Image.Image | None:
+    """Картинка целиком в RGBA или None, если данные не открываются.
+
+    Pillow на испорченных данных бросает разные исключения (OSError, SyntaxError, ValueError,
+    struct.error, EOFError…), поэтому ловится любое: любое из них значит «картинка повреждена».
+    """
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            return img.convert("RGBA")
+    except Exception:  # noqa: BLE001 — любое исключение Pillow на разборе значит «картинка повреждена»
+        return None
 
 
 def safe_name(text: str) -> str:
@@ -323,10 +349,9 @@ PROVIDERS = {"openai": openai_call, "openrouter": openrouter_call}
 
 
 def watermark(image: bytes, text: str, mock: bool, logo: Image.Image | None = None) -> bytes:
-    try:
-        base = Image.open(io.BytesIO(image)).convert("RGBA")
-    except (UnidentifiedImageError, OSError) as err:
-        raise UserError("Сервис ответил без картинки: данные не открываются как картинка.") from err
+    base = decode_image(image)
+    if base is None:
+        raise UserError("Сервис ответил без картинки: данные не открываются как картинка.")
     layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
     size = max(12, round(min(base.size) * 0.03))
@@ -352,9 +377,13 @@ def watermark(image: bytes, text: str, mock: bool, logo: Image.Image | None = No
 
 def load_logo(path: str) -> Image.Image:
     try:
-        return Image.open(path).convert("RGBA")
-    except (UnidentifiedImageError, OSError) as err:
+        data = Path(path).read_bytes()
+    except OSError as err:
         raise UserError(f"Логотип VISUALIZATION_WATERMARK_LOGO не открывается: {path}") from err
+    logo = decode_image(data)
+    if logo is None:
+        raise UserError(f"Логотип VISUALIZATION_WATERMARK_LOGO не открывается: {path}")
+    return logo
 
 
 # --- команды ---
