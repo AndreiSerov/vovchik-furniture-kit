@@ -49,7 +49,9 @@ def test_project_step_10_answers_nothing_stale_and_step_11_skips_the_banner():  
     steps = numbered_steps("kitchen-project")
     assert "«Пока ничего.»" in steps[10] and "Устаревшего нет" in steps[10]
     assert "первая строка diff" not in steps[11]
-    assert "первая строка изменений без плашки «МОК-ДАННЫЕ»" in steps[11]
+    # Тикет 59: запись об импорте пишет сама команда, скилл строку изменений в журнал не переносит.
+    assert "первая строка изменений" not in steps[11]
+    assert "пишет сама команда `kitchen import`" in steps[11]
 
 
 def test_not_found_is_retried_once_in_the_nominative_in_every_working_skill():  # ревью 31

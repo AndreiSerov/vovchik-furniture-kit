@@ -21,7 +21,7 @@ SKILL = REPO / "skills" / "kitchen-brief"
 CHECK_BRIEF = SKILL / "scripts" / "check_brief.py"
 BANNED = re.compile(r"салон|дизайнер|менеджер", re.IGNORECASE)
 
-PHRASE_CLIENT = "ориентир до замера: от <total_low> до <total_high> ₽"
+PHRASE_CLIENT = "ориентир до замера: от <total_low_text> до <total_high_text> ₽"
 PHRASE_MOCK = "вилка посчитана на мок-ценах, клиенту не отправляю; замените pricing.yaml (MOCKS.md)"
 PHRASE_PREMIUM = "с такими материалами цена будет выше этой вилки, точно скажу после проекта"
 PHRASE_DISHWASHER = "посудомойку лучше поставить рядом с мойкой — короткий слив"
@@ -320,7 +320,7 @@ def test_evals_one_to_three_use_the_fork_and_the_fourth_is_the_interview():
     data = json.loads(read("evals", "evals.json"))
     assert data["skill_name"] == "kitchen-brief"
     evals = data["evals"]
-    assert [e["id"] for e in evals] == [1, 2, 3, 4, 5]
+    assert [e["id"] for e in evals] == [1, 2, 3, 4, 5, 6, 7, 8]
     blob = json.dumps(data, ensure_ascii=False)
     assert "517 500" not in blob and "настроек салона" not in blob
     for case in evals:
@@ -367,10 +367,13 @@ def test_premium_phrase_reaches_the_client_only_without_mock_and_is_written_verb
     assert PHRASE_PREMIUM in step6 and "дословно" in step6
 
 
-def test_null_meters_runs_no_command():
+def test_null_meters_runs_only_the_mock_probe():
+    # Тикет 59 (решение 12): без длин считается один пробный вызов на 1 м, ради ключа `mock`.
     null = [line for line in fork_lines() if "равно `null`" in line]
     assert len(null) == 1
-    assert "Команду не запускай" in null[0] and "kitchen quick-estimate" not in null[0]
+    assert "Команду с длиной кухни не запускай" in null[0]
+    assert "kitchen quick-estimate --meters 1 --json" in null[0]
+    assert "--meters <summary.running_meters>" not in null[0]
 
 
 def test_client_price_answers_do_not_contradict_each_other():
@@ -439,9 +442,11 @@ def test_mandatory_fridge_questions_use_the_ticket_30_texts_exactly_as_check_bri
     mandatory = read("references", "questions.md").split("## Обязательная часть")[1].split("\n## ")[0]
     printed = CHECK_BRIEF.read_text(encoding="utf-8")
     fridge = "У какой стены и с какого края будет стоять холодильник, если стоять лицом к стене? Какой он ширины и высоты?"
+    # Тикет 59 (решение 11): в банке вопросов клиенту — с метками стен из ответа о длинах.
+    fridge_with_labels = fridge.replace("У какой стены и", "У какой стены — <метки> — и")
     over = "Над холодильником можно сделать шкаф до потолка — нужен?"
-    assert f"«{fridge}»" in mandatory and f"«{over}»" in mandatory
-    # check_brief печатает тот же текст (в коде он разбит на строки: склеиваем соседние литералы)
+    assert f"«{fridge_with_labels}»" in mandatory and f"«{over}»" in mandatory
+    # check_brief печатает тот же текст без меток (в коде он разбит на строки: склеиваем соседние литералы)
     joined = re.sub(r'"\s*\n\s*"', "", printed)
     assert fridge in joined and over in joined
 
@@ -455,7 +460,7 @@ def test_antresol_word_is_not_in_any_client_quote_of_the_mandatory_part():
 
 def test_fridge_wording_lives_in_one_place():
     questions = read("references", "questions.md")
-    for text in ("У какой стены и с какого края", "Над холодильником можно сделать шкаф"):
+    for text in ("У какой стены — <метки> — и с какого края", "Над холодильником можно сделать шкаф"):
         holders = [
             p.name for p in skill_files() if p.suffix == ".md" and text in p.read_text(encoding="utf-8")
         ]
@@ -520,7 +525,7 @@ def test_fork_keys_quoted_by_the_skill_are_printed_by_quick_estimate(home):
     ]
     assert len(ready) == 1
     keys = re.findall(r"`(\w+)`", ready[0])
-    assert {"total_low", "total_high", "mock"} <= set(keys)
+    assert {"total_low_text", "total_high_text", "mock"} <= set(keys)
     assert set(keys) <= set(data), set(keys) - set(data)
 
 
