@@ -271,3 +271,48 @@ def test_schema_error_keeps_module_key_outside_row_entries(home):
 
 def test_cut_json_has_no_gaps_mm(home):
     assert '"gaps_mm"' not in api.cut_from_project(write(home, wall_3700()), home).model_dump_json()
+
+
+# --- тикет 51: отметка «под столешницей» у пустого места верхнего ряда ----------
+
+UPPER_COUNTERTOP = (
+    "Место ПМ1 в верхнем ряду: отметка «под столешницей» не действует — "
+    "столешница идёт только над нижним рядом."
+)
+
+
+def test_upper_gap_under_countertop_is_one_warning_and_the_project_is_accepted(home):
+    walls = [
+        {
+            "label": "A",
+            "length": 1200,
+            "rows": [
+                lower(base("Н1"), base("Н2")),
+                upper(gap("ПМ1", 600, under_countertop=True), wall_door("В1")),
+            ],
+        }
+    ]
+    path = write(home, walls)
+    result = api.check_project(path, home)
+    [found] = [f for f in result.findings if f.code == "gap_upper_countertop"]
+    assert (found.level, found.subject, found.message) == ("warning", "ПМ1", UPPER_COUNTERTOP)
+    assert result.errors == []
+    assert common(home, path)["countertop"].length_mm == 1200
+    api.order_new(ORDER)
+    assert api.import_project("petrov", path, home=home).version == 1
+    parts = api.parts_from_project(path, home)
+    assert UPPER_COUNTERTOP in {f.message for f in parts.findings}
+
+
+def test_lower_gap_under_countertop_and_plain_upper_gap_give_no_such_finding(home):
+    walls = [
+        {
+            "label": "A",
+            "length": 1200,
+            "rows": [
+                lower(gap("ПМ1", 600, under_countertop=True), base("Н1")),
+                upper(gap("ПМ2", 600), wall_door("В1")),
+            ],
+        }
+    ]
+    assert "gap_upper_countertop" not in codes(home, write(home, walls))

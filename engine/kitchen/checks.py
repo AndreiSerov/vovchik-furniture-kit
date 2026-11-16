@@ -170,6 +170,23 @@ def _gap_widths(project: Project) -> list[Finding]:
     return found
 
 
+def _gap_upper_countertop(project: Project) -> list[Finding]:
+    """Отметка «под столешницей» у пустого места верхнего ряда ничего не делает: столешница идёт над нижним рядом."""
+    return [
+        Finding(
+            code="gap_upper_countertop",
+            level="warning",
+            subject=entry.label,
+            message=(
+                f"Место {entry.label} в верхнем ряду: отметка «под столешницей» не действует — "
+                "столешница идёт только над нижним рядом."
+            ),
+        )
+        for row, entry in _row_entries(project)
+        if row.kind == "upper" and is_gap(entry) and entry.under_countertop is True
+    ]
+
+
 def _drawer_depth(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -> Finding | None:
     """Глубина корпуса под ящик: нужная глубина считается `parts.drawer_depth_shortfall`, той же функцией,
     что и расчёт деталей. Сбой формул ящика здесь не назван: его назовёт расчёт модуля."""
@@ -684,6 +701,7 @@ def check_project(project: Project, ws: Workshop, brief: dict | None = None) -> 
         + _row_sums(project, ws)
         + _tall_overlaps(project, ws)
         + _gap_widths(project)
+        + _gap_upper_countertop(project)
         + _countertop_overrides(project)
     )
     dims, built = _build(project, ws, found)
