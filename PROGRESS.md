@@ -76,7 +76,7 @@
 - [x] 49 — Следующий шаг в `status` (6.4) ([спека](docs/specs/stage-6-skills.md))
 - [x] 46 — Уборка этапа 4 ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [x] 27 — Скилл `kitchen-project` (6.1, 6.4) ([спека](docs/specs/stage-6-skills.md))
-- [ ] 28 — Скилл `kitchen-production` (6.2, 6.4) ([спека](docs/specs/stage-6-skills.md))
+- [x] 28 — Скилл `kitchen-production` (6.2, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 29 — Скилл `kitchen-estimate` (6.3, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 43 — `kitchen-brief`: голос мастера и одна вилка (6.5, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 44 — Быстрый опрос и эвалы `kitchen-brief` (6.5) ([спека](docs/specs/stage-6-skills.md))

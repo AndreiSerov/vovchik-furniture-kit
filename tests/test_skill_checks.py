@@ -100,6 +100,63 @@ def test_kitchen_project_skill_regression_guards():
         assert "Файл не записан" in body
 
 
+def test_kitchen_production_skill_has_its_triggers_and_names_the_ticket_commands():
+    root = skill_lint.DEFAULT_ROOT
+    phrases = json.loads((root / "triggers.json").read_text(encoding="utf-8"))["phrases"]
+    mine = {p["text"] for p in phrases if p["skill"] == "kitchen-production"}
+    assert {"Сделай раскрой Петрову", "Что везти на монтаж к Петрову"} <= mine
+    body = (root / "kitchen-production" / "SKILL.md").read_text(encoding="utf-8")
+    for command in ("status", "check", "production", "cut", "edges", "assembly", "trip", "parts", "log"):
+        assert f"kitchen {command} " in body, command
+    assert skill_lint.lint(root) == []
+
+
+def test_kitchen_production_skill_regression_guards():
+    body = (skill_lint.DEFAULT_ROOT / "kitchen-production" / "SKILL.md").read_text(encoding="utf-8")
+    assert "kitchen labels" not in body
+    assert "первая строка" not in body.lower()
+    # карта присадки — только по прямой просьбе
+    assert "прямой просьбе" in body
+    assert body.count("kitchen drilling") == 1
+    # ошибочные пути: код 1 и код 2, нет проекта, «Устарело» пусто
+    assert "Код выхода 1" in body and "Код выхода 2" in body
+    assert "Проекта ещё нет" in body
+    assert "Пока ничего." in body
+    assert "Документы посчитаны на мок-данных мастерской (MOCKS.md) — сверьте размеры перед распилом" in body
+
+
+def test_kitchen_production_eval_describes_the_stale_cut_map_scenario():
+    path = skill_lint.DEFAULT_ROOT / "kitchen-production" / "evals" / "evals.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["skill_name"] == "kitchen-production"
+    (case,) = data["evals"]
+    assert "дай карту раскроя Петрова" in case["prompt"]
+    assert "scripts/petrov-sandbox" in case["setup"]
+    assert "kitchen import 2026-047-petrov" in case["setup"]
+    assert "facades_lower_color" in case["setup"]
+    assert len(case["assertions"]) >= 5
+
+
+def test_kitchen_production_eval_setup_really_makes_the_cut_map_stale(home):
+    from pathlib import Path
+
+    from kitchen import api
+
+    fixtures = Path(__file__).resolve().parent / "fixtures"
+    order = "2026-047-petrov"
+    api.brief_save(order, fixtures / "petrov_brief.json", home)
+    api.import_project(order, fixtures / "petrov_project.json", home=home)
+    api.production_and_save(order, home)
+    project = json.loads((fixtures / "petrov_project.json").read_text(encoding="utf-8"))
+    project["materials"]["facades_lower_color"] = "RAL 7016"
+    path = home / "petrov_v2.json"
+    path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    assert api.import_project(order, path, home=home).version == 2
+    stale = {s.kind: s for s in api.status(order, home).stale}
+    assert stale["cutting"].source_version == 1
+    assert stale["cutting"].command == f"kitchen cut {order}"
+
+
 def test_brief_and_order_requirements_work_when_not_exempt(tmp_path, monkeypatch):
     monkeypatch.setattr(skill_lint, "SHAPE_EXEMPT", set())
 
