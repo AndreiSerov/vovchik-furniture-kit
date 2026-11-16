@@ -249,9 +249,9 @@ def test_log_records_project_version(order, tmp_path):
 def test_status_has_all_sections_and_writes_file(order, home, tmp_path):
     api.log_add(order, "decision", "фасады белые матовые")
     api.log_add(order, "done", "замер сделан")
-    api.log_add(order, "next", "старое дело")
-    api.log_add(order, "next", "заказать фасады")
     api.import_project(order, _project(tmp_path))
+    api.log_add(order, "next", "старое дело")  # после импорта: он сбрасывает «Дальше» (тикет 57)
+    api.log_add(order, "next", "заказать фасады")
     r = api.status(order)
     text = (home / "orders" / "2026-047-petrov" / "status.md").read_text(encoding="utf-8")
     assert r.path == str(home / "orders" / "2026-047-petrov" / "status.md")

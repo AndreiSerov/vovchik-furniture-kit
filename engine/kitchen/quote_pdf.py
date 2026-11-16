@@ -11,7 +11,7 @@ from xml.sax.saxutils import escape
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph
 
-from kitchen.format import plural
+from kitchen.format import plural, working_days
 from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area
 from kitchen.quote import QuoteBody, money, percent
 
@@ -58,7 +58,7 @@ def _blocks(quote: QuoteBody, order: str) -> list[tuple[ParagraphStyle, str]]:
         (_BODY, f"Остаток: {money(quote.balance)}"),
         (
             _BODY,
-            f"Срок изготовления и монтажа: {plural(quote.days, 'рабочий день', 'рабочих дня', 'рабочих дней')}",
+            f"Срок изготовления и монтажа: {working_days(quote.days)}",
         ),
         (_BODY, f"Предложение действует {plural(master.offer_days, 'день', 'дня', 'дней')}"),
     ]

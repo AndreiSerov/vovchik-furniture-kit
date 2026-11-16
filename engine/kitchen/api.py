@@ -36,7 +36,7 @@ from kitchen.economy import EconomyLine, EconomyVariant, apply_rule
 from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError, ProjectFileError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
-from kitchen.format import num, plural
+from kitchen.format import num, plural, working_days
 from kitchen.geometry import PURPOSE_RU
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
 from kitchen.parts import (
@@ -506,6 +506,9 @@ def _reject_constant(name: str) -> None:
     raise ValueError(f"{name} в JSON недопустимо")
 
 
+BRIEF_SAVED = "бриф сохранён"  # единственная авто-запись «сделано», которая «Дальше» не сбрасывает
+
+
 def _insert_log(
     conn: sqlite3.Connection, pk: int, kind: str, text: str, version: int | None, auto: bool = False
 ) -> LogEntry:
@@ -621,6 +624,7 @@ def import_project(
                 f"Проверки проекта: техника сверена с брифом №{checked.brief_id}",
                 version,
             )
+        _insert_log(o.conn, o.pk, "done", f"принята версия {version}", version, auto=True)
         o.changed = True
         return ImportResult(
             order=o.ref,
@@ -932,16 +936,21 @@ def _next_step(
             return NextStep(text=f"Сделать проект: kitchen-project, затем {cmd}.", commands=[cmd])
         cmd = _command(BRIEF_SAVE_COMMAND, order_ref)
         return NextStep(text=f"Собрать бриф: kitchen-brief, затем {cmd}.", commands=[cmd])
-    if stale:
-        workshop = any(s.kind in PRODUCTION_KINDS for s in stale)
-        commands = list(dict.fromkeys(s.command for s in stale if s.kind not in PRODUCTION_KINDS))
+    due = [
+        s for s in stale if s.kind != store.DRILLING
+    ]  # карта присадки следующим шагом не зовётся (тикет 57)
+    if due:
+        workshop = any(s.kind in PRODUCTION_KINDS for s in due)
+        commands = list(dict.fromkeys(s.command for s in due if s.kind not in PRODUCTION_KINDS))
         if workshop:  # один `kitchen production` вместо отдельных команд цеха, после сметы и КП
             commands.append(_command(PRODUCTION_RECOMPUTE, order_ref))
         return NextStep(text=f"Пересчитать устаревшее: {', '.join(commands)}.", commands=commands)
+    estimate = _command(OUTPUT_RECOMPUTE[store.ESTIMATE_MD], order_ref)
     if store.QUOTE_PDF not in kinds:
-        estimate = _command(OUTPUT_RECOMPUTE[store.ESTIMATE_MD], order_ref)
         quote = _command(OUTPUT_RECOMPUTE[store.QUOTE_PDF], order_ref)
         return NextStep(text=f"Смета и КП: {estimate}, затем {quote}.", commands=[estimate, quote])
+    if store.ESTIMATE_MD not in kinds:
+        return NextStep(text=f"Смета: {estimate}.", commands=[estimate])
     if not set(PRODUCTION_KINDS) <= kinds:
         cmd = _command(PRODUCTION_RECOMPUTE, order_ref)
         return NextStep(text=f"Документы цеха: {cmd}.", commands=[cmd])
@@ -987,7 +996,8 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
         lines += _section("Решения клиента", dated(entries("decision")[::-1]), "Пока нет.")
         lines += _section("Сделано", dated(entries("done")[::-1]), "Пока ничего.")
         last_done = o.conn.execute(
-            "SELECT MAX(id) FROM log WHERE order_id = ? AND kind = 'done' AND auto = 0", (o.pk,)
+            "SELECT MAX(id) FROM log WHERE order_id = ? AND kind = 'done' AND (auto = 0 OR text != ?)",
+            (o.pk, BRIEF_SAVED),
         ).fetchone()[0]
         fresh = [r for r in entries("next", 5) if last_done is None or r["id"] > last_done]
         lines += _section("Дальше", dated(fresh), "Пока ничего.")
@@ -1038,19 +1048,23 @@ def _next_number(conn: sqlite3.Connection) -> str:
     return f"{year}-{nxt:03d}"
 
 
-def _resolve_for_brief(conn: sqlite3.Connection, query: str, client: str) -> tuple[sqlite3.Row, bool]:
+def _resolve_for_brief(
+    conn: sqlite3.Connection, query: str, client: str, phone: str
+) -> tuple[sqlite3.Row, bool]:
     """Заказ для брифа (внутри `BEGIN IMMEDIATE`).
 
     Номер — существующий заказ. Номер-фамилия — существующий или новый с этим номером. Одна фамилия —
     только новый заказ: если заказ с точно такой фамилией уже есть, это ошибка со списком.
     """
+    if store.is_phone_query(query):  # заказ по телефону: новый по телефону не заводится
+        return store.find_order(conn, query), False
     parsed = store.parse_query(query)
     if parsed.kind == "number":
         return store.find_order(conn, query), False
     if parsed.kind == "full":
         if conn.execute("SELECT 1 FROM orders WHERE number = ?", (parsed.number,)).fetchone():
             return store.find_order(conn, query), False
-        return _insert_order(conn, parsed.number, parsed.slug, client, "", ""), True
+        return _insert_order(conn, parsed.number, parsed.slug, client, phone, ""), True
     same = conn.execute("SELECT * FROM orders WHERE slug = ? ORDER BY number", (parsed.slug,)).fetchall()
     if same:
         listing = ", ".join(store.order_ref_of(r) for r in same)
@@ -1066,7 +1080,7 @@ def _resolve_for_brief(conn: sqlite3.Connection, query: str, client: str) -> tup
             pass
         raise OrderError(problems)
     number = _next_number(conn)
-    return _insert_order(conn, number, parsed.slug, client, "", ""), True
+    return _insert_order(conn, number, parsed.slug, client, phone, ""), True
 
 
 def brief_save(order: str, brief_path: Path, home: Path | None = None) -> BriefSaveResult:
@@ -1079,16 +1093,17 @@ def brief_save(order: str, brief_path: Path, home: Path | None = None) -> BriefS
     mock = _mock(home)
     with store.connect(home) as conn:
         conn.execute("BEGIN IMMEDIATE")
-        row, created = _resolve_for_brief(conn, order, brief_check.client_name(brief))
+        phone = brief_check.client_phone(brief)
+        row, created = _resolve_for_brief(conn, order, brief_check.client_name(brief), phone)
         ts = store.now()
+        if phone and not row["phone"]:  # телефон, уже записанный в заказ, не меняется
+            conn.execute("UPDATE orders SET phone = ? WHERE id = ?", (phone, row["id"]))
         conn.execute(
             "INSERT INTO briefs (order_id, data, check_result, created_at) VALUES (?, ?, ?, ?)",
             (row["id"], _canonical(brief), json.dumps(check, ensure_ascii=False), ts),
         )
         current = _current_version(conn, row["id"])
-        _insert_log(
-            conn, row["id"], "done", "бриф сохранён", current["version"] if current else None, auto=True
-        )
+        _insert_log(conn, row["id"], "done", BRIEF_SAVED, current["version"] if current else None, auto=True)
         conn.execute("UPDATE orders SET updated_at = ? WHERE id = ?", (ts, row["id"]))
         conn.commit()
         result = BriefSaveResult(
@@ -1354,9 +1369,15 @@ def _output_info(home: Path, source: PartsSource, kind: OutputKind, filename: st
 
 
 def _save_outputs(
-    home: Path, source: PartsSource, files: list[tuple[OutputInfo, Callable[[Path], None]]]
+    home: Path,
+    source: PartsSource,
+    files: list[tuple[OutputInfo, Callable[[Path], None]]],
+    done: str | None = None,
 ) -> None:
-    """Регистрирует и устанавливает комплект файлов под одной блокировкой; сбой восстанавливает старый комплект."""
+    """Регистрирует и устанавливает комплект файлов под одной блокировкой; сбой восстанавливает старый комплект.
+
+    `done` — текст авто-записи «сделано» (тикет 57): пишется в той же транзакции, откат убирает и её.
+    """
     if source.version is None:
         raise OrderError(f"У заказа {source.order} нет версии проекта.")
     directory = home / "orders" / source.order / "out"
@@ -1386,6 +1407,8 @@ def _save_outputs(
                     store.register_output(conn, row["id"], info.kind, info.path, source.version)
                     (staging / path.name).replace(path)
                     installed.append((path, backup))
+                if done:
+                    _insert_log(conn, row["id"], "done", done, source.version, auto=True)
                 conn.execute("UPDATE orders SET updated_at = ? WHERE id = ?", (store.now(), row["id"]))
                 conn.commit()
             except BaseException as error:
@@ -2078,7 +2101,7 @@ def _estimate_files(
 def estimate_and_save(order: str, home: Path | None = None, economy: bool = False) -> EstimateResult:
     home = home or resolve_home()
     result, files = _estimate_files(home, estimate_from_order(order, home, economy))
-    _save_outputs(home, result.source, files)
+    _save_outputs(home, result.source, files, f"смета посчитана из версии {result.source.version}")
     return result
 
 
@@ -2163,6 +2186,7 @@ def quote_and_save(
                 ),
             ),
         ],
+        f"КП посчитано из версии {result.source.version}, срок {working_days(days)}",
     )
     return result
 
@@ -2235,7 +2259,7 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
         (assembly_output, _assembly_writer(assembly, day)),
         (trip_output, _trip_writer(trip, day)),
     ]
-    _save_outputs(home, source, files)
+    _save_outputs(home, source, files, f"документы цеха посчитаны из версии {source.version}")
     return ProductionResult(
         cutting=cut.model_copy(update={"output": cut_output}),
         edging=edging.model_copy(update={"output": edging_output}),
