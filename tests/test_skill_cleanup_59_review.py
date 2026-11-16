@@ -62,3 +62,55 @@ def test_section_6_names_the_threshold_and_the_fork_ends_together():
         encoding="utf-8"
     )
     assert "оба числа: порог из текста находки и концы вилки `total_low_text`/`total_high_text`" in template
+
+
+def test_project_done_only_after_order_3d_not_after_draft():
+    (line,) = [l for l in numbered_steps("kitchen-project")[11].splitlines() if "--kind done" in l]
+    assert "Сделано, только после `kitchen 3d <заказ>`" in line
+    assert "После `kitchen 3d --project <файл>` запись не пишется" in line
+
+
+def test_mock_probe_runs_only_when_the_client_asked_about_price():
+    null = next(l for l in numbered_steps("kitchen-brief")[5].splitlines() if "равно `null`" in l)
+    before, _ = null.split("kitchen quick-estimate --meters 1 --json")
+    assert "Клиент о цене не спрашивал — больше ничего не запускай" in before
+    assert "Спросил — один раз" in before
+
+
+def test_appliances_budget_is_not_compared_with_the_estimate():
+    flag = numbered_steps("kitchen-estimate")[5].split("равно `true`")[1].split("Значение `false`")[0]
+    assert "«экономию» по бюджету не предлагай" in flag
+    assert "цену с бюджетом не сравнивай" in flag
+
+
+def test_interview_asks_the_fridge_wall_by_label_from_the_walls_answer():
+    step1 = skill_text("kitchen-brief").split("## Интервью")[1].split("\n2. ")[0]
+    assert "(холодильник — меткой стены из ответа о длинах)" in step1
+    mandatory = QUESTIONS.read_text(encoding="utf-8").split("## Обязательная часть")[1].split("\n## ")[0]
+    assert "Метки стен возьми из ответа о длинах." in mandatory
+
+
+def test_section_6_threshold_rule_is_not_limited_to_real_prices():
+    assert (
+        "Сработала `tall_uppers_budget` («верх до потолка») — в разделе 6 оба числа"
+        in numbered_steps("kitchen-brief")[6]
+    )
+
+
+def test_quick_survey_bank_keeps_the_limit_of_five():
+    quick = QUESTIONS.read_text(encoding="utf-8").split("## Быстрый опрос")[1]
+    assert "Лимит — пять на весь опрос, фото входит" in quick
+
+
+def test_estimate_term_other_than_working_days_means_asking_again():
+    step71 = numbered_steps("kitchen-estimate")[7].split("\n   2. ")[0]
+    assert "«N дней» и «N рабочих дней» — рабочие дни" in step71
+    for word in ("«календарных»", "«месяц»", "«недели»", "дробное"):
+        assert word in step71
+    assert "не переводи сам, спроси ещё раз: «Назовите срок числом рабочих дней»" in step71
+
+
+def test_quick_survey_end_does_not_demand_all_five_questions():
+    step7 = skill_text("kitchen-brief").split("## Быстрый опрос")[1].split("\n7. ")[1].split("\n8. ")[0]
+    assert "Опрос закончен, когда заданы все вопросы раздела" in step7
+    assert "все пять вопросов" not in step7

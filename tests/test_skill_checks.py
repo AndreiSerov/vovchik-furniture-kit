@@ -232,7 +232,7 @@ def test_kitchen_estimate_eval_asks_the_term_and_refuses_the_mock_send():
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["skill_name"] == "kitchen-estimate"
     by_prompt = {case["prompt"]: case for case in data["evals"]}
-    assert len(by_prompt) == 2
+    assert len(by_prompt) == 4
     for case in data["evals"]:
         assert "scripts/petrov-sandbox" in case["setup"]
         assert len(case["assertions"]) >= 5

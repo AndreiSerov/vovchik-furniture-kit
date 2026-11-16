@@ -320,7 +320,7 @@ def test_evals_one_to_three_use_the_fork_and_the_fourth_is_the_interview():
     data = json.loads(read("evals", "evals.json"))
     assert data["skill_name"] == "kitchen-brief"
     evals = data["evals"]
-    assert [e["id"] for e in evals] == [1, 2, 3, 4, 5]
+    assert [e["id"] for e in evals] == [1, 2, 3, 4, 5, 6, 7, 8]
     blob = json.dumps(data, ensure_ascii=False)
     assert "517 500" not in blob and "настроек салона" not in blob
     for case in evals:
