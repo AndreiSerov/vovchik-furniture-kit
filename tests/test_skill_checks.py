@@ -45,6 +45,10 @@ VIOLATIONS = {
     "shape_no_next": ["kitchen-project: нет шага kitchen log с --kind next"],
     "shape_no_stale": ["kitchen-project: нет раздела «Устарело»"],
     "shape_no_mock": ["kitchen-project: нет плашки «МОК-ДАННЫЕ»"],
+    "question_unknown_path": [
+        "kitchen-bad: references/questions.md: строка 6: поле `deadline` не из brief_schema.json",
+        "kitchen-bad: references/questions.md: строка 7: поле `room.nope` не из brief_schema.json",
+    ],
     "trigger_duplicate": ["triggers.json: фраза 2: дубль фразы 1 «  составь  БРИФ» (скилл kitchen-bad)"],
     "trigger_unknown_skill": ["triggers.json: фраза 2: неизвестный скилл «kitchen-nope»"],
     "skill_without_phrase": ["kitchen-bad: нет ни одной фразы в triggers.json"],

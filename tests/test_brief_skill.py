@@ -157,7 +157,7 @@ def test_steps_are_numbered_without_gaps_and_hold_the_mandatory_commands():
     assert len(numbered) >= 7
 
 
-@pytest.mark.parametrize("mode", ["Разбор", "Интервью"])
+@pytest.mark.parametrize("mode", ["Разбор", "Интервью", "Быстрый опрос"])
 def test_every_mode_route_reaches_check_fork_save_and_log(mode):
     body = read("SKILL.md")
     numbered = steps(body)
@@ -320,14 +320,14 @@ def test_evals_one_to_three_use_the_fork_and_the_fourth_is_the_interview():
     data = json.loads(read("evals", "evals.json"))
     assert data["skill_name"] == "kitchen-brief"
     evals = data["evals"]
-    assert [e["id"] for e in evals] == [1, 2, 3, 4]
+    assert [e["id"] for e in evals] == [1, 2, 3, 4, 5]
     blob = json.dumps(data, ensure_ascii=False)
     assert "517 500" not in blob and "настроек салона" not in blob
     for case in evals:
         assert "scripts/petrov-sandbox" in case["setup"]
         assert len(case["assertions"]) >= 5
         assert "kitchen brief save" in " ".join(case["assertions"])
-    for case in evals[:3]:
+    for case in evals[:3]:  # эвал 5 — быстрый опрос, его проверяет test_quick_survey_eval
         text = " ".join(case["assertions"])
         assert "quick-estimate" in text
     assert any("мок" in a.lower() and "клиент" in a for a in evals[1]["assertions"])
@@ -587,3 +587,190 @@ def test_unknown_field_text_quoted_by_the_skill_is_printed_by_brief_save(home, t
 
 def test_log_step_runs_only_after_save():
     assert "Только после сохранения" in steps(read("SKILL.md"))[8]
+
+
+# ---- тикет 44: быстрый опрос ----
+
+QUICK_TRIGGER = "Клиент с сайта спрашивает, сколько стоит кухня"
+ESTIMATE_TRIGGER = "Сколько выйдет кухня Петрова"
+
+
+def quick_section() -> str:
+    body = read("SKILL.md")
+    assert body.count("\n## Быстрый опрос") == 1
+    return body.split("\n## Быстрый опрос")[1].split("\n## ")[0]
+
+
+def quick_questions() -> list[str]:
+    text = read("references", "questions.md")
+    assert text.count("\n## Быстрый опрос") == 1
+    section = text.split("\n## Быстрый опрос")[1].split("\n## ")[0]
+    items = re.findall(r"^(\d)\. (.+)$", section, flags=re.MULTILINE)
+    assert [n for n, _ in items] == ["1", "2", "3", "4", "5"]
+    return [t for _, t in items]
+
+
+def test_quick_survey_is_the_third_mode_with_its_triggers():
+    modes = read("SKILL.md").split("## Режим")[1].split("\n## ")[0]
+    line = next(x for x in modes.splitlines() if x.startswith("- **Быстрый опрос"))
+    for needle in ("с сайта", "из мессенджера", "быстро"):
+        assert needle in line, needle
+    description = read("SKILL.md").split("---")[1]
+    assert "с сайта" in description and "быстрый опрос" in description.lower()
+
+
+def test_quick_survey_limits_and_counter_line():
+    section = quick_section()
+    assert "не больше 5 вопросов" in section
+    assert "не больше 2 вопросов в сообщении" in section
+    assert "(N из 5 вопросов)" in section
+    body = read("SKILL.md")
+    rules = body.split("## Правила поведения")[1].split("\n## ")[0]
+    assert "быстрого опроса" in rules  # общие «лимит» и «фото всегда» знают исключение
+
+
+def test_quick_survey_questions_come_in_the_ticket_order_and_photos_are_fifth():
+    name, walls, budget, deadline, photo = (q.lower() for q in quick_questions())
+    assert "имя" in name and "телефон" in name
+    assert "длин" in walls and "стен" in walls
+    assert "техник" in budget and "сборк" in budget
+    assert "срок" in deadline
+    assert "фото" in photo and "позже" in photo
+    assert "подскажем" not in f"{name} {walls} {budget} {deadline} {photo}"
+
+
+def test_quick_survey_does_not_repeat_the_client_wording_of_the_fork_or_the_duplicate_rule():
+    section = quick_section()
+    body = read("SKILL.md")
+    assert "шагу 5" in section
+    assert "шагу 7" in section
+    for phrase in (PHRASE_CLIENT, PHRASE_MOCK, PHRASE_PREMIUM, "Это тот же клиент или новый?"):
+        assert phrase not in section, phrase
+        assert body.count(phrase) >= 1, phrase
+    assert "Это тот же клиент или новый?" in body
+    assert "МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА" not in section  # плашка и мок-фраза — только в шаге 5
+    assert not re.search(r"перв(?:ая|ой) строк|послед(?:няя|ней) строк", section.lower())
+
+
+def test_quick_survey_saves_after_the_contact_and_after_each_portion_into_the_same_order():
+    section = quick_section()
+    assert "kitchen brief save <имя латиницей> brief.json" in section
+    assert "латиницей" in section
+    assert "kitchen brief save <заказ> brief.json" in section
+    assert "номер-имя" in section and "первого ответа команды" in section
+    assert "после каждой новой порции ответов" in section
+    assert "тот же заказ" in section
+    assert "Заказ с фамилией" in section and "какой номер" not in section  # дубль — только по шагу 7
+
+
+def test_quick_survey_fork_comes_right_after_the_lengths_and_the_rest_goes_to_the_phone_list():
+    section = quick_section()
+    assert re.search(r"сразу после длин[^.]*шаг 5", section)
+    assert "Уточнить по телефону и на замере" in section
+    assert "лимит" in section.lower() and "сверх пяти" in section
+
+
+def test_template_has_the_quick_survey_list_and_the_counter_line():
+    template = read("assets", "brief_template.md")
+    assert "(N из 5 вопросов)" in template
+    heading = "## 7. Уточнить по телефону и на замере"
+    assert heading in template
+    tail = template.split(heading)[1]
+    assert "списком" in tail and "- {{" in tail
+    assert "быстр" in tail.lower()
+
+
+def test_trigger_phrase_for_the_website_client_goes_to_brief_and_does_not_clash_with_estimate():
+    phrases = json.loads((REPO / "skills" / "triggers.json").read_text(encoding="utf-8"))["phrases"]
+    by_text = {p["text"]: p["skill"] for p in phrases}
+    assert by_text[QUICK_TRIGGER] == "kitchen-brief"
+    assert by_text[ESTIMATE_TRIGGER] == "kitchen-estimate"
+    assert skill_lint.lint() == []
+    estimate = (REPO / "skills" / "kitchen-estimate" / "SKILL.md").read_text(encoding="utf-8")
+    assert (
+        "при первом контакте клиента с сайта" in read("SKILL.md").split("---")[1]
+    )  # различие описано в brief
+    assert "заказа или проекта ещё нет" in read("SKILL.md").split("---")[1]
+    assert "Клиент с сайта" not in estimate
+
+
+def only_name_brief(tmp_path, name="Ольга"):
+    path = tmp_path / "brief.json"
+    path.write_text(
+        json.dumps({"client": {"name": {"value": name, "source": "client"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_two_name_only_briefs_the_second_fails_with_the_new_order_command_and_it_creates_one(home, tmp_path):
+    brief = only_name_brief(tmp_path)
+    first = run(["brief", "save", "olga", str(brief)])
+    assert first.exit_code == 0
+    assert "заведён, бриф сохранён." in first.output
+    ref1 = re.search(r"Заказ (\S+) заведён", first.output).group(1)
+    assert ref1.endswith("-olga")
+    again = run(["brief", "save", "olga", str(brief)])
+    assert again.exit_code == 1
+    assert "Заказ с фамилией «olga» уже есть" in again.output
+    new_cmd = re.search(r"Чтобы завести новый: kitchen brief save (\S+) brief\.json\.", again.output)
+    assert new_cmd, again.output
+    ref2 = new_cmd.group(1)
+    assert ref2 != ref1 and ref2.endswith("-olga")
+    assert not (home / "orders" / ref2).exists()
+    second = run(["brief", "save", ref2, str(brief)])  # команда из текста ошибки, brief.json — наш файл
+    assert second.exit_code == 0
+    assert f"Заказ {ref2} заведён, бриф сохранён." in second.output
+    assert (home / "orders" / ref1).is_dir() and (home / "orders" / ref2).is_dir()
+    assert sorted(p.name for p in (home / "orders").iterdir() if p.name.endswith("-olga")) == sorted(
+        [ref1, ref2]
+    )
+
+
+def test_same_client_after_the_duplicate_error_saves_into_the_found_order_and_later_portions_follow(
+    home, tmp_path
+):
+    brief = only_name_brief(tmp_path)
+    first = run(["brief", "save", "olga", str(brief)])
+    ref = re.search(r"Заказ (\S+) заведён", first.output).group(1)
+    again = run(["brief", "save", "olga", str(brief)])
+    assert f"уже есть: {ref}." in again.output
+    same = run(["brief", "save", ref, str(brief)])
+    assert same.exit_code == 0 and f"Заказ {ref}: бриф сохранён." in same.output
+    assert "Заказ <номер-фамилия>: бриф сохранён." in read("SKILL.md")
+    portion = json.loads(brief.read_text(encoding="utf-8"))
+    portion["client"]["phone"] = {"value": "+7 900 000-00-00", "source": "client"}
+    brief.write_text(json.dumps(portion, ensure_ascii=False), encoding="utf-8")
+    assert run(["brief", "save", ref, str(brief)]).exit_code == 0
+    shown = run(["brief", "show", ref])
+    assert shown.exit_code == 0 and "+7 900 000-00-00" in shown.output
+
+
+def test_check_brief_on_a_name_only_brief_reports_no_meters_so_the_fork_waits_for_the_lengths(tmp_path):
+    done = run_check_brief(str(only_name_brief(tmp_path)))
+    assert done.returncode == 0
+    report = json.loads(done.stdout)
+    assert report["summary"]["running_meters"] is None
+    assert report["summary"]["missing_required"] > 0  # пустые обязательные поля не мешают сохранению
+
+
+def test_quick_survey_eval_matches_the_ticket():
+    data = json.loads(read("evals", "evals.json"))
+    case = data["evals"][4]
+    assert case["id"] == 5 and "quick" in case["name"]
+    assert "scripts/petrov-sandbox" in case["setup"] and "olga" in case["setup"]
+    assert "С сайта: «Здравствуйте, сколько будет стоить кухня?» Ольга" in case["prompt"]
+    text = " ".join(case["assertions"]).lower()
+    for needle in (
+        "первый вопрос",
+        "телефон",
+        "не больше 5 вопросов",
+        "не больше 2",
+        "quick-estimate",
+        "мок-фраза",
+        "уточнить по телефону и на замере",
+        "kitchen brief save olga brief.json",
+        "после каждой новой порции",
+    ):
+        assert needle in text, needle
+    assert BANNED.search(json.dumps(case, ensure_ascii=False)) is None

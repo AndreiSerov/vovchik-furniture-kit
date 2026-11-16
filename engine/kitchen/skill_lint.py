@@ -391,6 +391,38 @@ def check_triggers(path: Path, skills: set[str]) -> list[str]:
     return problems
 
 
+ARROW_PATHS = re.compile(r"→\s*((?:`[^`]+`(?:,\s*)?)+)")
+
+
+def check_question_paths(skill: str, folder: Path) -> list[str]:
+    """Каждое поле после `→` в `references/questions.md` есть в `references/brief_schema.json`."""
+    questions = folder / "references" / "questions.md"
+    schema = folder / "references" / "brief_schema.json"
+    if not questions.is_file() or not schema.is_file():
+        return []
+    label = f"{skill}: references/questions.md"
+    text, problems = read_utf8(questions, label)
+    if text is None:
+        return problems
+    try:
+        sections = json.loads(schema.read_text(encoding="utf-8"))["sections"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return [*problems, f"{skill}: references/brief_schema.json: нет раздела sections"]
+    for n, line in enumerate(text.splitlines(), 1):
+        found = ARROW_PATHS.search(line)
+        if not found:
+            continue
+        for path in re.findall(r"`([^`]+)`", found.group(1)):
+            section, _, field = path.partition(".")
+            field = re.sub(r"\[\].*$", "", field)
+            known = section in sections and (
+                not field or field == "*" or field in sections[section].get("fields", {})
+            )
+            if not known:
+                problems.append(f"{label}: строка {n}: поле `{path}` не из brief_schema.json")
+    return problems
+
+
 def lint(root: Path = DEFAULT_ROOT, app: typer.Typer | None = None) -> list[str]:
     """Все нарушения в скиллах папки `root`; пусто — всё в порядке."""
     if app is None:
@@ -420,6 +452,7 @@ def lint(root: Path = DEFAULT_ROOT, app: typer.Typer | None = None) -> list[str]
         problems += check_commands(folder.name, lines, tree)
         problems += check_no_formulas(folder.name, lines)
         problems += check_shape(folder.name, lines)
+        problems += check_question_paths(folder.name, folder)
     problems += check_triggers(root / TRIGGERS_FILE, found)
     return problems
 
