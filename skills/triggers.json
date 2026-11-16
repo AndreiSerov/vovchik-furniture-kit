@@ -11,6 +11,9 @@
     {"text": "Посчитай закупку Петрову", "skill": "kitchen-estimate"},
     {"text": "Сколько выйдет кухня Петрова", "skill": "kitchen-estimate"},
     {"text": "Сделай КП Петрову", "skill": "kitchen-estimate"},
-    {"text": "А если подешевле?", "skill": "kitchen-estimate"}
+    {"text": "А если подешевле?", "skill": "kitchen-estimate"},
+    {"text": "Вот фото комнаты клиента, покажи, как тут будет смотреться угловая кухня", "skill": "kitchen-design"},
+    {"text": "Сделай картинку кухни с этими фасадами и столешницей", "skill": "kitchen-design"},
+    {"text": "Покажи каталог типов кухонь с фото", "skill": "kitchen-design"}
   ]
 }
