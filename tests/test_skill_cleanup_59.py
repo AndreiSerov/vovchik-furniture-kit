@@ -8,13 +8,14 @@
 import json
 import re
 
-from kitchen import skill_lint
+from kitchen import api, skill_lint
 from kitchen.cli import app
 from typer.testing import CliRunner
 
 from tests.conftest import REPO
 from tests.skill_steps import numbered_steps, skill_text
-from tests.test_status_next_step import FIXTURES
+from tests.test_order_skill import skill_for
+from tests.test_status_next_step import FIXTURES, ORDER, _v1
 
 BRIEF = REPO / "skills" / "kitchen-brief"
 runner = CliRunner()
@@ -209,7 +210,10 @@ def test_production_skill_logs_only_single_documents():
     (line,) = _done_lines("kitchen-production")
     has(line, "карта раскроя из версии N")
     assert "документы цеха из версии N" not in line
-    has(numbered_steps("kitchen-production")[6], "после `production` запись «сделано» пишет сама команда")
+    has(
+        numbered_steps("kitchen-production")[6],
+        "После `kitchen production` запись «сделано» пишет сама команда",
+    )
 
 
 def test_estimate_skill_logs_only_purchase_and_economy_as_done():
@@ -239,11 +243,6 @@ def test_brief_save_by_unknown_phone_prints_not_found(home):
 
 
 def test_order_hands_the_estimate_step_to_kitchen_estimate(home):
-    from kitchen import api
-
-    from tests.test_order_skill import skill_for
-    from tests.test_status_next_step import ORDER, _v1
-
     _v1(home)
     api.quote_and_save(ORDER, 20, home)
     api.production_and_save(ORDER, home)
