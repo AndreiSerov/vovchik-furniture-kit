@@ -305,3 +305,14 @@ def test_arithmetic_next_to_a_length_unit_is_caught(tmp_path):
     """Второе правило с меткой «арифметика над числами»: число с единицей длины рядом с оператором."""
     (problem,) = lint_body(tmp_path, "Текст: 45 см + 5\n")
     assert "арифметика над числами «45 см + 5»" in problem
+
+
+def test_duplicate_phrase_is_not_counted_towards_ten(tmp_path):
+    lint_text(tmp_path, HEAD + "Текст\n")
+    items = [{"text": f"фраза {n}", "skill": "kitchen-x"} for n in range(9)]
+    items.append({"text": "Фраза 0!", "skill": "kitchen-x"})
+    write_triggers(tmp_path, json.dumps({"phrases": items}, ensure_ascii=False))
+    assert skill_lint.lint(tmp_path) == [
+        "triggers.json: фраза 10: дубль фразы 1 «Фраза 0!» (скилл kitchen-x)",
+        "triggers.json: фраз 9, нужно не меньше 10",
+    ]

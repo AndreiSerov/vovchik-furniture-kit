@@ -342,7 +342,7 @@
 - `skill_lint`: новое правило — в `skills/triggers.json` не меньше 10 фраз и у каждого скилла не меньше двух; фикстуры нарушителей. Набор проходит.
 - В наборе: «Продолжи заказ Петрова» → `kitchen-order`; пограничные пары «Посчитай закупку Петрову» → `kitchen-estimate` и «Пересчитай раскрой Петрову» → `kitchen-production`; «Сколько стоит такая кухня?» от клиента до замера → `kitchen-brief` и «Сколько выйдет Петров?» → `kitchen-estimate`.
 - `kitchen-order` проходит свои требования формы тикета 27 (`kitchen status`, «Устарело»).
-- API (на заказе `2026-047-petrov` с `petrov_brief.json` и `petrov_project.json`): `api.status("Петрова")` находит заказ (тикет 49); после `api.brief_save`, `api.import_project`, `api.quote_and_save`, `api.production_and_save` и импорта v2 «Следующий шаг» — по таблице тикета 49.
+- API (на заказе `2026-047-petrov` с `petrov_brief.json` и `petrov_project.json`): `api.status("Петров")` (именительный; поиск по падежам отменён, DECISIONS 49) находит заказ; после `api.brief_save`, `api.import_project`, `api.quote_and_save`, `api.production_and_save` и импорта v2 «Следующий шаг» — по таблице тикета 49.
 - Выбор скилла по всем фразам — прогон координатором свежим субагентом, результат в `skills/triggers-results-<дата>.md` (фраза | ожидаемый | выбранный | модель | дата).
 - Выбор на GPT в Hermes — `manual`, не запускался.
 

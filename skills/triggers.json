@@ -4,7 +4,7 @@
     {"text": "Подготовь вопросы клиенту к замеру кухни", "skill": "kitchen-brief"},
     {"text": "Проведи интервью с заказчиком кухни", "skill": "kitchen-brief"},
     {"text": "Клиент с сайта спрашивает, сколько стоит кухня", "skill": "kitchen-brief"},
-    {"text": "Сколько стоит такая кухня? (пишет клиент до замера, заказа ещё нет)", "skill": "kitchen-brief"},
+    {"text": "Клиент до замера пишет: «Сколько стоит такая кухня?»", "skill": "kitchen-brief"},
     {"text": "Поменяй ширину Н2 у Петрова на 450", "skill": "kitchen-project"},
     {"text": "Покажи 3D кухни Петрова", "skill": "kitchen-project"},
     {"text": "Сделай раскрой Петрову", "skill": "kitchen-production"},

@@ -19,7 +19,7 @@ SKILLS = REPO / "skills"
 ORDER = "2026-047-petrov"
 FIXTURES = REPO / "tests" / "fixtures"
 FIVE = ["kitchen-brief", "kitchen-project", "kitchen-production", "kitchen-estimate", "kitchen-order"]
-SECTIONS = ["Этап", "Версия проекта", "Устарело", "Следующий шаг", "Сделано"]
+SECTIONS = ["Этап", "Версия проекта", "Устарело", "Следующий шаг", "Сделано", "Дальше"]
 
 
 def skill_text(name: str = "kitchen-order") -> str:
@@ -37,6 +37,14 @@ def body() -> str:
 
 def run(args):
     return CliRunner().invoke(app, args)
+
+
+def step(n: int) -> str:
+    """Текст шага n раздела «## Шаги» (до следующего шага)."""
+    steps = body().split("## Шаги")[1].split("## Ответ мастеру")[0]
+    match = re.search(rf"^{n}\. (.*?)(?=^\d+\. |\Z)", steps, re.DOTALL | re.MULTILINE)
+    assert match, f"нет шага {n}"
+    return match.group(1)
 
 
 def section(text: str, title: str) -> str:
@@ -146,9 +154,9 @@ def test_boundary_phrases_are_expected_to_go_where_the_ticket_says(text, skill):
 
 
 def test_client_question_before_measuring_goes_to_brief():
-    (found,) = [(t, s) for t, s in phrases().items() if t.startswith("Сколько стоит такая кухня?")]
+    (found,) = [(t, s) for t, s in phrases().items() if "Сколько стоит такая кухня?" in t]
     assert found[1] == "kitchen-brief"
-    assert "до замера" in found[0]
+    assert found[0] == "Клиент до замера пишет: «Сколько стоит такая кухня?»"
 
 
 def test_brief_and_estimate_descriptions_separate_the_two_price_questions():
@@ -187,7 +195,6 @@ def test_done_entries_run_from_old_to_new_so_the_last_one_is_last_in_the_section
 
 
 def test_banner_stands_at_both_ends_so_the_skill_names_sections_by_title(home):
-    result = run(["status", "Петров"])
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
     result = run(["status", ORDER])
     lines = result.output.strip().splitlines()
@@ -219,6 +226,7 @@ def test_genitive_surname_is_not_found_and_the_skill_says_to_use_the_nominative(
     assert run(["status", "Петров"]).exit_code == 0
     text = body()
     assert "именительном падеже" in text and "«Петрова» → «Петров»" in text
+    assert "«Петрова» она не найдёт" not in text
 
 
 def test_no_workshop_exits_one_with_the_quoted_message(tmp_path, monkeypatch):
@@ -318,9 +326,7 @@ def test_order_with_project_and_no_brief_still_has_a_step(home):
 
 def test_every_recompute_command_in_stale_lines_is_routed_by_the_skill():
     routed = routed_commands()
-    real = {r.command for r in api.OUTPUT_RECOMPUTE.values()} | {
-        "production"
-    }  # production — «Документы цеха» в status
+    real = {r.command for r in api.OUTPUT_RECOMPUTE.values()} | {api.PRODUCTION_RECOMPUTE.command}
     assert len(real) >= 8
     assert real <= set(routed), real - set(routed)
     for command in ("estimate", "purchase", "quote"):
@@ -337,3 +343,105 @@ def test_workshop_not_found_message_is_the_one_the_skill_quotes(tmp_path, monkey
     assert result.exit_code == 1
     assert "Мастерская не найдена" in result.output
     assert "Мастерская не найдена" in body()
+
+
+# --- ревью 1 ----------------------------------------------------------------------------------
+
+
+def test_scenario_status_has_the_right_dalshe_section(home):
+    api.order_new(ORDER, client="Петров П. П.", home=home)
+    api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
+    api.log_add(ORDER, "next", "согласовать фасады", home)
+    api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
+    api.estimate_and_save(ORDER, home)
+    api.quote_and_save(ORDER, 35, home)
+    api.production_and_save(ORDER, home)
+    assert section(api.status("Петров", home).text, "Дальше").endswith("согласовать фасады")
+    api.log_add(ORDER, "done", "фасады согласованы", home)
+    assert section(api.status("Петров", home).text, "Дальше") == "Пока ничего."
+
+
+def test_step_two_reads_the_dalshe_section_and_skips_it_when_empty():
+    text = step(2)
+    assert "Записано дальше: <строки раздела «Дальше»>" in text
+    assert "Пока ничего." in text
+
+
+def test_order_number_without_year_exits_one_and_the_skill_has_a_branch_for_it(home):
+    api.order_new(ORDER, client="Петров П. П.", home=home)
+    result = run(["status", "047"])
+    assert result.exit_code == 1
+    assert "похоже на номер заказа" in result.output
+    assert "ГГГГ-NNN-фамилия" in result.output
+    branch = step(1)
+    assert "похоже на номер заказа" in branch
+    assert "полный номер или фамилию" in branch
+
+
+def test_unknown_error_with_code_one_is_shown_as_is_and_stops():
+    assert "другое сообщение с кодом 1 — как есть, остановись" in step(1)
+
+
+@pytest.mark.parametrize("name", ["kitchen-project", "kitchen-production", "kitchen-estimate"])
+def test_working_skills_do_not_promise_every_form_of_the_order_name(name):
+    text = skill_text(name)
+    assert "поймут любой вариант" not in text
+    assert "именительном падеже" in text
+
+
+def test_acceptance_line_of_ticket_31_uses_the_nominative():
+    spec = (REPO / "docs" / "specs" / "stage-6-skills.md").read_text(encoding="utf-8")
+    ticket = spec.split("## Тикет 31")[1].split("## Тикет 49")[0]
+    assert 'api.status("Петрова")' not in ticket
+    assert 'api.status("Петров")' in ticket
+
+
+def test_decisions_do_not_contradict_the_trigger_rule_and_shape_exemption():
+    decisions = (REPO / "DECISIONS.md").read_text(encoding="utf-8")
+    assert "Нет файла или пустой набор проходит (до тикета 31)" not in decisions
+    assert "Сейчас в наборе три фразы" not in decisions
+    assert "`kitchen-brief` и `kitchen-order` в `SHAPE_EXEMPT`" not in decisions
+
+
+def test_step_two_pins_the_parts_of_the_answer():
+    text = step(2)
+    assert "последняя запись списка в разделе «Сделано»" in text
+    assert "Дальше: <раздел «Следующий шаг» как есть>" in text
+    assert "«пока ничего»" in text and "«проекта ещё нет»" in text
+    assert "Сделано последним" in text and "Устарело" in text
+
+
+def test_step_three_asks_before_handing_over_and_does_not_choose_alone():
+    text = step(3)
+    assert "Передать работу скиллу <имя>?" in text
+    assert "После согласия мастера" in text
+    assert "Текст шага не из таблицы" in text and "Скилл не выбирай сам" in text
+    assert "Мастер хочет другое" in text
+
+
+def test_step_one_waits_for_the_master_and_does_not_guess_or_create():
+    text = step(1)
+    assert "Жди ответа" in text and "Номер не угадывай" in text and "Заказ сам не заводи" in text
+    assert "потом повтори шаг 1" in text
+
+
+def test_mock_refusal_names_telegram_and_vk():
+    text = body()
+    assert "На «отправь клиенту всё равно»" in text
+    assert "Telegram или VK" in text and "клиенту ничего не отправляю" in text
+
+
+def test_step_four_writes_next_from_the_masters_own_words():
+    assert 'kitchen log <заказ> "<шаг>" --kind next' in step(4)
+
+
+def test_stale_drilling_map_is_only_shown_never_started():
+    text = step(3)
+    assert "показать, не запускать" in text and "`kitchen drilling`" in text
+    assert "статус прочитается заново" not in text
+
+
+def test_answer_parts_are_listed_in_one_place():
+    tail = body().split("## Ответ мастеру")[1]
+    assert "шаге 2" in tail
+    assert "этап, версия" not in tail
