@@ -83,6 +83,7 @@ def test_camera_is_at_1600_and_the_whole_kitchen_is_in_frame(viewed, aspect):
     assert cam["y"] == pytest.approx(1.6)
     assert cam["worst"] <= 0.93
     assert cam["target"][0] == pytest.approx(2.8) and cam["target"][2] == pytest.approx(0)  # угол: конец A
+    assert cam["target"][1] == pytest.approx(1.1)  # половина самого высокого верха (пенал 2200), решение 11
 
 
 def test_labels_sit_just_in_front_of_the_face_and_face_the_room(viewed):

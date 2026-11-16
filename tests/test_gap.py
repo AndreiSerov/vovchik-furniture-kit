@@ -316,3 +316,70 @@ def test_lower_gap_under_countertop_and_plain_upper_gap_give_no_such_finding(hom
         }
     ]
     assert "gap_upper_countertop" not in codes(home, write(home, walls))
+
+
+# --- тикет 52: высота и глубина пустого места на видах и в 3D (ответы мастера 8 и 12) ---
+
+
+def views_of(home, walls):
+    return api.views_from_project(write(home, walls), home)
+
+
+def gap_of(result, label):
+    return next(g for g in result.scene.gaps if g.label == label)
+
+
+def box_of(result, label):
+    return next(m for m in result.scene3d.modules if m.label == label)
+
+
+def test_lower_gap_is_as_high_as_the_top_of_the_lowers_of_its_wall(home):
+    walls = wall_3700()
+    walls[0]["rows"][0]["modules"][1]["height"] = 800  # Н1 выше остальных
+    result = views_of(home, walls)
+    assert gap_of(result, "ПМ1").front.height == 900  # ножки 100 + 800, а не 820
+    page = next(p for p in api.views_layout(result) if p.wall == "A")
+    assert ("верх нижних", 900) in [(lv.name, lv.z) for lv in page.levels]
+    box = box_of(result, "ПМ1").boxes[0]
+    assert (box.min[2], box.max[2]) == (0, 900)
+
+
+def test_lower_gap_beside_only_a_tall_module_keeps_the_workshop_height(home):
+    walls = [{"label": "A", "length": 1200, "rows": [lower(gap("ПМ1"), mod("П1", "tall_oven", 600))]}]
+    result = views_of(home, walls)
+    assert gap_of(result, "ПМ1").front.height == 820
+    assert box_of(result, "ПМ1").boxes[0].max[2] == 820
+
+
+def test_gap_depth_is_that_of_the_nearest_module_and_the_deeper_of_two(home):
+    result = views_of(home, wall_3700())
+    pm1 = gap_of(result, "ПМ1")
+    assert pm1.plan.y1 - pm1.plan.y0 == 579  # единственный сосед — Н1
+    assert box_of(result, "ПМ1").depth == 579
+    assert "579" in box_of(result, "ПМ1").size_label
+
+    walls = [
+        {"label": "A", "length": 1800, "rows": [lower(base("Н1") | {"depth": 600}, gap("ПМ1"), base("Н2"))]}
+    ]
+    between = box_of(views_of(home, walls), "ПМ1")
+    assert between.depth == 619  # Н1 619 слева, Н2 579 справа
+    assert between.boxes[0].max[1] - between.boxes[0].min[1] == 619
+
+
+def test_gap_skips_gaps_and_tall_modules_when_looking_for_a_neighbour(home):
+    walls = [{"label": "A", "length": 2400, "rows": [
+        lower(mod("П1", "tall_oven", 600), gap("ПМ1"), gap("ПМ2"), base("Н1") | {"depth": 600}),
+    ]}]  # fmt: skip
+    result = views_of(home, walls)
+    assert box_of(result, "ПМ1").depth == 619 and box_of(result, "ПМ2").depth == 619
+
+
+def test_lone_gap_of_a_row_takes_the_wall_row_depth_then_the_workshop(home):
+    walls = [{"label": "A", "length": 1200, "rows": [lower(gap("ПМ1"), mod("П1", "tall_oven", 600))]}]
+    result = views_of(home, walls)
+    tall = next(m for m in result.scene.modules if m.label == "П1")
+    assert result.scene.walls[0].depths["lower"] == round(tall.depth)
+    assert box_of(result, "ПМ1").depth == round(tall.depth)
+
+    alone = views_of(home, [{"label": "A", "length": 600, "rows": [lower(gap("ПМ1"))]}])
+    assert box_of(alone, "ПМ1").depth == 560  # ряда в стене нет — нижний модуль мастерской

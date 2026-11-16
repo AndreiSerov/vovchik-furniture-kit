@@ -38,7 +38,6 @@ __all__ = [
 
 SCENE_VERSION = 1
 CAMERA_HEIGHT = 1600  # решение мастера 2026-11-15: камера в комнате на высоте 1600
-TARGET_HEIGHT = 1000  # куда смотрит камера у угла (решение агента, ПРОВЕРИТЬ МАСТЕРУ)
 
 
 class SceneBox(BaseModel):
@@ -196,8 +195,9 @@ def _gap(gap, view: ViewGap, rotation: int, project: Project) -> SceneModule:
     )
 
 
-def _camera(walls: list[SceneWall], floor: SceneFloor) -> SceneCamera:
-    """Угол цепочки — конец первой стены (она встречается с началом второй); у одной стены — её середина.
+def _camera(walls: list[SceneWall], floor: SceneFloor, top: float) -> SceneCamera:
+    """Смотрит на угол на высоте половины самого высокого верха коробок сцены `top` (решение мастера 2026-11-16, 11).
+    Угол цепочки — конец первой стены (она встречается с началом второй); у одной стены — её середина.
     Камера отходит от угла по прямой к середине пола, а у одной стены — по её нормали."""
     first = walls[0]
     if len(walls) > 1:
@@ -213,7 +213,7 @@ def _camera(walls: list[SceneWall], floor: SceneFloor) -> SceneCamera:
         dx, dy = dx / length, dy / length
     return SceneCamera(
         height=CAMERA_HEIGHT,
-        target=[_num(cx), _num(cy), TARGET_HEIGHT],
+        target=[_num(cx), _num(cy), _num(top / 2)],
         direction=[round(dx, 4), round(dy, 4)],
     )
 
@@ -263,5 +263,5 @@ def build_scene3d(
         walls=walls,
         floor=floor,
         modules=modules,
-        camera=_camera(walls, floor),
+        camera=_camera(walls, floor, max((b.max[2] for m in modules for b in m.boxes), default=0)),
     )
