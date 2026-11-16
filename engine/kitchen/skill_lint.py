@@ -202,14 +202,35 @@ def check_call(words: list[str], tree: Tree) -> list[str]:
     return problems
 
 
+def kitchen_calls(code: str) -> Iterator[str]:
+    """Вызовы `kitchen …` в куске кода: текст после слова `kitchen` до `;`, `|`, `&` или `)`.
+
+    Единственное определение «вызова»: его берут и проверка команд, и проверка формы скилла.
+    Кавычки не обрывают вызов (`kitchen log x "текст" --kind done` — один вызов); `;|&)` внутри
+    кавычек не считаются концом.
+    """
+    for call in KITCHEN_CALL.finditer(code):
+        rest = code[call.end() :]
+        quote: str | None = None
+        for i, ch in enumerate(rest):
+            if quote:
+                quote = None if ch == quote else quote
+            elif ch in "\"'":
+                quote = ch
+            elif ch in ";|&)":
+                yield rest[:i]
+                break
+        else:
+            yield rest
+
+
 def check_commands(skill: str, lines: list[str], tree: Tree) -> list[str]:
     _, start = split_frontmatter(lines)
     problems = []
     for lineno, code in code_lines(lines, start):
-        for call in KITCHEN_CALL.finditer(code):
-            rest = code[call.end() :]
-            end = SHELL_END.search(rest)
-            words = (rest[: end.start()] if end else rest).split()
+        for call in kitchen_calls(code):
+            end = SHELL_END.search(call)  # слова после первой кавычки не команда
+            words = (call[: end.start()] if end else call).split()
             problems.extend(f"{skill}: строка {lineno}: {p}" for p in check_call(words, tree))
     return problems
 
@@ -301,16 +322,26 @@ def check_no_formulas(skill: str, lines: list[str]) -> list[str]:
 
 # Форма скилла (спека 6.4): статус в начале, журнал в конце, устаревшее и плашка мока.
 # Требование — (сообщение «нет …», проверка по строкам кода и тексту тела).
-Shape = Callable[[list[str], str], bool]
+ShapeCheck = Callable[[list[str], str], bool]
 
 
-def _step(command: str, kind: str | None = None) -> Shape:
+def _step(command: str, kind: str | None = None) -> ShapeCheck:
+    """Шаг — вызов `kitchen …`; `--kind` засчитывается, только если стоит в том же вызове."""
     call = re.compile(rf"(?<![\w./-]){command}(?!\w)")
     flag = re.compile(rf"--kind[ =]{kind}(?!\w)") if kind else None
-    return lambda code, _text: any(call.search(c) and (flag is None or flag.search(c)) for c in code)
+
+    def found(code: list[str], _text: str) -> bool:
+        for chunk in code:
+            for kitchen in kitchen_calls(chunk):
+                text = f"kitchen {kitchen}"
+                if call.search(text) and (flag is None or flag.search(text)):
+                    return True
+        return False
+
+    return found
 
 
-def _word(word: str) -> Shape:
+def _word(word: str) -> ShapeCheck:
     return lambda _code, text: word in text
 
 
@@ -321,7 +352,7 @@ STALE = ("нет раздела «Устарело»", _word("Устарело")
 MOCK = ("нет плашки «МОК-ДАННЫЕ»", _word("МОК-ДАННЫЕ"))
 WORKING_SKILL = [STATUS, LOG_DONE, LOG_NEXT, STALE, MOCK]
 
-SHAPE_REQUIREMENTS: dict[str, list[tuple[str, Shape]]] = {
+SHAPE_REQUIREMENTS: dict[str, list[tuple[str, ShapeCheck]]] = {
     "kitchen-project": WORKING_SKILL,
     "kitchen-production": WORKING_SKILL,
     "kitchen-estimate": WORKING_SKILL,
@@ -397,7 +428,7 @@ def check_triggers(path: Path, skills: set[str]) -> list[str]:
         if per_skill.get(skill, 0) == 0:
             problems.append(f"{skill}: нет ни одной фразы в {name}")
         elif per_skill[skill] < MIN_PHRASES_PER_SKILL:
-            problems.append(f"{skill}: одна фраза в {name}, нужно не меньше двух")
+            problems.append(f"{skill}: одна фраза в {name}, нужно не меньше {MIN_PHRASES_PER_SKILL}")
     return problems
 
 
@@ -424,10 +455,12 @@ def check_question_paths(skill: str, folder: Path) -> list[str]:
             continue
         for path in re.findall(r"`([^`]+)`", found.group(1)):
             section, _, field = path.partition(".")
-            field = re.sub(r"\[\].*$", "", field)
-            known = section in sections and (
-                not field or field == "*" or field in sections[section].get("fields", {})
-            )
+            field, _, item_field = field.partition("[]")
+            item_field = item_field.removeprefix(".")
+            fields = sections.get(section, {}).get("fields", {})
+            known = section in sections and (not field or field == "*" or field in fields)
+            if known and item_field and item_field != "*":  # поле элемента списка
+                known = item_field in fields[field].get("item", {})
             if not known:
                 problems.append(f"{label}: строка {n}: поле `{path}` не из brief_schema.json")
     return problems

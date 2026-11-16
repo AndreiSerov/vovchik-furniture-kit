@@ -52,7 +52,7 @@ VIOLATIONS = {
     "trigger_duplicate": ["triggers.json: фраза 2: дубль фразы 1 «  составь  БРИФ» (скилл kitchen-bad)"],
     "trigger_unknown_skill": ["triggers.json: фраза 2: неизвестный скилл «kitchen-nope»"],
     "skill_without_phrase": ["kitchen-bad: нет ни одной фразы в triggers.json"],
-    "skill_one_phrase": ["kitchen-other: одна фраза в triggers.json, нужно не меньше двух"],
+    "skill_one_phrase": ["kitchen-other: одна фраза в triggers.json, нужно не меньше 2"],
     "triggers_too_few": ["triggers.json: фраз 9, нужно не меньше 10"],
     "triggers_empty": [
         "triggers.json: фраз 0, нужно не меньше 10",
