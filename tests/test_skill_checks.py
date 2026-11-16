@@ -309,3 +309,56 @@ def test_step_needs_whole_words(tmp_path):
         "kitchen-project: нет шага kitchen status",
         "kitchen-project: нет шага kitchen log с --kind done",
     ]
+
+
+def _estimate_body():
+    return (skill_lint.DEFAULT_ROOT / "kitchen-estimate" / "SKILL.md").read_text(encoding="utf-8")
+
+
+def _step(n):
+    return _estimate_body().split(f"\n{n}. **")[1].split(f"\n{n + 1}. **")[0]
+
+
+def test_kitchen_estimate_r29_B1_every_money_route_goes_through_check():
+    for line in _step(2).splitlines():
+        if re.search(r"шаг [4-7]\b", line):
+            assert re.search(r"шаг(и)? 3", line), line
+
+
+def test_kitchen_estimate_r29_B2_problems_alone_do_not_cancel_economy():
+    assert not re.search(r"problems[^.]*не пуст[^.]*не получился", _step(6))
+
+
+def test_kitchen_estimate_r29_B3_non_number_term_is_asked_again_before_quote():
+    ask = _estimate_body().split("1. Спроси срок")[1].split("2. `kitchen quote")[0]
+    assert "не число" in ask or "не целое" in ask, ask
+
+
+def test_kitchen_estimate_skill_keeps_the_ticket_rules():
+    for text in (
+        "не бери его из брифа",
+        "Пересчёт устаревшего КП — снова спроси срок",
+        "Мастер просил КП — срок спроси заново",
+        "срок прошлого КП не повторяй",
+        "внутренний документ",
+        "«КП посчитано на мок-данных — в PDF водяной знак, клиенту не отправляю; что заменить — MOCKS.md»",
+        "в том числе через Telegram или VK",
+        "«Пока ничего.»",
+        "Проекта ещё нет",
+        "--kind decision",
+        "economy.price",
+        "economy.saving",
+        "client_text",
+        "budget.amount_rub.value",
+    ):
+        assert text in _estimate_body(), text
+
+
+def test_kitchen_estimate_r29_journal_is_last_and_mock_phrases_are_split():
+    body = _estimate_body()
+    assert _step(8).startswith("Устаревшее.")
+    assert _step(9).startswith("Запиши журнал.")
+    assert "срок без согласия не спрашивай" in _step(8)
+    assert "Посчитано на мок-данных мастерской — клиенту не отправляю; что заменить — MOCKS.md" in body
+    assert "Фразу про КП не говори, если КП не делали" in body
+    assert "сначала шаг 5" not in _step(6)
