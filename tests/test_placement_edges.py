@@ -184,6 +184,30 @@ def test_ring_gap_is_rounded_to_whole_mm(home):
     ]
 
 
+def test_ring_gap_is_compared_with_the_tolerance_after_rounding(home):
+    # В 2950,3: расхождение 100,3 → 100 мм, допуск 100 — проходит (решение агента: сравнивается округлённое N)
+    edit(home, "construction.yaml", "допуск_стены: 0", "допуск_стены: 100")
+    walls = ring([2850, 2850, 2950, 2850])
+    walls[2]["length"] = 2950.3
+    assert [w.label for w in place(home, walls).walls] == ["A", "Б", "В", "Г"]
+
+
+def test_two_wall_ring_by_different_rows_stays_contradictory(home):
+    # кольцо из двух стен, заданное разными рядами, — прежнее «противоречиво», а не текст стен по кругу
+    walls = [
+        wall("A", 1800, [mod("Н1", "base_door", 750), corner("Н2", "base_corner", 1050, "Б")]),
+        wall(
+            "Б",
+            2400,
+            [mod("Н3", "base_door", 2400)],
+            [mod("В1", "wall_door", 1800), corner("В2", "wall_corner", 600, "A")],
+        ),
+    ]
+    assert placement_error(home, write_data(walls)) == [
+        "Угол между A и Б задан противоречиво: нижний ряд — конец A к началу Б, верхний — начало A к концу Б."
+    ]
+
+
 def test_ring_error_comes_with_the_ceiling_error(home):
     edit(home, "construction.yaml", "пенал: {высота: 2100", "пенал: {высота: 2700")
     walls = ring([2850, 2850, 2850])

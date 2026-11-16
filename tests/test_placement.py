@@ -252,6 +252,62 @@ def test_upper_corner_modules_at_both_ends_of_a_row_name_the_upper_row(home):
     ]
 
 
+def test_two_lower_corner_modules_in_the_corner_at_the_end_of_the_second_wall(home):
+    # зеркально test_two_lower_corner_modules_in_one_corner: угол «конец Б к началу A»
+    walls = [
+        wall("A", 1650, [corner("Н4", "base_corner", 1050, "Б"), mod("Н1", "base_door", 600)]),
+        wall("Б", 1800, [mod("Н6", "base_door", 150), corner("Н5", "base_corner", 1050, "A")]),
+    ]
+    assert placement_error(home, write_data(walls)) == [
+        "В углу A–Б два угловых модуля нижнего ряда: Н4 и Н5."
+    ]
+
+
+def test_corner_modules_at_both_ends_of_a_row_on_the_second_wall_of_the_project(home):
+    walls = [
+        wall("Б", 1800, [mod("Н5", "base_door", 1200)]),
+        wall(
+            "A",
+            3300,
+            [
+                corner("Н1", "base_corner", 1050, "Б"),
+                mod("Н2", "base_door", 1200),
+                corner("Н3", "base_corner", 1050, "Б"),
+            ],
+        ),
+    ]
+    assert placement_error(home, write_data(walls)) == [
+        "Стена A: угловые модули Н1 и Н3 нижнего ряда стоят на разных концах ряда, но оба угла ведут к Б."
+    ]
+
+
+def test_two_upper_rows_with_corners_at_one_end_are_one_corner_not_both_ends(home):
+    walls = [
+        {
+            "label": "A",
+            "length": 1650,
+            "rows": [
+                {
+                    "kind": "lower",
+                    "modules": [mod("Н1", "base_door", 600), corner("Н4", "base_corner", 1050, "Б")],
+                },
+                {
+                    "kind": "upper",
+                    "modules": [mod("В1", "wall_door", 1050), corner("В2", "wall_corner", 600, "Б")],
+                },
+                {
+                    "kind": "upper",
+                    "modules": [mod("В3", "wall_door", 1050), corner("В4", "wall_corner", 600, "Б")],
+                },
+            ],
+        },
+        wall("Б", 1800, [mod("Н5", "base_door", 1200)]),
+    ]
+    assert placement_error(home, write_data(walls)) == [
+        "В углу A–Б два угловых модуля верхнего ряда: В2 и В4."
+    ]
+
+
 def test_corner_module_in_the_middle_of_a_row(home):
     walls = [
         wall(

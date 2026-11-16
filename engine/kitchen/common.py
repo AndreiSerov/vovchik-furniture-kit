@@ -17,7 +17,7 @@ from kitchen.errors import OrderError
 from kitchen.format import label_order
 from kitchen.models import Workshop
 from kitchen.parts import TEMPLATES, corner_on_left, gap_width, upper_corner_offset
-from kitchen.project import ModuleSpec, Project, Row, Wall, is_gap
+from kitchen.project import Gap, ModuleSpec, Project, Row, Wall, is_gap
 
 __all__ = [
     "CommonItem",
@@ -127,7 +127,7 @@ def corner_offsets(project: Project, ws: Workshop) -> CornerOffsets:
     return found
 
 
-def _goes_first(m, other: tuple[float, ModuleSpec], x: float) -> bool:
+def _goes_first(m: ModuleSpec | Gap, other: tuple[float, ModuleSpec], x: float) -> bool:
     """Пенал `m` ряда встаёт на отступ `x` раньше пенала другого ряда с тем же отступом, если его метка раньше
     по `format.label_order` (решение мастера 2026-11-16, тикет 54): порядок не зависит от того, какой ряд
     записан первым. Пенал другого ряда с меньшим отступом и не пенал на его отступе — после пенала, как раньше."""
@@ -159,6 +159,9 @@ def row_layouts(wall, offsets: CornerOffsets) -> list[list]:
                     for m in other.modules
                     if is_tall(m) and id(m) in at
                 ),
+                # метка при равном отступе — страховка: порядок пеналов на одном отступе решает `_goes_first`, а
+                # здесь метка лишь делает промежуточные проходы независимыми от порядка рядов (по фаззеру ревью
+                # итог без неё тот же)
                 key=lambda t: (t[0], label_order(t[1].label)),
             )
             unplaced = [

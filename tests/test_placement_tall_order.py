@@ -4,8 +4,9 @@
 import itertools
 
 import pytest
+from kitchen import api
 
-from tests.test_placement import corner, mod, place, wall
+from tests.test_placement import corner, mod, place, wall, write
 
 
 def rows(*rows):
@@ -114,3 +115,24 @@ def test_tie_after_corner_offsets_does_not_depend_on_wall_or_row_order(home, wal
         "Н5": 1800,
         "В6": 1800,
     }
+
+
+@pytest.mark.parametrize("flip", [False, True])
+def test_tall_of_another_row_with_a_smaller_offset_is_not_overtaken_by_label(home, flip):
+    # П9 верхнего ряда на 300 (после В1 300) — меньше отступа П1 в нижнем (600): в нижнем ряду П9 встаёт раньше
+    # П1, как до тикета 54, хотя метка П1 раньше; П1 сдвигается на 1200
+    lower = ("lower", [mod("Н1", "base_door", 600), mod("П1", "tall_oven", 600)])
+    upper = ("upper", [mod("В1", "wall_door", 300), mod("П9", "tall_oven", 600)])
+    result = place(home, one_wall(2400, *((upper, lower) if flip else (lower, upper))))
+    assert (xs(result)["П9"], xs(result)["П1"]) == (300, 1200)
+
+
+@pytest.mark.parametrize("flip", [False, True])
+def test_talls_with_labels_equal_after_normalisation_do_not_stand_on_one_place(home, flip):
+    # П1 и п1 — повтор метки: расстановка отказывает, а проверки видят `duplicate_label`, но не `tall_overlap` —
+    # порядок модулей в рядах всё равно ставит пеналы друг за другом, а не на одно место
+    lower = ("lower", [mod("П1", "tall_oven", 600), mod("Н1", "base_door", 600)])
+    upper = ("upper", [mod("п1", "tall_oven", 600), mod("В1", "wall_door", 600)])
+    path = write(home, one_wall(2400, *((upper, lower) if flip else (lower, upper))))
+    codes = {f.code for f in api.check_project(path, home).findings}
+    assert "duplicate_label" in codes and "tall_overlap" not in codes
