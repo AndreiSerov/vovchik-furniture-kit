@@ -350,7 +350,7 @@
 
 **Blocked by:** 47
 
-**Status:** ready-for-agent (проверка готовности 2026-11-16; тексты сообщений — решения агента по поручению мастера 2026-11-16, сверить после MVP)
+**Status:** done (проверка готовности 2026-11-16; тексты сообщений — решения агента по поручению мастера 2026-11-16, сверить после MVP)
 
 **Решения мастера (2026-11-16):**
 - (1) Пустое место верхнего ряда с отметкой «под столешницей» — предупреждение, проект принимается.
@@ -375,11 +375,11 @@
 - Эталоны `tests/golden/` не меняются.
 
 **Проверки приёмки (каждая — тест):**
-1. (1) `tests/test_gap.py::write`: A 1200, нижний [Н1, Н2 base_door 600], верхний [ПМ1 600 `under_countertop: true`, В1 wall_door 600] — ровно одна `gap_upper_countertop` с текстом выше, ошибок нет, длина столешницы 1200; та же отметка у нижнего ПМ находки не даёт.
-2. (2) `kitchen parts --project tests/fixtures/petrov_project.json`: строка ПМ1 между Н6 и В5; `--json` равен `api.parts_from_project`; тест ПМ2 `tests/test_gap_appliances.py` зелёный.
-3. (3) Петров v1, затем v2 с варочной, перенесённой из Н1 в Н2 (`schema_import` из `tests/test_project_import_diff.py`) — ровно две строки «техника» выше; смена ширины мойки 750 → 600 даёт строку поля; то же у пустого места с холодильником; `tests/test_gap_appliances.py::test_diff_lines` зелёный.
-4. (4) Нижний ряд [Н3 base_door 600, Н1], холодильник `module: Н3`, `save_brief(home, {"built_in": False, "width_mm": 600, "wall": "A"})` (`tests/test_gap_appliances.py`) — `fridge_in_module` с текстом выше; при `built_in: true` и без `built_in` её нет.
-5. (5) `fridge_project(home, 620)` и `save_brief(home, {"wall": "none", "width_mm": 600})` — `fridge_not_in_kitchen` с текстом выше, `appliance_not_in_brief` нет; при `wall: "A"` находки нет; при `wall: "none"` и `built_in: true` нет `gap_built_in`.
+- [x] (1) `tests/test_gap.py::write`: A 1200, нижний [Н1, Н2 base_door 600], верхний [ПМ1 600 `under_countertop: true`, В1 wall_door 600] — ровно одна `gap_upper_countertop` с текстом выше, ошибок нет, длина столешницы 1200; та же отметка у нижнего ПМ находки не даёт.
+- [x] (2) `kitchen parts --project tests/fixtures/petrov_project.json`: строка ПМ1 между Н6 и В5; `--json` равен `api.parts_from_project`; тест ПМ2 `tests/test_gap_appliances.py` зелёный.
+- [x] (3) Петров v1, затем v2 с варочной, перенесённой из Н1 в Н2 (`schema_import` из `tests/test_project_import_diff.py`) — ровно две строки «техника» выше; смена ширины мойки 750 → 600 даёт строку поля; то же у пустого места с холодильником; `tests/test_gap_appliances.py::test_diff_lines` зелёный.
+- [x] (4) Нижний ряд [Н3 base_door 600, Н1], холодильник `module: Н3`, `save_brief(home, {"built_in": False, "width_mm": 600, "wall": "A"})` (`tests/test_gap_appliances.py`) — `fridge_in_module` с текстом выше; при `built_in: true` и без `built_in` её нет.
+- [x] (5) `fridge_project(home, 620)` и `save_brief(home, {"wall": "none", "width_mm": 600})` — `fridge_not_in_kitchen` с текстом выше, `appliance_not_in_brief` нет; при `wall: "A"` находки нет; при `wall: "none"` и `built_in: true` нет `gap_built_in`.
 
 ## Тикет 54 — Ответы мастера по уборке этапа 5: расстановка (MVP)
 

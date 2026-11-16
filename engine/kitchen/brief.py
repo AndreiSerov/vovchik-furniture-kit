@@ -8,7 +8,7 @@ import importlib.util
 import json
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from functools import cache
 from pathlib import Path
@@ -80,7 +80,8 @@ class BriefAppliance:
 
     type: str
     label: str  # для сообщений: «посудомойка 45 см Bosch SMV»
-    built_in: bool
+    # `None` — в брифе поля нет: такой прибор не считается ни встраиваемым, ни отдельностоящим
+    built_in: bool | None
     model: str | None = None
     width: int | None = None
     height: int | None = None
@@ -89,6 +90,7 @@ class BriefAppliance:
     niche_height: int | None = None
     niche_depth: int | None = None
     warnings: list[str] = field(default_factory=list)
+    wall: str | None = None  # метка стены из брифа или `none` (холодильник не на кухне)
 
 
 def _mm(value: Any) -> int | None:
@@ -97,7 +99,7 @@ def _mm(value: Any) -> int | None:
     )
 
 
-def _appliance(item: dict[str, Any], type_: str, label: str, built_in: bool) -> BriefAppliance:
+def _appliance(item: dict[str, Any], type_: str, label: str) -> BriefAppliance:
     width, height, depth = (_mm(item.get(k)) for k in ("width_mm", "height_mm", "depth_mm"))
     warnings: list[str] = []
     text = item.get("dimensions")
@@ -111,8 +113,19 @@ def _appliance(item: dict[str, Any], type_: str, label: str, built_in: bool) -> 
             )
     niche = (_mm(item.get(k)) for k in ("niche_width_mm", "niche_height_mm", "niche_depth_mm"))
     model = item.get("model")
+    built_in = item.get("built_in")
+    wall = item.get("wall")
     return BriefAppliance(
-        type_, label, built_in, str(model) if model else None, width, height, depth, *niche, warnings
+        type_,
+        label,
+        built_in if isinstance(built_in, bool) else None,
+        str(model) if model else None,
+        width,
+        height,
+        depth,
+        *niche,
+        warnings,
+        str(wall).strip() or None if isinstance(wall, str) else None,
     )
 
 
@@ -122,15 +135,16 @@ def appliances(brief: dict[str, Any]) -> list[BriefAppliance]:
     found = []
     for item in cb.appliances(brief):
         label = " ".join(x for x in (cb.appliance_name(item), item.get("model") or item.get("brand")) if x)
-        found.append(_appliance(item, str(item.get("type") or ""), label, item.get("built_in") is True))
+        found.append(_appliance(item, str(item.get("type") or ""), label))
     fridge = cb.get(brief, "appliances.fridge")
     if isinstance(fridge, dict) and any(v not in (None, "", [], {}) for v in fridge.values()):
         label = " ".join(x for x in ("холодильник", fridge.get("model") or fridge.get("brand")) if x)
-        found.append(_appliance(fridge, "fridge", label, fridge.get("built_in") is True))
+        found.append(_appliance(fridge, "fridge", label))
     hood = cb.get(brief, "appliances.hood")
     if isinstance(hood, dict) and hood.get("kind") in HOOD_IN_MODULE:
         label = " ".join(x for x in ("вытяжка", hood.get("model")) if x)
-        found.append(_appliance(hood, "hood", label, True))
+        # вытяжка в модуль — встраиваемая
+        found.append(replace(_appliance(hood, "hood", label), built_in=True))
     return found
 
 

@@ -18,6 +18,7 @@ from kitchen.common import (
     corner_offsets,
     corner_wall_message,
     is_tall,
+    pair_by_model_then_order,
     row_layouts,
     row_positions,
 )
@@ -170,6 +171,23 @@ def _gap_widths(project: Project) -> list[Finding]:
     return found
 
 
+def _gap_upper_countertop(project: Project) -> list[Finding]:
+    """Отметка «под столешницей» у пустого места верхнего ряда ничего не делает: столешница идёт над нижним рядом."""
+    return [
+        Finding(
+            code="gap_upper_countertop",
+            level="warning",
+            subject=entry.label,
+            message=(
+                f"Место {entry.label} в верхнем ряду: отметка «под столешницей» не действует — "
+                "столешница идёт только над нижним рядом."
+            ),
+        )
+        for row, entry in _row_entries(project)
+        if row.kind == "upper" and is_gap(entry) and entry.under_countertop is True
+    ]
+
+
 def _drawer_depth(module: ModuleSpec, dims: ModuleDims, ws: Workshop) -> Finding | None:
     """Глубина корпуса под ящик: нужная глубина считается `parts.drawer_depth_shortfall`, той же функцией,
     что и расчёт деталей. Сбой формул ящика здесь не назван: его назовёт расчёт модуля."""
@@ -200,17 +218,9 @@ def _pair(project: Project, brief: list[BriefAppliance], ws: Workshop, found: li
     for type_ in dict.fromkeys([b.type for b in brief] + [a.type for a in project.appliances]):
         items = [b for b in brief if b.type == type_]
         mine = [a for a in project.appliances if a.type == type_]
-        rest = []
-        for a in mine:
-            hit = next((b for b in items if a.model and b.model and a.model.lower() == b.model.lower()), None)
-            if hit:
-                items.remove(hit)
-                paired[id(a)] = hit
-            else:
-                rest.append(a)
-        by_order = bool(rest and items)
-        for a in rest:
-            paired[id(a)] = items.pop(0) if items else None
+        pairs, items, by_order = pair_by_model_then_order(mine, items, lambda i: i.model)
+        for a, hit in pairs:
+            paired[id(a)] = hit
         if by_order and (len([b for b in brief if b.type == type_]) > 1 or len(mine) > 1):
             found.append(
                 Finding(
@@ -275,6 +285,37 @@ def _inner_width(dims: ModuleDims, ws: Workshop) -> int:
     )
 
 
+NOT_IN_KITCHEN = "none"  # `appliances.fridge.wall` брифа: холодильник не на кухне
+
+
+def _fridge_vs_brief(
+    appliance: Appliance, label: str, pair: BriefAppliance | None, *, in_gap: bool
+) -> list[Finding]:
+    """Холодильник проекта против холодильника брифа: «не на кухне» (любое место) и «отдельностоящий, а ниша в
+    модуле». Брифа или пары нет — сравнивать не с чем."""
+    if appliance.type != "fridge" or pair is None:
+        return []
+    if pair.wall == NOT_IN_KITCHEN:
+        return [
+            Finding(
+                code="fridge_not_in_kitchen",
+                level="warning",
+                subject=label,
+                message=f"Холодильник в брифе не на кухне, а в проекте он есть ({label}) — проверьте.",
+            )
+        ]
+    if not in_gap and pair.built_in is False:
+        return [
+            Finding(
+                code="fridge_in_module",
+                level="warning",
+                subject=label,
+                message=f"Холодильник в брифе отдельностоящий, а в проекте для него ниша в модуле {label}.",
+            )
+        ]
+    return []
+
+
 def _gap_appliances(
     apps: list[Appliance], gap: Gap, row_kind: str, paired: dict[int, BriefAppliance | None], ws: Workshop
 ) -> list[Finding]:
@@ -288,7 +329,8 @@ def _gap_appliances(
                 level="error",
                 subject=gap.label,
                 message=f"Место {gap.label} в верхнем ряду: технику ставят только в пустое место нижнего ряда",
-            )
+            ),
+            *(f for a in apps for f in _fridge_vs_brief(a, gap.label, paired[id(a)], in_gap=True)),
         ]
     found: list[Finding] = []
     fits = []
@@ -337,7 +379,8 @@ def _gap_appliances(
             )
     for appliance in fits:
         pair = paired[id(appliance)]
-        if appliance.type == "fridge" and pair is not None and pair.built_in:
+        found += _fridge_vs_brief(appliance, gap.label, pair, in_gap=True)
+        if appliance.type == "fridge" and pair is not None and pair.built_in and pair.wall != NOT_IN_KITCHEN:
             found.append(
                 Finding(
                     code="gap_built_in",
@@ -399,6 +442,7 @@ def _niches(
             )
             continue
         module, d = dims[a.module]
+        found += _fridge_vs_brief(a, a.module, paired[id(a)], in_gap=False)
         template = TEMPLATES[module.template]
         if template.row_kind not in APPLIANCE_ROWS.get(a.type, (template.row_kind,)):
             found.append(
@@ -684,6 +728,7 @@ def check_project(project: Project, ws: Workshop, brief: dict | None = None) -> 
         + _row_sums(project, ws)
         + _tall_overlaps(project, ws)
         + _gap_widths(project)
+        + _gap_upper_countertop(project)
         + _countertop_overrides(project)
     )
     dims, built = _build(project, ws, found)

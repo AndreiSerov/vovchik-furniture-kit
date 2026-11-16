@@ -238,7 +238,18 @@ def _render_parts(r: api.PartsResult) -> str:
         f"{api.plural(len(r.findings) - errors, 'предупреждение', 'предупреждения', 'предупреждений')}"
     )
     lines = [f"Детали проекта {r.order}:", _render_source(r.source), summary]
-    for m in r.modules:
+    gaps = iter(r.gaps)
+    gap = next(gaps, None)
+
+    def gap_line(g: api.PartsGap) -> str:
+        what = f" ({g.appliance})" if g.appliance else ""
+        tail = ", деталей нет" if g.appliance else ""
+        return f"  {g.label} — пустое место {g.width} мм{what}{tail}"
+
+    for i, m in enumerate(r.modules):
+        while gap is not None and gap.modules_before <= i:  # пустые места — на своём месте в порядке проекта
+            lines.append(gap_line(gap))
+            gap = next(gaps, None)
         lines.append(f"  Модуль {m.module} ({m.template}) — {len(m.parts)} дет.")
         for p in m.parts:
             edged = ", ".join(f"{side} {edge}" for side, edge in p.edges.items() if edge)
@@ -247,10 +258,9 @@ def _render_parts(r: api.PartsResult) -> str:
             lines.append(
                 f"    {p.id} — {p.name} {p.length}×{p.width}×{p.thickness} мм, {p.material}, {grain}{tail}"
             )
-    for g in r.gaps:
-        what = f" ({g.appliance})" if g.appliance else ""
-        tail = ", деталей нет" if g.appliance else ""
-        lines.append(f"  {g.label} — пустое место {g.width} мм{what}{tail}")
+    while gap is not None:
+        lines.append(gap_line(gap))
+        gap = next(gaps, None)
     hw = ", ".join(f"{pid} ×{n}" for pid, n in r.hardware.items())
     lines.append(f"Фурнитура: {hw}")
     for edge_id, e in r.edges.items():

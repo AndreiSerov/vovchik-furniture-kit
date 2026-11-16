@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from kitchen import api
 from kitchen.cli import app
@@ -89,3 +90,41 @@ def test_parts_text_marks_textured_material(home, base_door_project):
     t = runner.invoke(app, ["parts", "--project", str(base_door_project)])
     assert t.exit_code == 0, t.output
     assert "ldsp_16_oak, текстура вдоль длины, кромка: L1 edge_08_oak" in t.output
+
+
+def test_parts_text_prints_the_gap_in_its_place_in_the_row():
+    petrov = str(Path(__file__).resolve().parent / "fixtures" / "petrov_project.json")
+    out = runner.invoke(app, ["parts", "--project", petrov]).output.splitlines()
+    gap = out.index("  ПМ1 — пустое место 264 мм")
+    before = [line for line in out[:gap] if line.startswith("  Модуль ")]
+    assert before[-1].startswith("  Модуль Н6 ")
+    assert out[gap - 1].startswith("    Н6-") and out[gap + 1].startswith("  Модуль В5 ")
+    data = json.loads(runner.invoke(app, ["parts", "--project", petrov, "--json"]).output)
+    assert data == json.loads(api.parts_from_project(petrov).model_dump_json())
+    assert [g["label"] for g in data["gaps"]] == ["ПМ1"]
+    assert "modules_before" not in data["gaps"][0]
+
+
+def test_parts_text_prints_gaps_at_the_start_and_at_the_end_of_rows(home):
+    from tests.test_gap import base, gap, lower, upper, wall_door, write
+
+    walls = [
+        {
+            "label": "A",
+            "length": 1800,
+            "rows": [
+                lower(gap("ПМ1", 600), base("Н1"), gap("ПМ2", 600)),
+                upper(wall_door("В1"), gap("ПМ3", 600), gap("ПМ4", 600)),
+            ],
+        },
+    ]
+    out = runner.invoke(app, ["parts", "--project", str(write(home, walls))]).output.splitlines()
+    heads = [line for line in out if line.startswith("  ") and not line.startswith("    ")]
+    assert [h.split(" — ")[0] for h in heads[:6]] == [
+        "  ПМ1",
+        "  Модуль Н1 (base_door)",
+        "  ПМ2",
+        "  Модуль В1 (wall_door)",
+        "  ПМ3",
+        "  ПМ4",
+    ]
