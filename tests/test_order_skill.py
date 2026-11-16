@@ -264,7 +264,7 @@ def routed_commands() -> dict[str, str]:
 
 def skill_for(step_text: str, commands: list[str]) -> str | None:
     table = handoff_table()
-    assert len(table) == 6
+    assert len(table) == 7
     for start, target in table.items():
         if not step_text.startswith(start):
             continue
@@ -328,11 +328,13 @@ def test_every_recompute_command_in_stale_lines_is_routed_by_the_skill():
     routed = routed_commands()
     real = {r.command for r in api.OUTPUT_RECOMPUTE.values()} | {api.PRODUCTION_RECOMPUTE.command}
     assert len(real) >= 8
+    real = real - {"drilling"}  # тикет 57: `kitchen drilling` из «Пересчитать устаревшее» исключён
     assert real <= set(routed), real - set(routed)
     for command in ("estimate", "purchase", "quote"):
         assert routed[command] == "kitchen-estimate"
-    for command in ("production", "cut", "edges", "assembly", "trip", "drilling"):
+    for command in ("production", "cut", "edges", "assembly", "trip"):
         assert routed[command] == "kitchen-production"
+    assert "drilling" not in routed  # тикет 57: присадка в «Пересчитать устаревшее» не попадает
     assert routed["3d"] == "kitchen-project"
 
 
@@ -437,9 +439,11 @@ def test_step_four_writes_next_from_the_masters_own_words():
     assert 'kitchen log <заказ> "<шаг>" --kind next' in step(4)
 
 
-def test_stale_drilling_map_is_only_shown_never_started():
+def test_stale_drilling_map_is_only_named_in_stale_never_started():
+    # Тикет 59 (решение 15): в «Следующем шаге» присадки нет, строк `kitchen drilling` в таблице нет.
     text = step(3)
-    assert "показать, не запускать" in text and "`kitchen drilling`" in text
+    assert "kitchen drilling" not in text
+    assert "стоит только в разделе «Устарело»" in text and "не запускай и не предлагай" in text
     assert "статус прочитается заново" not in text
 
 
@@ -501,7 +505,7 @@ def test_all_documents_ready_is_handed_to_nobody():
 
 
 def test_drilling_map_is_never_started_without_a_direct_request():
-    assert "карту присадки без прямой просьбы мастера не запускай и не предлагай" in step(3)
+    assert "без прямой просьбы мастера её не запускай и не предлагай" in step(3)
 
 
 def test_no_log_entry_when_the_master_decided_nothing():

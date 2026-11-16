@@ -468,7 +468,7 @@ def test_kitchen_estimate_r29_B1_every_route_lists_check_and_quote_lists_estimat
 def test_kitchen_estimate_problems_keep_variant_term_not_converted_budget_skipped():
     assert "а вариант всё равно дай" in _step(6)
     assert "`warnings`" in _step(6)
-    ask = _estimate_body().split("1. Спроси срок")[1].split("2. `kitchen quote")[0]
+    ask = _estimate_body().split("1. Срок в самой просьбе")[1].split("2. `kitchen quote")[0]
     assert "не переводи сам" in ask and "спроси ещё раз" in ask, ask
     assert "только если мастер не просил «экономию»" in _step(5)
     assert "Мастер просил другое — только предложи" in _step(8)
@@ -480,14 +480,14 @@ def test_kitchen_estimate_r29_B2_problems_alone_do_not_cancel_economy():
 
 
 def test_kitchen_estimate_r29_B3_non_number_term_is_asked_again_before_quote():
-    ask = _estimate_body().split("1. Спроси срок")[1].split("2. `kitchen quote")[0]
+    ask = _estimate_body().split("1. Срок в самой просьбе")[1].split("2. `kitchen quote")[0]
     assert "не число" in ask or "не целое" in ask, ask
 
 
 def test_kitchen_estimate_skill_keeps_the_ticket_rules():
     for text in (
         "не бери его из брифа",
-        "Пересчёт устаревшего КП — снова спроси срок",
+        "Пересчёт устаревшего КП без срока в просьбе — снова спроси срок",
         "Мастер просил КП — срок спроси заново",
         "срок прошлого КП не повторяй",
         "внутренний документ",
