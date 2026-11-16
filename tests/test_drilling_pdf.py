@@ -345,3 +345,11 @@ def test_cups_of_right_hinged_facade_are_written_from_the_nearer_edge(home):
     assert all(t.endswith("· 22 от правой кромки") for t in right), right
     assert not any("275" in t for t in right)
     assert all(t.endswith("· 22") and "от правой" not in t for t in left), left
+
+
+def test_only_hinge_cups_are_written_from_the_nearer_edge(home):
+    """Ревью 46: «от правой кромки» — только у чашек петель, остальные отверстия — от базовых кромок."""
+    _, pages = petrov_layout(home)
+    rows = [t.text for s in schemes(pages).values() for t in s.texts if re.match(r"\d+(–\d+)?\. ", t.text)]
+    assert rows
+    assert [r for r in rows if " кромки" in r and "чашка петли" not in r] == []

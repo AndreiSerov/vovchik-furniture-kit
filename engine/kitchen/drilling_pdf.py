@@ -293,7 +293,7 @@ def _levels(values: list[Mm], k: float, size: float) -> list[int]:
     return levels
 
 
-def grown_reserve(reserved: dict[str, int], need: dict[str, int]) -> dict[str, int]:
+def _grown_reserve(reserved: dict[str, int], need: dict[str, int]) -> dict[str, int]:
     """Запас строк цепочек по осям после очередного масштаба: ни одна ось не теряет запас, иначе подбор масштаба мог бы ходить по кругу."""
     return {a: max(reserved[a], need[a]) for a in reserved}
 
@@ -366,7 +366,7 @@ def _scheme(part: Part, slot: Area) -> SchemeLayout:
         if all(need[a] <= reserved[a] for a in axes):
             ok = True
             break
-        reserved = grown_reserve(reserved, need)
+        reserved = _grown_reserve(reserved, need)
     if not ok:
         raise KitchenError(
             f"Схема детали {part.id} не помещается на карте присадки: отверстий {len(part.holes)}."

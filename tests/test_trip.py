@@ -516,6 +516,16 @@ def test_client_name_with_spaces_around_is_printed_trimmed(home):
     assert api.trip_from_order(ORDER, home).header.client == "Петров, +7 900 000-00-00"
 
 
+def test_phone_of_only_spaces_is_printed_as_missing(home):
+    """Ревью 46: поле из одних пробелов — пусто, в шапке прочерк, как без поля."""
+    brief = json.loads((FIXTURES / "petrov_brief.json").read_text(encoding="utf-8"))
+    brief["client"]["phone"] = {"value": "   ", "source": "client"}
+    path = home / "brief-blank-phone.json"
+    path.write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
+    petrov(home, path)
+    assert api.trip_from_order(ORDER, home).header.client == "Петров, —"
+
+
 def test_production_cli_prints_the_empty_brief_warning(home):
     api.order_new(ORDER, home=home)
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
@@ -555,3 +565,12 @@ def test_two_line_heading_is_not_split_between_pages(home):
                 n,
                 page.lines[-1].text,
             )  # заголовок (жирный) не последний на странице
+
+
+def test_production_cli_prints_a_warning_shared_by_purchase_and_trip_once(home):
+    """Ревью 46: предупреждение, которое есть и в закупке, и в чек-листе, `production` печатает один раз."""
+    api.order_new(ORDER, home=home)
+    api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
+    api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)  # бриф новее версии проекта
+    out = runner.invoke(app, ["production", "petrov"]).output
+    assert out.count("новее брифа") == 1, out

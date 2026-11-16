@@ -139,12 +139,14 @@ def appliances(brief: dict[str, Any]) -> list[BriefAppliance]:
 
 def value(brief: dict[str, Any], path: str) -> Any:
     """Значение поля брифа по пути «раздел.поле» (обёртка `{value, source}` снята, у строки обрезаны пробелы по
-    краям); пусто — `None`."""
+    краям); пусто или одни пробелы — `None`."""
     cb = _checker()
     found = cb.get(brief, path)
     if cb.is_empty(found):
         return None
-    return found.strip() if isinstance(found, str) else found
+    if isinstance(found, str):
+        return found.strip() or None
+    return found
 
 
 def value_label(path: str, raw: Any) -> str:
