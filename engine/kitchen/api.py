@@ -719,14 +719,51 @@ def _changes(before: dict, after: dict, prefix: str = "") -> list[str]:
     return changes
 
 
-def _appliances_of(data: dict) -> dict[str, str]:
-    """Техника проекта по меткам модулей и мест: «холодильник, плита» или пусто."""
-    found: dict[str, list[str]] = {}
+_APPLIANCE_FIELDS = {
+    "width": "ширина",
+    "model": "модель",
+    "height": "высота",
+    "depth": "глубина",
+    "niche_width": "ширина ниши",
+    "niche_height": "высота ниши",
+    "niche_depth": "глубина ниши",
+}
+
+
+def _appliance_name(item: dict) -> str:
+    return APPLIANCE_NAMES.get(item["type"], item["type"]) if isinstance(item["type"], str) else "?"
+
+
+def _appliances_of(data: dict) -> dict[str, list[dict]]:
+    """Техника проекта по меткам модулей и мест."""
+    found: dict[str, list[dict]] = {}
     for item in data.get("appliances", []):
-        found.setdefault(item["module"], []).append(
-            APPLIANCE_NAMES.get(item["type"], item["type"]) if isinstance(item["type"], str) else "?"
+        found.setdefault(item["module"], []).append(item)
+    return found
+
+
+def _kit(items: list[dict] | None) -> str:
+    """Состав техники места: «холодильник, плита» или пусто."""
+    return ", ".join(sorted(_appliance_name(i) for i in items or []))
+
+
+def _appliance_changes(before: list[dict] | None, after: list[dict] | None) -> list[str]:
+    """Поля прибора одного вида, который стоит на месте в обеих версиях: приборы вида идут парами по порядку."""
+    changes = []
+    kinds = [i["type"] for i in [*(before or []), *(after or [])]]
+    for kind in dict.fromkeys(kinds):
+        pairs = zip(
+            [i for i in before or [] if i["type"] == kind],
+            [i for i in after or [] if i["type"] == kind],
+            strict=False,
         )
-    return {label: ", ".join(sorted(names)) for label, names in found.items()}
+        for old, new in pairs:
+            for key, name in _APPLIANCE_FIELDS.items():
+                if old.get(key) != new.get(key):
+                    changes.append(
+                        f"{_appliance_name(new)}: {name} {_value(old.get(key))} → {_value(new.get(key))}"
+                    )
+    return changes
 
 
 def diff_project(order: str, from_version: int, to_version: int, home: Path | None = None) -> DiffResult:
@@ -771,9 +808,14 @@ def diff_project(order: str, from_version: int, to_version: int, home: Path | No
                     changes.append(f"{label}: {'модуль' if new.get('gap') else 'пустое место'} → {now}")
                 else:
                     changes.extend(f"{label}: {line}" for line in _changes(old, new))
-                    if new.get("gap") and before_kit.get(label) != after_kit.get(label):
+                    changes.extend(
+                        f"{label}: {line}"
+                        for line in _appliance_changes(before_kit.get(label), after_kit.get(label))
+                    )
+                    if _kit(before_kit.get(label)) != _kit(after_kit.get(label)):
                         changes.append(
-                            f"{label}: техника {_value(before_kit.get(label))} → {_value(after_kit.get(label))}"
+                            f"{label}: техника {_value(_kit(before_kit.get(label)) or None)} → "
+                            f"{_value(_kit(after_kit.get(label)) or None)}"
                         )
                 if (old_wall, old_row, old_pos) != (new_wall, new_row, new_pos):
                     changes.append(

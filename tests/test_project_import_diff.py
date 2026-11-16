@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -210,3 +211,63 @@ def test_diff_names_added_nested_fields_in_russian(home, tmp_path):
     assert "наполнение: двери не задано → 1" in changes
     assert "угол: соседняя стена не задано → Б" in changes
     assert '"doors"' not in changes and '"adjacent_wall"' not in changes
+
+
+# --- тикет 51: diff показывает смену техники у модулей и мест -------------------
+
+PETROV = Path(__file__).resolve().parent / "fixtures" / "petrov_project.json"
+
+
+def petrov_versions(tmp_path, *edits):
+    """Петров v1 и по версии на каждую правку (каждая правка — к предыдущей версии)."""
+    api.order_new("2026-047-petrov")
+    data = json.loads(PETROV.read_text(encoding="utf-8"))
+    versions = [data]
+    for edit in edits:
+        data = json.loads(json.dumps(data))
+        edit(data)
+        versions.append(data)
+    for n, version in enumerate(versions, 1):
+        schema_import("petrov", write(tmp_path / f"v{n}.json", version))
+
+
+def appliance(data, kind):
+    return next(a for a in data["appliances"] if a["type"] == kind)
+
+
+def test_diff_shows_the_hob_moved_between_modules(home, tmp_path):
+    petrov_versions(tmp_path, lambda d: appliance(d, "hob").update(module="Н2"))
+    assert api.diff_project("petrov", 1, 2).changes == [
+        "Н1: техника варочная панель → не задано",
+        "Н2: техника не задано → варочная панель",
+    ]
+
+
+def test_diff_shows_appliance_field_changes_before_the_kit(home, tmp_path):
+    def edit(d):
+        appliance(d, "sink")["width"] = 600
+        appliance(d, "sink")["model"] = "Franke"
+        appliance(d, "dishwasher")["module"] = "Н5"
+
+    petrov_versions(tmp_path, edit)
+    assert api.diff_project("petrov", 1, 2).changes == [
+        "Н5: мойка: ширина 750 → 600",
+        "Н5: мойка: модель не задано → Franke",
+        "Н5: техника мойка → мойка, посудомойка",
+        "Н6: техника посудомойка → не задано",
+    ]
+
+
+def test_diff_shows_appliance_change_of_a_gap(home, tmp_path):
+    def add_fridge(d):
+        d["appliances"].append({"type": "fridge", "width": 600, "model": "A", "module": "ПМ1"})
+
+    def change(d):
+        appliance(d, "fridge").update(width=560, model="B")
+
+    petrov_versions(tmp_path, add_fridge, change)
+    assert api.diff_project("petrov", 1, 2).changes == ["ПМ1: техника не задано → холодильник"]
+    assert api.diff_project("petrov", 2, 3).changes == [
+        "ПМ1: холодильник: ширина 600 → 560",
+        "ПМ1: холодильник: модель A → B",
+    ]
