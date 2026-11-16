@@ -675,7 +675,7 @@ def build_base_sink(
 def build_dishwasher_panel(
     module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
 ) -> TemplateOut:
-    """Фасад ПММ: крепёж поставляется с техникой, корпус отсутствует."""
+    """Фасад ПММ: корпуса нет, одна ручка на фасад (тикет 55); крепёж и лента поставляются с техникой."""
     f = ws.construction.facades
     facade = find_material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
     h = _calc(module, dims, "высота фасада", f.height_lower, H=dims.height, W=dims.width)
@@ -694,7 +694,8 @@ def build_dishwasher_panel(
                 at=Position(x=f.gap, y=dims.depth, z=f.gap),
                 area=True,
             )
-        ]
+        ],
+        hardware=Counter({materials.handles: ws.construction.handles.per_unit}),
     )
 
 

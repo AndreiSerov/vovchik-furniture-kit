@@ -83,7 +83,7 @@ def test_petrov_countertop_and_totals_unchanged(home):
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
     cut = api.cut_and_save("petrov", home).countertop
     assert (cut.total_length_mm, cut.sheet_count) == (3400, 1)
-    assert api.purchase_and_save("petrov", home).total == 157724.70
+    assert api.purchase_and_save("petrov", home).total == 158074.70
     assert api.estimate_and_save("petrov", home).price == 222000
 
 

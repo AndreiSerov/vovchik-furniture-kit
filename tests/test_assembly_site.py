@@ -15,7 +15,7 @@ from tests.test_gap import gap, lower, write
 
 runner = CliRunner()
 PETROV_HARDWARE = {
-    "handle_profile": 17,
+    "handle_profile": 18,
     "leg_100": 26,
     "hanger_camar807": 12,
     "confirmat_7x50": 102,
@@ -88,7 +88,7 @@ def test_petrov_handles_equal_facade_count_in_each_carcass_module(home):
         built = next(b for b in parts.modules if b.module == m.label)
         facades = sum(1 for p in built.parts if p.name.startswith("фасад"))
         got = sum(h.quantity for h in m.hardware if h.id == "handle_profile")
-        assert got == (0 if m.label == "Н6" else facades), m.label
+        assert got == facades, m.label
 
 
 @pytest.mark.parametrize("item", sorted(STAGE_STEP))
