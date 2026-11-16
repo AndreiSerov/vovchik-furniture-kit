@@ -271,3 +271,77 @@ def test_diff_shows_appliance_change_of_a_gap(home, tmp_path):
         "ПМ1: холодильник: ширина 600 → 560",
         "ПМ1: холодильник: модель A → B",
     ]
+
+
+@pytest.mark.parametrize("broken", ["missing", ["oven"]])
+def test_diff_of_an_unchecked_old_version_with_appliance_without_type_is_a_readable_error(
+    home, tmp_path, broken
+):
+    api.order_new("2026-047-petrov")
+    old = json.loads(PETROV.read_text(encoding="utf-8"))
+    if broken == "missing":
+        del old["appliances"][2]["type"]
+    else:
+        old["appliances"][2]["type"] = broken
+    api.import_project(
+        "petrov", write(tmp_path / "v1.json", old), validate=lambda data, ctx: api.ValidationResult()
+    )
+    schema_import("petrov", write(tmp_path / "v2.json", json.loads(PETROV.read_text(encoding="utf-8"))))
+    with pytest.raises(OrderError, match="Версия 1 не соответствует"):
+        api.diff_project("petrov", 1, 2)
+
+
+def test_diff_pairs_the_remaining_fridge_not_the_removed_one(home, tmp_path):
+    two = [
+        {"type": "fridge", "width": 450, "model": "X", "module": "ПМ1"},
+        {"type": "fridge", "width": 600, "model": "Y", "module": "ПМ1"},
+    ]
+    petrov_versions(tmp_path, lambda d: d["appliances"].extend(two), lambda d: d["appliances"].remove(two[0]))
+    assert api.diff_project("petrov", 2, 3).changes == ["ПМ1: техника холодильник, холодильник → холодильник"]
+
+
+def test_diff_of_two_fridges_swapped_in_the_list_has_no_field_lines(home, tmp_path):
+    two = [
+        {"type": "fridge", "width": 450, "model": "X", "module": "ПМ1"},
+        {"type": "fridge", "width": 600, "model": "Y", "module": "ПМ1"},
+    ]
+    petrov_versions(tmp_path, lambda d: d["appliances"].extend(two), lambda d: d["appliances"].reverse())
+    assert api.diff_project("petrov", 2, 3).changes == []
+
+
+def test_diff_names_a_field_of_the_second_appliance_of_one_kind(home, tmp_path):
+    two = [
+        {"type": "fridge", "width": 450, "model": "X", "module": "ПМ1"},
+        {"type": "fridge", "width": 600, "model": "Y", "module": "ПМ1"},
+    ]
+    petrov_versions(
+        tmp_path, lambda d: d["appliances"].extend(two), lambda d: d["appliances"][-1].update(width=560)
+    )
+    assert api.diff_project("petrov", 2, 3).changes == ["ПМ1: холодильник: ширина 600 → 560"]
+
+
+def test_diff_names_niche_fields_of_an_appliance(home, tmp_path):
+    def edit(d):
+        oven = next(a for a in d["appliances"] if a["type"] == "oven")
+        oven.update(niche_width=570, height=600, depth=560)
+
+    petrov_versions(tmp_path, edit)
+    assert api.diff_project("petrov", 1, 2).changes == [
+        "П1: духовой шкаф: высота 595 → 600",
+        "П1: духовой шкаф: глубина 567 → 560",
+        "П1: духовой шкаф: ширина ниши 560 → 570",
+    ]
+
+
+def test_diff_puts_the_kit_line_before_the_position_line(home, tmp_path):
+    def edit(d):
+        d["walls"][1]["rows"][0]["modules"].reverse()
+        next(a for a in d["appliances"] if a["type"] == "dishwasher")["module"] = "Н5"
+
+    petrov_versions(tmp_path, edit)
+    assert api.diff_project("petrov", 1, 2).changes == [
+        "Н5: техника мойка → мойка, посудомойка",
+        "Н5: положение Б, нижний, 1 → Б, нижний, 2",
+        "Н6: техника посудомойка → не задано",
+        "Н6: положение Б, нижний, 2 → Б, нижний, 1",
+    ]

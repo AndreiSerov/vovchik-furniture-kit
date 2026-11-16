@@ -1207,7 +1207,7 @@ class PartsGap(BaseModel):
     appliance: str | None = None  # техника, привязанная к месту, по-русски
     under_countertop: bool = False
     # сколько модулей проекта стоит до места: порядок строк текста `kitchen parts`; в JSON не входит
-    position: int = Field(default=0, exclude=True)
+    modules_before: int = Field(default=0, exclude=True)
 
 
 @dataclass
@@ -1325,7 +1325,7 @@ def compute_parts(project: Project, ws: Workshop) -> PartsComputation:
                             width=gap_width(entry),  # дробная ширина — ошибка, как у модуля
                             appliance=", ".join(kinds) or None,
                             under_countertop=entry.under_countertop,
-                            position=len(modules),
+                            modules_before=len(modules),
                         )
                     )
                     continue

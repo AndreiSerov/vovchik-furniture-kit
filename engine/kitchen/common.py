@@ -6,10 +6,10 @@
 смещение на соседней стене его не удлиняет (стык в углу «встык»).
 """
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
 from decimal import ROUND_CEILING, Decimal
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,7 @@ __all__ = [
     "corner_offsets",
     "corner_wall_message",
     "is_tall",
+    "pair_by_model_then_order",
     "row_layouts",
     "row_positions",
     "size_countertop",
@@ -384,3 +385,31 @@ def compute_common(project: Project, ws: Workshop, hardware: dict[str, int]) -> 
             )
         )
     return items
+
+
+def pair_by_model_then_order(
+    mine: list[Any], theirs: list[Any], model_of: Callable[[Any], object]
+) -> tuple[list[tuple[Any, Any]], list[Any], bool]:
+    """Пары приборов одного вида: сначала по модели (без учёта регистра), затем по порядку. Единственное правило
+    пар для «Состава техники» (проект и бриф) и для `diff` (две версии проекта). Возвращает пары по порядку `mine`
+    (без пары — `None`), непарные из `theirs` и признак, что пары по порядку были."""
+    items = list(theirs)
+    pairs: list[tuple[Any, Any]] = []
+    rest: list[Any] = []
+    for a in mine:
+        model = model_of(a)
+        hit = next(
+            (b for b in items if model and model_of(b) and str(model).lower() == str(model_of(b)).lower()),
+            None,
+        )
+        if hit is not None:
+            items.remove(hit)
+            pairs.append((a, hit))
+        else:
+            rest.append(a)
+            pairs.append((a, None))
+    by_order = bool(rest and items)
+    for a in rest:
+        index = next(i for i, (x, _) in enumerate(pairs) if x is a)
+        pairs[index] = (a, items.pop(0) if items else None)
+    return pairs, items, by_order

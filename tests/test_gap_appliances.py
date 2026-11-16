@@ -341,3 +341,19 @@ def test_fridge_not_in_kitchen_and_built_in_gives_only_the_not_in_kitchen_findin
     save_brief(home, {"wall": "none", "built_in": True, "width_mm": 600})
     found = codes(home, fridge_project(home, 620))
     assert "fridge_not_in_kitchen" in found and "gap_built_in" not in found
+
+
+def test_free_standing_fridge_in_a_gap_is_not_fridge_in_module(home):
+    save_brief(home, {"built_in": False, "width_mm": 600, "wall": "A"})
+    assert "fridge_in_module" not in codes(home, fridge_project(home, 620))
+
+
+def test_fridge_wall_none_with_spaces_is_not_in_kitchen(home):
+    save_brief(home, {"wall": " none ", "width_mm": 600})
+    assert "fridge_not_in_kitchen" in codes(home, fridge_project(home, 620))
+
+
+def test_fridge_not_in_kitchen_wins_over_free_standing_in_a_module(home):
+    save_brief(home, {"wall": "none", "built_in": False, "width_mm": 600})
+    found = codes(home, fridge_in_module_project(home))
+    assert "fridge_not_in_kitchen" in found and "fridge_in_module" not in found

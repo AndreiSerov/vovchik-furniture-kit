@@ -247,7 +247,7 @@ def _render_parts(r: api.PartsResult) -> str:
         return f"  {g.label} — пустое место {g.width} мм{what}{tail}"
 
     for i, m in enumerate(r.modules):
-        while gap is not None and gap.position <= i:  # пустые места — на своём месте в порядке проекта
+        while gap is not None and gap.modules_before <= i:  # пустые места — на своём месте в порядке проекта
             lines.append(gap_line(gap))
             gap = next(gaps, None)
         lines.append(f"  Модуль {m.module} ({m.template}) — {len(m.parts)} дет.")

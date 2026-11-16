@@ -18,6 +18,7 @@ from kitchen.common import (
     corner_offsets,
     corner_wall_message,
     is_tall,
+    pair_by_model_then_order,
     row_layouts,
     row_positions,
 )
@@ -217,17 +218,9 @@ def _pair(project: Project, brief: list[BriefAppliance], ws: Workshop, found: li
     for type_ in dict.fromkeys([b.type for b in brief] + [a.type for a in project.appliances]):
         items = [b for b in brief if b.type == type_]
         mine = [a for a in project.appliances if a.type == type_]
-        rest = []
-        for a in mine:
-            hit = next((b for b in items if a.model and b.model and a.model.lower() == b.model.lower()), None)
-            if hit:
-                items.remove(hit)
-                paired[id(a)] = hit
-            else:
-                rest.append(a)
-        by_order = bool(rest and items)
-        for a in rest:
-            paired[id(a)] = items.pop(0) if items else None
+        pairs, items, by_order = pair_by_model_then_order(mine, items, lambda i: i.model)
+        for a, hit in pairs:
+            paired[id(a)] = hit
         if by_order and (len([b for b in brief if b.type == type_]) > 1 or len(mine) > 1):
             found.append(
                 Finding(

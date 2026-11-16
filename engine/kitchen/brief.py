@@ -80,9 +80,8 @@ class BriefAppliance:
 
     type: str
     label: str  # для сообщений: «посудомойка 45 см Bosch SMV»
-    built_in: (
-        bool | None
-    )  # `None` — в брифе поля нет: такой прибор не считается ни встраиваемым, ни отдельностоящим
+    # `None` — в брифе поля нет: такой прибор не считается ни встраиваемым, ни отдельностоящим
+    built_in: bool | None
     model: str | None = None
     width: int | None = None
     height: int | None = None
@@ -144,9 +143,8 @@ def appliances(brief: dict[str, Any]) -> list[BriefAppliance]:
     hood = cb.get(brief, "appliances.hood")
     if isinstance(hood, dict) and hood.get("kind") in HOOD_IN_MODULE:
         label = " ".join(x for x in ("вытяжка", hood.get("model")) if x)
-        found.append(
-            replace(_appliance(hood, "hood", label), built_in=True)
-        )  # вытяжка в модуль — встраиваемая
+        # вытяжка в модуль — встраиваемая
+        found.append(replace(_appliance(hood, "hood", label), built_in=True))
     return found
 
 

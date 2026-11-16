@@ -21,7 +21,13 @@ from kitchen.assembly import AssemblyModule, build_assembly
 from kitchen.assembly_pdf import AssemblyPageLayout, layout, write_assembly
 from kitchen.checks import Finding, duplicate_labels
 from kitchen.checks import check_project as run_checks
-from kitchen.common import CommonItem, CountertopSize, compute_common, size_countertop
+from kitchen.common import (
+    CommonItem,
+    CountertopSize,
+    compute_common,
+    pair_by_model_then_order,
+    size_countertop,
+)
 from kitchen.cutting import MaterialCut, cut_parts, kerf_warnings
 from kitchen.cutting_pdf import write_cutting_map
 from kitchen.drilling import DrillingCheck, reconcile
@@ -720,10 +726,10 @@ def _changes(before: dict, after: dict, prefix: str = "") -> list[str]:
 
 
 _APPLIANCE_FIELDS = {
-    "width": "ширина",
+    "width": _DIFF_NAMES["width"],
     "model": "модель",
-    "height": "высота",
-    "depth": "глубина",
+    "height": _DIFF_NAMES["height"],
+    "depth": _DIFF_NAMES["depth"],
     "niche_width": "ширина ниши",
     "niche_height": "высота ниши",
     "niche_depth": "глубина ниши",
@@ -731,13 +737,15 @@ _APPLIANCE_FIELDS = {
 
 
 def _appliance_name(item: dict) -> str:
-    return APPLIANCE_NAMES.get(item["type"], item["type"]) if isinstance(item["type"], str) else "?"
+    return APPLIANCE_NAMES.get(item["type"], item["type"])
 
 
 def _appliances_of(data: dict) -> dict[str, list[dict]]:
     """Техника проекта по меткам модулей и мест."""
     found: dict[str, list[dict]] = {}
     for item in data.get("appliances", []):
+        if not isinstance(item["type"], str):
+            raise TypeError("вид техники не строка")
         found.setdefault(item["module"], []).append(item)
     return found
 
@@ -748,16 +756,19 @@ def _kit(items: list[dict] | None) -> str:
 
 
 def _appliance_changes(before: list[dict] | None, after: list[dict] | None) -> list[str]:
-    """Поля прибора одного вида, который стоит на месте в обеих версиях: приборы вида идут парами по порядку."""
+    """Поля прибора одного вида, который стоит на месте в обеих версиях: пары — как в «Составе техники»
+    (сначала по модели, затем по порядку; `common.pair_by_model_then_order`)."""
     changes = []
     kinds = [i["type"] for i in [*(before or []), *(after or [])]]
     for kind in dict.fromkeys(kinds):
-        pairs = zip(
+        pairs, _, _ = pair_by_model_then_order(
             [i for i in before or [] if i["type"] == kind],
             [i for i in after or [] if i["type"] == kind],
-            strict=False,
+            lambda i: i.get("model"),
         )
         for old, new in pairs:
+            if new is None:
+                continue
             for key, name in _APPLIANCE_FIELDS.items():
                 if old.get(key) != new.get(key):
                     changes.append(
