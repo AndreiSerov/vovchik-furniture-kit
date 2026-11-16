@@ -30,6 +30,11 @@ def test_a_call_ends_at_an_unquoted_shell_separator_only():
     assert [c.strip() for c in calls] == ['log x "a; b" --kind done', "status"]
 
 
+def test_a_call_ends_at_a_closing_paren_outside_quotes():
+    code = '$(kitchen status x) и kitchen log y "t)" --kind next'
+    assert [c.strip() for c in skill_lint.kitchen_calls(code)] == ["status x", 'log y "t)" --kind next']
+
+
 # --- ревью 31: сообщение выводится из константы ---------------------------------
 
 
@@ -67,6 +72,11 @@ def test_question_path_with_an_unknown_item_field_is_an_error(tmp_path):
     folder = skill_with_question(tmp_path, "`appliances.items[].nope`")
     message = "kitchen-brief: references/questions.md: строка 1: поле `appliances.items[].nope` не из brief_schema.json"
     assert skill_lint.check_question_paths("kitchen-brief", folder) == [message]
+
+
+def test_question_path_with_a_star_item_field_is_known(tmp_path):
+    folder = skill_with_question(tmp_path, "`appliances.items[].*`")
+    assert skill_lint.check_question_paths("kitchen-brief", folder) == []
 
 
 def test_real_questions_use_list_item_paths_and_they_are_checked():

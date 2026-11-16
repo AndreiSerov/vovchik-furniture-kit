@@ -59,6 +59,27 @@ def test_not_found_is_retried_once_in_the_nominative_in_every_working_skill():  
         assert "не нашёл и так" in step1, name
 
 
+def test_project_step_4_exit_code_2_does_not_route_to_step_6():  # ревью 48 TG4
+    line = next(x for x in numbered_steps("kitchen-project")[4].splitlines() if "Код выхода 2" in x)
+    assert "шаг 6 не нужен" in line
+
+
+def test_project_step_4_exit_code_2_stops_after_three_failures_and_does_not_mention_a_missing_order():  # D7
+    line = next(x for x in numbered_steps("kitchen-project")[4].splitlines() if "Код выхода 2" in x)
+    assert "Три неудачи подряд — покажи сообщение мастеру и остановись" in line
+    assert "нет заказа" not in line
+
+
+def test_project_step_5_sends_the_first_project_rejection_to_step_6():  # D6
+    step5 = numbered_steps("kitchen-project")[5]
+    assert "«Проект отклонён, текущая версия не изменена»" in step5
+    assert "«Проект отклонён.»" in step5 and "шаг 6" in step5
+
+
+def test_project_step_10_nothing_stale_has_no_recompute_offer():  # ревью 48 TG5
+    assert "скажи только «Устаревшего нет», без «Пересчитать»" in numbered_steps("kitchen-project")[10]
+
+
 # --- kitchen-estimate -----------------------------------------------------------
 
 
@@ -80,6 +101,26 @@ def test_estimate_step_8_knows_every_stale_kind_outside_money():  # ревью 2
     for label, word in words.items():
         assert word in step8, label
     assert "пересчёт — kitchen-project" in step8
+
+
+def test_estimate_step_8_does_not_offer_the_drilling_map():  # ревью 48 TG6
+    assert "Карту присадки назови строкой как есть, не предлагай" in numbered_steps("kitchen-estimate")[8]
+
+
+def test_estimate_step_8_drilling_map_rule_matches_kitchen_production():  # D5: показать строку, не запускать, не предлагать
+    line = next(x for x in numbered_steps("kitchen-estimate")[8].splitlines() if "Карту присадки назови" in x)
+    assert "не предлагай и не запускай" in line
+    assert "«Устарели документы цеха; пересчёт — kitchen-production»" in line  # для остальных четырёх
+    production = skill_text("kitchen-production")
+    assert "но не запускай и не предлагай" in production
+
+
+def test_estimate_step_8_quote_bullet_is_one_rule():  # D4: не просит срок и не говорит «остались»
+    line = next(x for x in numbered_steps("kitchen-estimate")[8].splitlines() if "Строки про КП" in x)
+    assert "они остались" not in line
+    assert line.count("срок спроси заново") == 1
+    assert "Сразу после шага 7" in line and "строк про КП нет" in line
+    assert "Мастер срока не назвал — КП не считай, запиши `next` «назвать срок КП»" in line
 
 
 def test_estimate_without_a_term_records_what_to_do_and_mock_refusal_records_the_replacement():  # ревью 29
@@ -110,12 +151,14 @@ def test_brief_step_1_has_the_standard_ready_sign_and_keeps_brief_json_out_of_th
     assert "в рабочей папке заказа, не в папке скилла" in step1
 
 
-def test_brief_message_to_the_client_has_at_most_two_questions():  # ревью 43: черновик раздела 4
+def test_parse_mode_section_4_stays_one_message_and_the_two_question_limit_is_for_interview_and_quick_survey():
+    # ревью 48 B3: в разборе раздел 4 — одно сообщение, лимит «2 в сообщении» — правило интервью и быстрого опроса
     rules = brief_text("SKILL.md").split("## Правила поведения")[1].split("\n## ")[0]
     limit = next(x for x in rules.splitlines() if x.startswith("- **Лимит вопросов."))
-    assert "не больше двух" in limit and "в черновике раздела 4" in limit
+    assert "в черновике раздела 4" not in limit and "по два" not in limit
     section4 = brief_text("assets", "brief_template.md").split("## 4.")[1].split("\n## ")[0]
-    assert "не больше двух вопросов" in section4
+    assert "несколько сообщений" not in section4 and "не больше двух" not in section4
+    assert "В одном сообщении не больше двух вопросов" in brief_text("SKILL.md").split("## Интервью")[1]
 
 
 def test_brief_quick_end_keeps_the_section_7_rule_in_one_place_and_does_not_save_twice():  # ревью 44

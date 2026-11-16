@@ -30,9 +30,8 @@ def test_brief_save_text_has_banner_and_counts(home, brief_file):
     lines = r.output.strip().splitlines()
     assert lines[0] == MOCK_BANNER and lines[-1] == MOCK_BANNER
     assert "Заказ 2026-001-sergeev заведён, бриф сохранён." in r.output
-    assert (
-        "обязательных полей: 4" in r.output and "рисков: 12" in r.output
-    )  # было 10: тикет 30 добавил вопросы о холодильнике
+    # было 10: тикет 30 добавил вопросы о холодильнике
+    assert "обязательных полей: 4" in r.output and "рисков: 12" in r.output
 
 
 def test_brief_save_json_is_the_api_result(home, brief_file):
