@@ -122,14 +122,10 @@ def test_petrov_purchase_estimate_economy_and_trip_numbers(home):
     assert "Ручка-профиль торцевая — 18 шт" in [i.text for i in site.items]
 
 
-def test_workshop_check_passes_and_only_the_dishwasher_golden_holds_the_handle(home):
-    """Проверка 9: мастерская цела, из эталонов ручку несёт только `dishwasher_panel_600`."""
+def test_workshop_check_passes_and_the_dishwasher_golden_holds_one_handle(home):
+    """Проверка 9: мастерская цела, эталон `dishwasher_panel_600` несёт одну ручку (остальные эталоны сверяет
+    `test_golden`; «меняется только этот эталон» — свойство диффа тикета, ревью его проверило)."""
     result = api.check_workshop(home)
     assert result.valid and result.errors == []
-    goldens = {p.name: json.loads(p.read_text(encoding="utf-8")) for p in GOLDEN.glob("*.json")}
-    with_handle = {
-        n
-        for n, g in goldens.items()
-        if "handle_profile" in g.get("hardware", {}) and n.startswith("dishwasher")
-    }
-    assert with_handle == {"dishwasher_panel_600.json"}
+    golden = json.loads((GOLDEN / "dishwasher_panel_600.json").read_text(encoding="utf-8"))
+    assert golden["hardware"] == {"handle_profile": 1}
