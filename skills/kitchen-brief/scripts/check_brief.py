@@ -739,6 +739,13 @@ def unknown_fields(brief: dict, schema: dict) -> list[str]:
     return out
 
 
+def enum_text(value: Any) -> str:
+    """Значение для сравнения с перечнем: дробное без дробной части равно целому («720.0» — «720»)."""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
 def enum_errors(brief: dict, schema: dict) -> list[str]:
     """Значение enum-поля не из перечня схемы; у полей-объектов — ключи вида «enum: a, b»."""
     out = []
@@ -748,7 +755,7 @@ def enum_errors(brief: dict, schema: dict) -> list[str]:
             if is_empty(value):
                 continue
             path = f"{sec_key}.{name}"
-            if spec.get("type") == "enum" and str(value) not in spec["values"]:
+            if spec.get("type") == "enum" and enum_text(value) not in spec["values"]:
                 out.append(f"{path}: {value!r} не из перечня {', '.join(spec['values'])}")
             elif spec.get("type") == "object" and isinstance(value, dict):
                 for key, desc in spec.get("item", {}).items():
@@ -756,7 +763,7 @@ def enum_errors(brief: dict, schema: dict) -> list[str]:
                         continue
                     listed = re.sub(r"\([^)]*\)", "", str(desc)[6:]).split("—")[0]
                     allowed = [v.strip() for v in listed.split(",")]
-                    if str(value[key]) not in allowed:
+                    if enum_text(value[key]) not in allowed:
                         out.append(f"{path}.{key}: {value[key]!r} не из перечня {', '.join(allowed)}")
     return out
 

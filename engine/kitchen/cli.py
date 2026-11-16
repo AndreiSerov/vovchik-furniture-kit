@@ -266,7 +266,7 @@ def _render_parts(r: api.PartsResult) -> str:
     for edge_id, e in r.edges.items():
         lines.append(
             f"Кромка {edge_id}: чистая {e.clean_m:.3f} м, с припуском "
-            f"{e.with_allowance_m:.3f} м, к закупке {e.purchase_m:.1f} м"
+            f"{e.with_allowance_m:.3f} м, к закупке {e.purchase_m:.{r.purchase_digits}f} м"
         )
     lines.append(f"Фасады: {r.facade_area:.4f} м²")
     for color, area in r.facade_area_by_color.items():
@@ -313,7 +313,7 @@ def _render_edges(r: api.EdgingResult) -> str:
     for edge_id, e in r.edges.items():
         lines.append(
             f"Кромка {edge_id}: чистая {e.clean_m:.3f} м, с припуском {e.with_allowance_m:.3f} м, "
-            f"к закупке {e.purchase_m:.3f} м"
+            f"к закупке {e.purchase_m:.{r.purchase_digits}f} м"
         )
     if r.output:
         lines.append(f"Карта кромления PDF: {r.output.file} (версия проекта {r.output.source_version})")
@@ -758,7 +758,7 @@ def _render_production(r: api.ProductionResult) -> str:
     for edge_id, edge in r.edging.edges.items():
         lines.append(
             f"Кромка {edge_id}: чистая {edge.clean_m} м, с припуском "
-            f"{edge.with_allowance_m} м, к закупке {purchase_edges[edge_id]} м"
+            f"{edge.with_allowance_m} м, к закупке {purchase_edges[edge_id]:.{r.edging.purchase_digits}f} м"
         )
     for shop in r.purchase.shops:
         lines.append(f"Магазин {shop.name}: {shop.total:.2f} ₽")
@@ -839,7 +839,7 @@ def _dumps(data: object) -> str:
 
 
 def _rub(n: float) -> str:
-    return f"{n:,.0f}".replace(",", " ")
+    return api.group_digits(round(n))
 
 
 def _render_estimate(r: api.QuickEstimate) -> str:
