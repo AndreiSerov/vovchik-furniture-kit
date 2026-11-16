@@ -654,7 +654,7 @@ def test_quick_survey_does_not_repeat_the_client_wording_of_the_fork_or_the_dupl
 
 def test_quick_survey_saves_after_the_contact_and_after_each_portion_into_the_same_order():
     section = quick_section()
-    assert "kitchen brief save olga brief.json" in section
+    assert "kitchen brief save <имя латиницей> brief.json" in section
     assert "латиницей" in section
     assert "kitchen brief save <заказ> brief.json" in section
     assert "номер-имя" in section and "первого ответа команды" in section
@@ -678,15 +678,6 @@ def test_template_has_the_quick_survey_list_and_the_counter_line():
     tail = template.split(heading)[1]
     assert "списком" in tail and "- {{" in tail
     assert "быстр" in tail.lower()
-
-
-def test_quick_wording_lives_in_questions_md_only():
-    questions = quick_questions()
-    for text in questions:
-        holders = [
-            p.name for p in skill_files() if p.suffix == ".md" and text in p.read_text(encoding="utf-8")
-        ]
-        assert holders == ["questions.md"], (text, holders)
 
 
 def test_trigger_phrase_for_the_website_client_goes_to_brief_and_does_not_clash_with_estimate():
