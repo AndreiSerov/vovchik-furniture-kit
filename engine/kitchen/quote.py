@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from kitchen.common import size_countertop
 from kitchen.economy import EconomyVariant
 from kitchen.errors import InputError, OrderError
+from kitchen.format import group_digits
 from kitchen.models import Master, Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
@@ -103,7 +104,7 @@ class QuoteBody(BaseModel):
 
 def money(value: int) -> str:
     """222000 -> «222 000 ₽»."""
-    return f"{value:,}".replace(",", " ") + " ₽"
+    return group_digits(value) + " ₽"
 
 
 def percent(share: float) -> str:

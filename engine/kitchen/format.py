@@ -6,8 +6,9 @@
 
 import re
 import unicodedata
+from decimal import Decimal
 
-__all__ = ["label_key", "label_order", "num", "plural"]
+__all__ = ["group_digits", "label_key", "label_order", "num", "plural", "purchase_digits"]
 
 _LOOKALIKE = str.maketrans("ABCEHKMOPTXYabcehkmoptxy", "АВСЕНКМОРТХУавсенкмортху")  # латиница → кириллица
 
@@ -38,3 +39,15 @@ def num(value: float, digits: int | None = None) -> int | float:
     if float(value).is_integer():
         return int(value)
     return value if digits is None else round(value, digits)
+
+
+def group_digits(value: int) -> str:
+    """222000 -> «222 000»: пробел по разрядам, без знака рубля (КП и вилка цены)."""
+    return f"{value:,}".replace(",", " ")
+
+
+def purchase_digits(step_m: float) -> int:
+    """Знаков после точки у кромки «к закупке»: один, если шаг округления не мельче 0.1 м,
+    иначе столько, сколько знаков у шага (0.05 м — два)."""
+    exponent = Decimal(str(step_m)).normalize().as_tuple().exponent
+    return max(1, -exponent) if isinstance(exponent, int) else 1

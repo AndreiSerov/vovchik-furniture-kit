@@ -63,7 +63,7 @@ def test_every_edged_part_and_totals_on_multipage_pdf(home):
         assert edge_id in text
         assert f"{total.clean_m:.3f}" in text
         assert f"{total.with_allowance_m:.3f}" in text
-        assert f"{total.purchase_m:.3f}" in text
+        assert f"{total.purchase_m:.1f}" in text  # ticket 58: «к закупке» с одним знаком
 
 
 def test_empty_edging_and_non_mock_pdf(home, base_door_project):

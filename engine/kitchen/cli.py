@@ -313,7 +313,7 @@ def _render_edges(r: api.EdgingResult) -> str:
     for edge_id, e in r.edges.items():
         lines.append(
             f"Кромка {edge_id}: чистая {e.clean_m:.3f} м, с припуском {e.with_allowance_m:.3f} м, "
-            f"к закупке {e.purchase_m:.3f} м"
+            f"к закупке {e.purchase_m:.{r.purchase_digits}f} м"
         )
     if r.output:
         lines.append(f"Карта кромления PDF: {r.output.file} (версия проекта {r.output.source_version})")

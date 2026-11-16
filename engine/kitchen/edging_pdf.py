@@ -31,6 +31,7 @@ def write_edging_map(
     parts: list[Part],
     totals: dict[str, EdgeTotals],
     *,
+    purchase_digits: int,
     order: str,
     version: int | None,
     mock: bool,
@@ -45,7 +46,7 @@ def write_edging_map(
         for p in parts
     ] or [("Нет деталей с кромкой", "", "", "", "", "")]
     summaries = [
-        (edge, "", f"{e.clean_m:.3f}", f"{e.with_allowance_m:.3f}", f"{e.purchase_m:.3f}", "")
+        (edge, "", f"{e.clean_m:.3f}", f"{e.with_allowance_m:.3f}", f"{e.purchase_m:.{purchase_digits}f}", "")
         for edge, e in sorted(totals.items())
     ] or [("Нет кромки", "", "", "", "", "")]
     sections = [

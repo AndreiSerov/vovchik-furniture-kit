@@ -36,7 +36,7 @@ from kitchen.economy import EconomyLine, EconomyVariant, apply_rule
 from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError, ProjectFileError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
-from kitchen.format import num, plural
+from kitchen.format import group_digits, num, plural, purchase_digits
 from kitchen.geometry import PURPOSE_RU
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
 from kitchen.parts import (
@@ -1453,10 +1453,15 @@ class EdgingResult(Result):
     edges: dict[str, EdgeTotals]
     warnings: list[str]
     output: OutputInfo | None = None
+    purchase_digits: int = Field(
+        default=1, exclude=True
+    )  # знаков у «к закупке» по шагу округления; в JSON не идёт
 
 
-def _edging(parts: PartsResult) -> EdgingResult:
+def _edging(parts: PartsResult, home: Path | None = None) -> EdgingResult:
+    step = load_workshop(home).construction.edging.purchase_rounding.step_m
     return EdgingResult(
+        purchase_digits=purchase_digits(step),
         source=parts.source,
         parts=[p for m in parts.modules for p in m.parts if any(p.edges.values())],
         edges=parts.edges,
@@ -1467,11 +1472,11 @@ def _edging(parts: PartsResult) -> EdgingResult:
 
 
 def edges_from_order(order: str, home: Path | None = None) -> EdgingResult:
-    return _edging(parts_from_order(order, home))
+    return _edging(parts_from_order(order, home), home)
 
 
 def edges_from_project(path: Path, home: Path | None = None) -> EdgingResult:
-    return _edging(parts_from_project(path, home))
+    return _edging(parts_from_project(path, home), home)
 
 
 def edges_and_save(order: str, home: Path | None = None, on: date | None = None) -> EdgingResult:
@@ -1487,6 +1492,7 @@ def edges_and_save(order: str, home: Path | None = None, on: date | None = None)
             path,
             result.parts,
             result.edges,
+            purchase_digits=result.purchase_digits,
             order=result.source.order,
             version=result.source.version,
             mock=result.mock,
@@ -2225,6 +2231,7 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
                 path,
                 edging.parts,
                 edging.edges,
+                purchase_digits=edging.purchase_digits,
                 order=source.order,
                 version=source.version,
                 mock=edging.mock,
@@ -2518,6 +2525,8 @@ class QuickEstimate(Result):
     total_low: int
     total_high: int
     rounding: str  # как округлено, словами
+    total_low_text: str  # «306 000»: готовая строка для скилла
+    total_high_text: str
 
 
 def quick_estimate(meters: float, home: Path | None = None) -> QuickEstimate:
@@ -2529,13 +2538,17 @@ def quick_estimate(meters: float, home: Path | None = None) -> QuickEstimate:
     low, high = pricing.quick_estimate_per_m
     rule = pricing.price_rounding
     exact = Decimal(str(meters))  # через строку: без шума плавающей запятой
+    total_low = rule.apply(exact * Decimal(str(low)))
+    total_high = rule.apply(exact * Decimal(str(high)))
     return QuickEstimate(
         meters=num(meters),
         per_meter_low=num(low),
         per_meter_high=num(high),
-        total_low=rule.apply(exact * Decimal(str(low))),
-        total_high=rule.apply(exact * Decimal(str(high))),
+        total_low=total_low,
+        total_high=total_high,
         rounding=rule.describe(),
-        mock=workshop.is_mock,
-        mock_files=workshop.mock_files,
+        total_low_text=group_digits(total_low),
+        total_high_text=group_digits(total_high),
+        mock=pricing.mock,  # вилка зависит только от pricing.yaml (решение мастера, тикет 58)
+        mock_files=["pricing.yaml"] if pricing.mock else [],
     )
