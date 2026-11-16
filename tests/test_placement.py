@@ -214,6 +214,44 @@ def test_two_lower_corner_modules_in_one_corner(home):
     ]
 
 
+def test_corner_modules_at_both_ends_of_a_row_leading_to_one_wall(home):
+    # тикет 54 (6): Н1 первый (начало A к концу Б), Н3 последний (конец A к началу Б) — разные углы, одна стена
+    walls = [
+        wall(
+            "A",
+            3300,
+            [
+                corner("Н1", "base_corner", 1050, "Б"),
+                mod("Н2", "base_door", 1200),
+                corner("Н3", "base_corner", 1050, "Б"),
+            ],
+        ),
+        wall("Б", 1800, [mod("Н5", "base_door", 1200)]),
+    ]
+    assert placement_error(home, write_data(walls)) == [
+        "Стена A: угловые модули Н1 и Н3 нижнего ряда стоят на разных концах ряда, но оба угла ведут к Б."
+    ]
+
+
+def test_upper_corner_modules_at_both_ends_of_a_row_name_the_upper_row(home):
+    walls = [
+        wall(
+            "A",
+            3000,
+            [mod("Н1", "base_door", 3000)],
+            [
+                corner("В1", "wall_corner", 600, "Б"),
+                mod("В2", "wall_door", 1800),
+                corner("В3", "wall_corner", 600, "Б"),
+            ],
+        ),
+        wall("Б", 1800, [mod("Н5", "base_door", 1800)]),
+    ]
+    assert placement_error(home, write_data(walls)) == [
+        "Стена A: угловые модули В1 и В3 верхнего ряда стоят на разных концах ряда, но оба угла ведут к Б."
+    ]
+
+
 def test_corner_module_in_the_middle_of_a_row(home):
     walls = [
         wall(
