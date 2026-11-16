@@ -71,7 +71,8 @@ _SCHEMA_V3 = """
 ALTER TABLE project_versions ADD COLUMN brief_id INTEGER
 """
 
-# auto — запись журнала, которую программа пишет сама («бриф сохранён»); «Дальше» её не считает за «сделано»
+# auto — запись журнала, которую программа пишет сама («бриф сохранён», с тикета 57 — импорт, смета, КП, производство);
+# «Дальше» сбрасывают все `done`, кроме авто «бриф сохранён»
 _SCHEMA_V4 = """
 ALTER TABLE log ADD COLUMN auto INTEGER NOT NULL DEFAULT 0;
 UPDATE log SET auto = 1 WHERE kind = 'done' AND text = 'бриф сохранён'

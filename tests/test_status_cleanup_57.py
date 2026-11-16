@@ -258,3 +258,49 @@ def test_brief_without_phone_leaves_order_phone_empty(home):
     path.write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
     api.brief_save("petrov", path, home)
     assert [r[1] for r in _orders(home)] == [""]
+
+
+def test_quote_only_asks_for_estimate_before_workshop_documents(home):
+    _v1(home)
+    api.quote_and_save(ORDER, 20, home)
+    assert _step(home).text == "Смета: kitchen estimate 2026-047-petrov."
+
+
+@pytest.mark.parametrize(
+    ("save", "compute", "prefix"),
+    [
+        (lambda h: api.estimate_and_save(ORDER, h), "estimate_from_order", "смета"),
+        (lambda h: api.production_and_save(ORDER, h), "_order_project", "документы цеха"),
+    ],
+)
+def test_refused_estimate_and_production_write_no_entry(home, monkeypatch, save, compute, prefix):
+    _v1(home)
+    original = getattr(api, compute)
+
+    def stale_after_compute(*args, **kwargs):
+        result = original(*args, **kwargs)
+        _import_v2(home)
+        return result
+
+    monkeypatch.setattr(api, compute, stale_after_compute)
+    with pytest.raises(OrderError, match="Изменилась версия проекта"):
+        save(home)
+    assert not [t for t in _done_texts(home) if t.startswith(prefix)]
+
+
+def test_failed_done_entry_rolls_back_the_outputs(home, monkeypatch):
+    _v1(home)
+    original = api._insert_log
+
+    def failing(conn, pk, kind, text, version, auto=False):
+        if text.startswith("КП посчитано"):
+            raise sqlite3.OperationalError("disk I/O error")
+        return original(conn, pk, kind, text, version, auto)
+
+    monkeypatch.setattr(api, "_insert_log", failing)
+    with pytest.raises(sqlite3.OperationalError):
+        api.quote_and_save(ORDER, 20, home)
+    conn = sqlite3.connect(home / "orders" / "kitchen.db")
+    kinds = {r[0] for r in conn.execute("SELECT kind FROM outputs")}
+    assert "quote_pdf" not in kinds
+    assert not (home / "orders" / ORDER / "out" / "quote.pdf").exists()
