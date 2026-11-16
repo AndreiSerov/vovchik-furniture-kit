@@ -16,6 +16,8 @@ import yaml
 DEFAULT_ROOT = Path(__file__).resolve().parents[2] / "skills"
 TRIGGERS_FILE = "triggers.json"
 ALLOWED_FRONTMATTER = {"name", "description"}
+MIN_PHRASES = 10  # спека 6.6: в наборе не меньше 10 фраз
+MIN_PHRASES_PER_SKILL = 2  # и у каждого скилла не меньше двух
 
 # Дерево команд: группа — словарь подкоманд, команда — множество её флагов.
 Tree = dict[str, "dict | frozenset[str]"]
@@ -330,8 +332,7 @@ SHAPE_REQUIREMENTS: dict[str, list[tuple[str, Shape]]] = {
     ],
     "kitchen-order": [STATUS, STALE],
 }
-# kitchen-order — до тикета 31.
-SHAPE_EXEMPT = {"kitchen-order"}
+SHAPE_EXEMPT: set[str] = set()
 
 
 def check_shape(skill: str, lines: list[str]) -> list[str]:
@@ -349,7 +350,10 @@ def normalise_phrase(text: str) -> str:
 
 
 def check_triggers(path: Path, skills: set[str]) -> list[str]:
-    """Набор фраз `{"phrases": [{"text", "skill"}]}`. Нет файла или пустой набор — проходит."""
+    """Набор фраз `{"phrases": [{"text", "skill"}]}`: не меньше 10 и не меньше двух на скилл.
+
+    Нет файла — проходит (так проверяются отдельные скиллы-примеры); пустой набор — нет.
+    """
     name = path.name
     if not path.is_file():
         return []
@@ -364,10 +368,8 @@ def check_triggers(path: Path, skills: set[str]) -> list[str]:
         return [*problems, f'{name}: строка 1: нужен объект {{"phrases": [...]}}']
     phrases = data["phrases"]
     seen: dict[str, int] = {}
-    covered = set()
+    per_skill: dict[str, int] = {}
     for i, item in enumerate(phrases, 1):
-        if isinstance(item, dict) and isinstance(item.get("skill"), str):
-            covered.add(item["skill"])
         ok = (
             isinstance(item, dict)
             and set(item) == {"text", "skill"}
@@ -383,11 +385,19 @@ def check_triggers(path: Path, skills: set[str]) -> list[str]:
             problems.append(
                 f"{name}: фраза {i}: дубль фразы {seen[key]} «{item['text']}» (скилл {item['skill']})"
             )
+        else:
+            per_skill[item["skill"]] = per_skill.get(item["skill"], 0) + 1
         seen.setdefault(key, i)
         if item["skill"] not in skills:
             problems.append(f"{name}: фраза {i}: неизвестный скилл «{item['skill']}»")
-    if phrases:
-        problems.extend(f"{s}: нет ни одной фразы в {name}" for s in sorted(skills - covered))
+    total = sum(per_skill.values())
+    if total < MIN_PHRASES:
+        problems.append(f"{name}: фраз {total}, нужно не меньше {MIN_PHRASES}")
+    for skill in sorted(skills):
+        if per_skill.get(skill, 0) == 0:
+            problems.append(f"{skill}: нет ни одной фразы в {name}")
+        elif per_skill[skill] < MIN_PHRASES_PER_SKILL:
+            problems.append(f"{skill}: одна фраза в {name}, нужно не меньше двух")
     return problems
 
 

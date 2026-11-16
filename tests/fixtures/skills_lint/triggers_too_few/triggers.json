@@ -1,0 +1,40 @@
+{
+  "phrases": [
+    {
+      "text": "Запасная фраза kitchen-bad 0",
+      "skill": "kitchen-bad"
+    },
+    {
+      "text": "Запасная фраза kitchen-bad 1",
+      "skill": "kitchen-bad"
+    },
+    {
+      "text": "Запасная фраза kitchen-bad 2",
+      "skill": "kitchen-bad"
+    },
+    {
+      "text": "Запасная фраза kitchen-bad 3",
+      "skill": "kitchen-bad"
+    },
+    {
+      "text": "Запасная фраза kitchen-bad 4",
+      "skill": "kitchen-bad"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 0",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 1",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 2",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 3",
+      "skill": "kitchen-other"
+    }
+  ]
+}

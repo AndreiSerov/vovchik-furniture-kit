@@ -1,5 +1,44 @@
 {
   "phrases": [
-    {"text": "Составь бриф", "skill": "kitchen-other"}
+    {
+      "text": "Составь бриф",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 0",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 1",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 2",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 3",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 4",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 5",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 6",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 7",
+      "skill": "kitchen-other"
+    },
+    {
+      "text": "Запасная фраза kitchen-other 8",
+      "skill": "kitchen-other"
+    }
   ]
 }
