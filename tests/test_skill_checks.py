@@ -100,6 +100,42 @@ def test_kitchen_project_skill_regression_guards():
         assert "Файл не записан" in body
 
 
+def test_kitchen_estimate_skill_has_its_triggers_and_names_the_ticket_commands():
+    root = skill_lint.DEFAULT_ROOT
+    phrases = json.loads((root / "triggers.json").read_text(encoding="utf-8"))["phrases"]
+    mine = {p["text"] for p in phrases if p["skill"] == "kitchen-estimate"}
+    assert mine == {
+        "Посчитай закупку Петрову",
+        "Сколько выйдет кухня Петрова",
+        "Сделай КП Петрову",
+        "А если подешевле?",
+    }
+    body = (root / "kitchen-estimate" / "SKILL.md").read_text(encoding="utf-8")
+    for command in ("status", "check", "purchase", "estimate", "quote", "brief show", "log"):
+        assert f"kitchen {command} " in body, command
+    assert "kitchen estimate <заказ> --economy" in body
+    assert "kitchen quote <заказ> --days N" in body
+    assert "Какой срок изготовления и монтажа вписать в КП, в рабочих днях?" in body
+    assert "клиенту не отправляю; что заменить — MOCKS.md" in body
+    assert "первая строка" not in body.lower()
+
+
+def test_kitchen_estimate_eval_asks_the_term_and_refuses_the_mock_send():
+    path = skill_lint.DEFAULT_ROOT / "kitchen-estimate" / "evals" / "evals.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["skill_name"] == "kitchen-estimate"
+    by_prompt = {case["prompt"]: case for case in data["evals"]}
+    assert len(by_prompt) == 2
+    for case in data["evals"]:
+        assert "scripts/petrov-sandbox" in case["setup"]
+        assert len(case["assertions"]) >= 5
+    quote = next(c for p, c in by_prompt.items() if "«Сделай КП Петрову»" in p)
+    assert any("не вызвана" in a and "quote" in a for a in quote["assertions"])
+    send = next(c for p, c in by_prompt.items() if "«Отправь КП клиенту в телеграм»" in p)
+    assert any("Telegram" in a and "VK" in a for a in send["assertions"])
+    assert "kitchen quote 2026-047-petrov --days 20" in send["setup"]
+
+
 def test_brief_and_order_requirements_work_when_not_exempt(tmp_path, monkeypatch):
     monkeypatch.setattr(skill_lint, "SHAPE_EXEMPT", set())
 
