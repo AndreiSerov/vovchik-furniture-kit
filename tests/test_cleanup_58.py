@@ -267,3 +267,20 @@ def test_parts_and_production_edge_line_follow_the_rounding_step(home):
 def test_rub_grouping_in_quick_estimate_text(home):
     out = runner.invoke(app, ["quick-estimate", "--meters", "3.6"]).output
     assert "  За пог. м: 85 000 – 110 000 ₽" in out
+
+
+def test_production_edge_line_follows_the_rounding_step_with_trailing_zero(home):
+    path = home / "workshop" / "construction.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("вверх до 0.1 м", "вверх до 0.25 м"), encoding="utf-8"
+    )
+    petrov(home)
+    assert "к закупке 51.00 м" in runner.invoke(app, ["production", ORDER]).output
+
+
+def test_quick_estimate_text_rounds_a_fractional_per_meter_price(home):
+    path = home / "workshop" / "pricing.yaml"
+    text = path.read_text(encoding="utf-8").replace("[85000, 110000]", "[85000.6, 110000]")
+    path.write_text(text, encoding="utf-8")
+    out = runner.invoke(app, ["quick-estimate", "--meters", "3.6"]).output
+    assert "  За пог. м: 85 001 – 110 000 ₽" in out

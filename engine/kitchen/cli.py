@@ -758,7 +758,7 @@ def _render_production(r: api.ProductionResult) -> str:
     for edge_id, edge in r.edging.edges.items():
         lines.append(
             f"Кромка {edge_id}: чистая {edge.clean_m} м, с припуском "
-            f"{edge.with_allowance_m} м, к закупке {purchase_edges[edge_id]} м"
+            f"{edge.with_allowance_m} м, к закупке {purchase_edges[edge_id]:.{r.edging.purchase_digits}f} м"
         )
     for shop in r.purchase.shops:
         lines.append(f"Магазин {shop.name}: {shop.total:.2f} ₽")
