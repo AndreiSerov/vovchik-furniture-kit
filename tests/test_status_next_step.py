@@ -38,6 +38,13 @@ def _v1(home):
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
 
 
+def test_stage_is_outputs_after_the_first_saved_output(home):
+    _v1(home)
+    assert api.status(ORDER, home).stage == "Проект"
+    api.estimate_and_save(ORDER, home)
+    assert api.status(ORDER, home).stage == "Выводы"
+
+
 def test_new_order_needs_brief(home):
     api.order_new(ORDER, home=home)
     step = _step(home)

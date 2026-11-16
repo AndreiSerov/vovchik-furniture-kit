@@ -32,10 +32,8 @@ def test_save_with_full_id_creates_order_with_client_from_brief(home, tmp_path):
     assert api.order_show("2026-047").order.client == "Сергей"
     assert r.mock is True
     # счётчики эталонного брифа Сергея, как их считает check_brief.py
-    assert (r.missing_required, r.conflicts) == (
-        4,
-        12,
-    )  # было 10: тикет 30 добавил fridge_place и over_fridge
+    # было 10: тикет 30 добавил fridge_place и over_fridge
+    assert (r.missing_required, r.conflicts) == (4, 12)
     assert len(r.check["conflicts"]) == 12 and r.check["unknown_fields"] == []
 
 
@@ -125,9 +123,8 @@ def test_resave_replaces_current_brief(home, tmp_path):
     api.brief_save("2026-047-sergeev", _brief(tmp_path, second, "second.json"))
     shown = api.brief_show("sergeev")
     assert shown.brief["budget"]["amount_rub"]["value"] == 900000
-    assert (
-        shown.check["summary"]["conflicts"] < 12
-    )  # было 10 (тикет 30: +2 вопроса про холодильник); бюджет вырос: часть замечаний ушла
+    # было 10 (тикет 30: +2 вопроса про холодильник); бюджет вырос: часть замечаний ушла
+    assert shown.check["summary"]["conflicts"] < 12
 
 
 def test_show_returns_saved_brief_and_check(home, tmp_path):
@@ -135,7 +132,8 @@ def test_show_returns_saved_brief_and_check(home, tmp_path):
     shown = api.brief_show("sergeev")
     assert shown.order == "2026-047-sergeev"
     assert shown.brief == sergey()
-    assert shown.check["summary"]["conflicts"] == 12  # было 10, тикет 30
+    # было 10, тикет 30
+    assert shown.check["summary"]["conflicts"] == 12
     assert shown.mock is True and shown.mock_files  # плашка мока везде одинаковая
 
 
@@ -211,7 +209,8 @@ def test_old_v1_database_is_upgraded_and_keeps_orders(home, tmp_path):
     columns = [r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(project_versions)")]
     assert "brief_id" in columns  # миграция 3: бриф, с которым проверена версия
     assert api.brief_save("2026-047-petrov", _brief(tmp_path)).created is False
-    assert api.brief_show("petrov").check["summary"]["conflicts"] == 12  # было 10, тикет 30
+    # было 10, тикет 30
+    assert api.brief_show("petrov").check["summary"]["conflicts"] == 12
 
 
 # --- quick-estimate ----------------------------------------------------------

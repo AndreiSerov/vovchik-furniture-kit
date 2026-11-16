@@ -468,7 +468,7 @@ def hood_exhaust(brief: dict, s: dict) -> list[Finding]:
                 "question",
                 "Вытяжка есть, тип отвода не указан: отвод в вентканал требует короба и места "
                 "в верхнем шкафу, рециркуляция — угольного фильтра.",
-                "Вытяжку подключаем к вентканалу (воздух уходит в шахту дома) или ставим "
+                "Вытяжку подключать к вентканалу (воздух уходит в шахту дома) или ставить "
                 "рециркуляцию с угольным фильтром? Если не знаете — расскажу плюсы и минусы.",
                 "now",
                 ["appliances.hood"],
@@ -806,6 +806,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--today", type=date.fromisoformat, default=date.today())
     args = parser.parse_args(argv)
     brief = json.loads(args.brief.read_text(encoding="utf-8"))
+    if not isinstance(brief, dict):
+        print(f"Бриф должен быть JSON-объектом {{...}}, а не {type(brief).__name__}.", file=sys.stderr)
+        return 1
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     result = check(brief, load_settings(args.settings, args.today), schema)
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)

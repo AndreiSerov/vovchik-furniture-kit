@@ -287,7 +287,7 @@ def test_fewer_than_ten_phrases_is_an_error(tmp_path):
 def test_skill_with_one_phrase_is_an_error_even_with_enough_in_total(tmp_path):
     two_skills(tmp_path)
     write_triggers(tmp_path, phrases(kitchen_x=10, kitchen_y=1))
-    assert skill_lint.lint(tmp_path) == ["kitchen-y: одна фраза в triggers.json, нужно не меньше двух"]
+    assert skill_lint.lint(tmp_path) == ["kitchen-y: одна фраза в triggers.json, нужно не меньше 2"]
     write_triggers(tmp_path, phrases(kitchen_x=9, kitchen_y=2))
     assert skill_lint.lint(tmp_path) == []
 

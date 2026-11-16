@@ -314,6 +314,9 @@ class StatusResult(Result):
 
 OUTPUT_RECOMPUTE = store.OUTPUT_RECOMPUTE
 PRODUCTION_RECOMPUTE = store.PRODUCTION_RECOMPUTE
+# Команды шагов «Следующий шаг», у которых нет вывода и записи в реестре пересчёта (тикет 49).
+IMPORT_COMMAND = store.Recompute("импорт проекта", "import", "<файл>")
+BRIEF_SAVE_COMMAND = store.Recompute("сохранение брифа", "brief save", "<файл>")
 
 
 LOG_KINDS = ("done", "decision", "next", "note")
@@ -925,22 +928,22 @@ def _next_step(
     """Первое подходящее правило таблицы тикета 49."""
     if not has_project:
         if has_brief:
-            cmd = f"kitchen import {order_ref} <файл>"
+            cmd = _command(IMPORT_COMMAND, order_ref)
             return NextStep(text=f"Сделать проект: kitchen-project, затем {cmd}.", commands=[cmd])
-        cmd = f"kitchen brief save {order_ref} <файл>"
+        cmd = _command(BRIEF_SAVE_COMMAND, order_ref)
         return NextStep(text=f"Собрать бриф: kitchen-brief, затем {cmd}.", commands=[cmd])
     if stale:
         workshop = any(s.kind in PRODUCTION_KINDS for s in stale)
         commands = list(dict.fromkeys(s.command for s in stale if s.kind not in PRODUCTION_KINDS))
         if workshop:  # один `kitchen production` вместо отдельных команд цеха, после сметы и КП
-            commands.append(_command(store.PRODUCTION_RECOMPUTE, order_ref))
+            commands.append(_command(PRODUCTION_RECOMPUTE, order_ref))
         return NextStep(text=f"Пересчитать устаревшее: {', '.join(commands)}.", commands=commands)
     if store.QUOTE_PDF not in kinds:
-        estimate = _command(store.OUTPUT_RECOMPUTE[store.ESTIMATE_MD], order_ref)
-        quote = _command(store.OUTPUT_RECOMPUTE[store.QUOTE_PDF], order_ref)
+        estimate = _command(OUTPUT_RECOMPUTE[store.ESTIMATE_MD], order_ref)
+        quote = _command(OUTPUT_RECOMPUTE[store.QUOTE_PDF], order_ref)
         return NextStep(text=f"Смета и КП: {estimate}, затем {quote}.", commands=[estimate, quote])
     if not set(PRODUCTION_KINDS) <= kinds:
-        cmd = _command(store.PRODUCTION_RECOMPUTE, order_ref)
+        cmd = _command(PRODUCTION_RECOMPUTE, order_ref)
         return NextStep(text=f"Документы цеха: {cmd}.", commands=[cmd])
     return NextStep(text="Все документы готовы: выезд на монтаж по чек-листу.")
 
@@ -967,7 +970,9 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
             sql = f"SELECT 1 FROM {table} WHERE order_id = ?"  # имя таблицы из кода, не от пользователя
             return bool(o.conn.execute(sql, (o.pk,)).fetchone())
 
-        stage = _stage(cur is not None, exists("outputs"), exists("briefs"))
+        kinds = {r["kind"] for r in o.conn.execute("SELECT kind FROM outputs WHERE order_id = ?", (o.pk,))}
+        has_brief = exists("briefs")
+        stage = _stage(cur is not None, bool(kinds), has_brief)
         who = ", ".join(x for x in (o.row["client"], o.row["phone"], o.row["address"]) if x)
         lines = [f"# Заказ {o.ref}", "", STATUS_HEADER, ""]
         if who:
@@ -977,8 +982,7 @@ def status(order: str, home: Path | None = None, tz: tzinfo | None = None) -> St
         lines.append("")
         stale = _stale_outputs(o.conn, o.pk, o.ref, cur["version"] if cur else None)
         lines += _section("Устарело", [_stale_line(s) for s in stale], "Пока ничего.")
-        kinds = {r["kind"] for r in o.conn.execute("SELECT kind FROM outputs WHERE order_id = ?", (o.pk,))}
-        next_step = _next_step(o.ref, exists("briefs"), cur is not None, stale, kinds)
+        next_step = _next_step(o.ref, has_brief, cur is not None, stale, kinds)
         lines += _section("Следующий шаг", [next_step.text], "")
         lines += _section("Решения клиента", dated(entries("decision")[::-1]), "Пока нет.")
         lines += _section("Сделано", dated(entries("done")[::-1]), "Пока ничего.")
