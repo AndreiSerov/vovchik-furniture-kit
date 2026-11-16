@@ -278,3 +278,66 @@ def test_appliance_of_a_module_is_not_checked_as_gap_technique_when_a_gap_shares
     codes = {f.code for f in api.check_project(path, home).findings}
     assert "duplicate_label" in codes
     assert "gap_appliance" not in codes
+
+
+# --- тикет 51: холодильник в брифе и в проекте -----------------------------------
+
+IN_MODULE = "Холодильник в брифе отдельностоящий, а в проекте для него ниша в модуле Н3."
+NOT_IN_KITCHEN = "Холодильник в брифе не на кухне, а в проекте он есть (ПМ1) — проверьте."
+
+
+def fridge_in_module_project(home):
+    walls = [{"label": "A", "length": 1200, "rows": [lower(base("Н3"), base("Н1"))]}]
+    return write(home, walls, appliances=[{"type": "fridge", "width": 600, "module": "Н3"}])
+
+
+def test_free_standing_fridge_in_brief_and_niche_in_a_module_is_a_warning(home):
+    save_brief(home, {"built_in": False, "width_mm": 600, "wall": "A"})
+    result = api.check_project(fridge_in_module_project(home), home)
+    [found] = [f for f in result.findings if f.code == "fridge_in_module"]
+    assert (found.level, found.subject, found.message) == ("warning", "Н3", IN_MODULE)
+    # идёт вместе с находкой шаблона, а не вместо неё
+    assert "appliance_no_niche" in {f.code for f in result.findings}
+
+
+def test_fridge_in_module_needs_an_explicit_free_standing_brief(home):
+    path = fridge_in_module_project(home)
+    save_brief(home, {"built_in": True, "width_mm": 600, "wall": "A"})
+    assert "fridge_in_module" not in codes(home, path)
+    save_brief(home, {"width_mm": 600, "wall": "A"})
+    assert "fridge_in_module" not in codes(home, path)
+
+
+def test_fridge_in_brief_not_in_kitchen_but_in_project_is_a_check_warning(home):
+    save_brief(home, {"wall": "none", "width_mm": 600})
+    result = api.check_project(fridge_project(home, 620), home)
+    [found] = [f for f in result.findings if f.code == "fridge_not_in_kitchen"]
+    assert (found.level, found.subject, found.message) == ("warning", "ПМ1", NOT_IN_KITCHEN)
+    assert "appliance_not_in_brief" not in {f.code for f in result.findings}
+
+
+def test_fridge_not_in_kitchen_names_the_module_when_it_stands_in_one(home):
+    save_brief(home, {"wall": "none", "width_mm": 600})
+    found = api.check_project(fridge_in_module_project(home), home).findings
+    [one] = [f for f in found if f.code == "fridge_not_in_kitchen"]
+    assert one.subject == "Н3" and one.message.endswith("в проекте он есть (Н3) — проверьте.")
+    assert "fridge_in_module" not in {f.code for f in found}
+
+
+def test_fridge_not_in_kitchen_is_named_for_a_gap_of_the_upper_row_too(home):
+    save_brief(home, {"wall": "none", "width_mm": 600})
+    walls = [{"label": "A", "length": 1200, "rows": [upper(gap("ПМ2"), wall_door("В1"))]}]
+    appliance = {"type": "fridge", "width": 500, "module": "ПМ2"}
+    found = api.check_project(write(home, walls, appliances=[appliance]), home).findings
+    assert {"gap_upper_appliance", "fridge_not_in_kitchen"} <= {f.code for f in found}
+
+
+def test_fridge_on_a_wall_in_brief_gives_no_not_in_kitchen_finding(home):
+    save_brief(home, {"wall": "A", "width_mm": 600})
+    assert "fridge_not_in_kitchen" not in codes(home, fridge_project(home, 620))
+
+
+def test_fridge_not_in_kitchen_and_built_in_gives_only_the_not_in_kitchen_finding(home):
+    save_brief(home, {"wall": "none", "built_in": True, "width_mm": 600})
+    found = codes(home, fridge_project(home, 620))
+    assert "fridge_not_in_kitchen" in found and "gap_built_in" not in found
