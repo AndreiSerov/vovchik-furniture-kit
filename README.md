@@ -5,7 +5,8 @@
 ## Состав
 
 - `engine/kitchen/` — движок и CLI `kitchen`; `workshop/` — данные мастерской (моки); `PROGRESS.md`, `DECISIONS.md`, `MOCKS.md`.
-- `skills/kitchen-brief/` — скилл Claude: разбор переписки с клиентом кухни или интервью, бриф к замеру, противоречия и вопросы клиенту. Пороги и цены салона — в `references/settings.json`.
+- `skills/kitchen-brief/` — скилл Claude: разбор переписки с клиентом кухни, интервью или быстрый опрос, бриф к замеру, противоречия и вопросы клиенту. Пороги мастера — в `references/settings.json`.
+- `skills/kitchen-project/` — правка проекта, импорт, проверка, различия версий, 3D и виды; `skills/kitchen-production/` — раскрой, кромка, сборочный лист, чек-лист выезда; `skills/kitchen-estimate/` — закупка, смета, «экономия», КП; `skills/kitchen-order/` — «продолжи заказ»: статус и передача нужному скиллу. Таблица «какой скилл когда» — в `AGENTS.md`.
 
 ## Установка
 
@@ -166,7 +167,7 @@ scripts/check           # ruff + pytest + проверки скиллов
 
 `scripts/link-skills` ставит симлинки `skills/kitchen-*` в `.claude/skills/`, `.agents/skills/`, `.qwen/skills/` (его же вызывает `sync-skills`); для Hermes один раз вручную: `scripts/link-skills --hermes` (пишет в `~/.hermes/skills/`). Запускать из основной копии репозитория, не из worktree: после удаления worktree ссылки повиснут.
 
-`scripts/check` проверяет и скиллы `skills/kitchen-*` (`python -m kitchen.skill_lint`, тесты — `tests/test_skill_checks.py`): frontmatter только с `name` и `description`, команды `kitchen …` из кода в `SKILL.md` существуют в CLI, в теле нет формул и размеров, набор фраз `skills/triggers.json` корректен. Новый скилл добавляет в набор хотя бы одну фразу.
+`scripts/check` проверяет и скиллы `skills/kitchen-*` (`python -m kitchen.skill_lint`, тесты — `tests/test_skill_checks.py`): frontmatter только с `name` и `description`, команды `kitchen …` из кода в `SKILL.md` существуют в CLI, в теле нет формул и размеров, набор фраз `skills/triggers.json` корректен; у рабочих скиллов есть форма — шаг `kitchen status`, раздел «Устарело», плашка «МОК-ДАННЫЕ» и шаги `kitchen log` с `--kind done` и `--kind next` (у `kitchen-brief` и `kitchen-order` свой набор, `SHAPE_REQUIREMENTS` в `skill_lint.py`); `--kind` засчитывается, только если стоит в том же вызове `kitchen log`. Новый скилл добавляет в набор хотя бы одну фразу.
 
 Проверка брифа вручную:
 

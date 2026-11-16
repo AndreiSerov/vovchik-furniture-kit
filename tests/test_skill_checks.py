@@ -15,6 +15,7 @@ from kitchen import skill_lint
 from kitchen.cli import app
 
 from tests.conftest import REPO
+from tests.skill_steps import numbered_steps, skill_text
 
 BAD = REPO / "tests" / "fixtures" / "skills_lint"
 
@@ -95,7 +96,7 @@ def test_kitchen_project_skill_has_its_triggers_and_names_the_ticket_commands():
     root = skill_lint.DEFAULT_ROOT
     phrases = json.loads((root / "triggers.json").read_text(encoding="utf-8"))["phrases"]
     mine = {p["text"] for p in phrases if p["skill"] == "kitchen-project"}
-    assert mine == {"Поменяй ширину Н2 у Петрова на 450", "Покажи 3D кухни Петрова"}
+    assert {"Поменяй ширину Н2 у Петрова на 450", "Покажи 3D кухни Петрова"} <= mine
     body = (root / "kitchen-project" / "SKILL.md").read_text(encoding="utf-8")
     for command in ("status", "check", "export", "import", "diff", "3d", "log"):
         assert f"kitchen {command} " in body, command
@@ -179,8 +180,8 @@ def test_kitchen_production_commands_print_the_ready_markers_the_skill_quotes(ho
     fixtures = REPO / "tests" / "fixtures"
     api.brief_save(order, fixtures / "petrov_brief.json", home)
     api.import_project(order, fixtures / "petrov_project.json", home=home)
-    body = (skill_lint.DEFAULT_ROOT / "kitchen-production" / "SKILL.md").read_text(encoding="utf-8")
-    step4 = body.split("4. **")[1].split("5. **")[0]
+    body = skill_text("kitchen-production")
+    step4 = numbered_steps("kitchen-production")[4]
     commands = re.findall(r"`kitchen (production|cut|edges|assembly|trip|parts|drilling) <заказ>`", body)
     assert {"production", "cut", "edges", "assembly", "trip", "parts"} <= set(commands)
     assert "Детали проекта" in step4 and "Источник" in step4
@@ -196,10 +197,10 @@ def test_kitchen_production_commands_print_the_ready_markers_the_skill_quotes(ho
 
 def test_kitchen_production_step_1_stops_without_a_project_and_wording_guards():
     body = (skill_lint.DEFAULT_ROOT / "kitchen-production" / "SKILL.md").read_text(encoding="utf-8")
-    step1 = body.split("1. **")[1].split("2. **")[0]
+    steps = numbered_steps("kitchen-production")
+    step1, step2 = steps[1], steps[2]
     assert "«Проекта ещё нет» — остановись" in step1
     assert "не остановка" not in step1
-    step2 = body.split("2. **")[1].split("3. **")[0]
     assert "шаги 3, 4 с его командой" in step2
     assert "если напечатаны" in body
     assert "<документ>: посчитан из версии K, пересчитан из версии N" in body
@@ -209,13 +210,13 @@ def test_kitchen_estimate_skill_has_its_triggers_and_names_the_ticket_commands()
     root = skill_lint.DEFAULT_ROOT
     phrases = json.loads((root / "triggers.json").read_text(encoding="utf-8"))["phrases"]
     mine = {p["text"] for p in phrases if p["skill"] == "kitchen-estimate"}
-    assert mine == {
+    assert {
         "Посчитай закупку Петрову",
         "Сколько выйдет кухня Петрова",
         "Сколько выйдет Петров?",
         "Сделай КП Петрову",
         "А если подешевле?",
-    }
+    } <= mine  # фразы тикета на месте; новые фразы набора тест не роняют
     body = (root / "kitchen-estimate" / "SKILL.md").read_text(encoding="utf-8")
     for command in ("status", "check", "purchase", "estimate", "quote", "brief show", "log"):
         assert f"kitchen {command} " in body, command
@@ -434,8 +435,7 @@ def test_kitchen_production_eval_expects_the_single_document_journal_entry():
 
 
 def test_kitchen_production_step_4_quotes_the_markers_the_commands_print():
-    body = (skill_lint.DEFAULT_ROOT / "kitchen-production" / "SKILL.md").read_text(encoding="utf-8")
-    step4 = body.split("4. **")[1].split("5. **")[0]
+    step4 = numbered_steps("kitchen-production")[4]
     for marker in (
         "«Файл: …»",
         "«… PDF: …»",
@@ -447,11 +447,11 @@ def test_kitchen_production_step_4_quotes_the_markers_the_commands_print():
 
 
 def _estimate_body():
-    return (skill_lint.DEFAULT_ROOT / "kitchen-estimate" / "SKILL.md").read_text(encoding="utf-8")
+    return skill_text("kitchen-estimate")
 
 
 def _step(n):
-    return _estimate_body().split(f"\n{n}. **")[1].split(f"\n{n + 1}. **")[0]
+    return numbered_steps("kitchen-estimate")[n]
 
 
 def test_kitchen_estimate_r29_B1_every_route_lists_check_and_quote_lists_estimate():
