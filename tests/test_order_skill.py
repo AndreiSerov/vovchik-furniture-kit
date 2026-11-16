@@ -445,3 +445,64 @@ def test_answer_parts_are_listed_in_one_place():
     tail = body().split("## Ответ мастеру")[1]
     assert "шаге 2" in tail
     assert "этап, версия" not in tail
+
+
+def test_decisions_31_match_the_repo():
+    d = (REPO / "DECISIONS.md").read_text(encoding="utf-8")
+    assert "`kitchen-order` в него не входил" not in d
+    if list(SKILLS.glob("triggers-results-*.md")):
+        assert "выбор скилла по фразам не прогонялся" not in d
+
+
+@pytest.mark.parametrize("name", ["kitchen-project", "kitchen-production", "kitchen-estimate"])
+def test_working_skills_carry_the_same_nominative_sentence(name):
+    assert (
+        "Заказ называй номером, номером-фамилией или фамилией в именительном падеже"
+        " («Петров», не «Петрова»): команды падежи не склоняют."
+    ) in skill_text(name)
+
+
+def test_not_found_branch_retries_once_then_asks_and_repeats_step_one():
+    (branch,) = [ln for ln in step(1).splitlines() if "не найден»" in ln]
+    assert "один раз повтори команду с именительным («Петрова» → «Петров»)" in branch
+    assert "когда мастер ответит, потом повтори шаг 1 с его названием" in branch
+
+
+def test_short_number_branch_asks_the_master_and_does_not_guess():
+    (branch,) = [ln for ln in step(1).splitlines() if "похоже на номер заказа" in ln]
+    assert "покажи сообщение как есть и спроси полный номер или фамилию. Жди ответа" in branch
+
+
+def test_exit_two_and_missing_workshop_stop_or_ask_and_never_guess():
+    text = step(1)
+    assert (
+        "Код выхода 2 — команда не получила заказ (не назван). Спроси мастера, какой заказ, и повтори."
+        in text
+    )
+    assert "покажи сообщение как есть и остановись: без папки мастерской статус не прочитать" in text
+    assert (
+        "Любое другое сообщение с кодом 1 — как есть, остановись: сообщение скажи мастеру дословно, догадок не добавляй."
+        in text
+    )
+
+
+def test_step_two_reads_version_from_its_section_and_says_nothing_for_empty_stale():
+    text = step(2)
+    assert "Версия: из раздела «Версия проекта» («Версия N от …»)" in text
+    assert "Устарело: строки раздела «Устарело» как есть. Если там «Пока ничего.» — скажи «ничего»." in text
+    assert "Если там «Пока ничего.» — эту часть пропусти." in text
+    assert "«## Дальше»" in body()
+
+
+def test_all_documents_ready_is_handed_to_nobody():
+    assert handoff_table()["Все документы готовы"].startswith("ничего не передавай")
+
+
+def test_drilling_map_is_never_started_without_a_direct_request():
+    assert "карту присадки без прямой просьбы мастера не запускай и не предлагай" in step(3)
+
+
+def test_no_log_entry_when_the_master_decided_nothing():
+    text = step(4)
+    assert "Мастер ничего не решал — журнал не трогай" in text
+    assert text.count("kitchen log <заказ>") == 2
