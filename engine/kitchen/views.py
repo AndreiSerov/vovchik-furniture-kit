@@ -160,6 +160,17 @@ def _along(wall: WallPlace, x: float, y: float) -> float:
     return back[0]
 
 
+def _lower_top(modules: list[ViewModule], wall: str) -> float | None:
+    """«Верх нижних» стены: верх самого высокого нижнего модуля, пенал не в счёт; нижних нет — `None`."""
+    tops = [m.front.z + m.front.height for m in modules if m.wall == wall and m.row == "lower" and not m.tall]
+    return max(tops) if tops else None
+
+
+def _nearest(labels: list[str], depth_of: dict[str, float], tall_of: dict[str, bool]) -> float | None:
+    """Глубина первого модуля списка меток, не считая пеналов и пустых мест; таких нет — `None`."""
+    return next((depth_of[x] for x in labels if x in depth_of and not tall_of[x]), None)
+
+
 def build_scene(project: Project, placed: Placement, parts: list[ModuleParts], ws: Workshop) -> ViewScene:
     """Сцена видов из расстановки: модули, их фасады (детали-фасады через `part_in_room`), пустые места,
     угловые смещения и глухие части угловых модулей."""
@@ -198,15 +209,13 @@ def build_scene(project: Project, placed: Placement, parts: list[ModuleParts], w
         front = Rect(x=place.x, z=place.position.z, width=place.size.x, height=place.size.z)
         blind = blind_width = None
         if spec.corner is not None and facades:
-            blind_width = round(place.size.x - sum(f.width for f in facades))
+            # глухая часть — от края фасада на её стороне до края модуля (решение мастера 2026-11-16, 9)
+            left = corner_on_left(row, spec)
+            edge = min(f.x for f in facades) if left else max(f.x + f.width for f in facades)
+            x0, x1 = (place.x, edge) if left else (edge, place.x + place.size.x)
+            blind_width = round(x1 - x0)
             if blind_width > 0:
-                left = corner_on_left(row, spec)
-                blind = Rect(
-                    x=place.x if left else place.x + place.size.x - blind_width,
-                    z=place.position.z,
-                    width=blind_width,
-                    height=place.size.z,
-                )
+                blind = Rect(x=x0, z=place.position.z, width=blind_width, height=place.size.z)
             else:
                 blind_width = None
         modules.append(
@@ -226,24 +235,6 @@ def build_scene(project: Project, placed: Placement, parts: list[ModuleParts], w
                 appliances=appliances(place.label, gap=False),
                 blind=blind,
                 blind_width=blind_width,
-            )
-        )
-    gaps = []
-    for g in placed.gaps:
-        wall = walls[g.wall]
-        if g.row == "lower":
-            z0, height, depth = 0, c.legs.height + c.lower.height, c.lower.depth
-        else:
-            z0, height, depth = placed.top_of_uppers - c.upper.height, c.upper.height, c.upper.depth
-        gaps.append(
-            ViewGap(
-                label=g.label,
-                wall=g.wall,
-                row=g.row,
-                front=Rect(x=g.x, z=z0, width=g.width, height=height),
-                plan=_plan_box(wall, g.x, g.width, depth),
-                width=g.width,
-                appliances=appliances(g.label, gap=True),
             )
         )
     view_walls = []
@@ -279,6 +270,48 @@ def build_scene(project: Project, placed: Placement, parts: list[ModuleParts], w
                 end=(w.origin.x + end[0], w.origin.y + end[1]),
                 offsets=offsets,
                 depths=depths,
+            )
+        )
+    depth_of = {m.label: m.depth for m in modules}
+    tall_of = {m.label: m.tall for m in modules}
+    wall_depths = {w.label: w.depths for w in view_walls}
+    gaps = []
+    for g in placed.gaps:
+        wall = walls[g.wall]
+        if g.row == "lower":
+            # до верха нижних стены; нижних модулей нет — ножки и нижний модуль мастерской (решение мастера, 8)
+            z0, height = 0, _lower_top(modules, g.wall) or c.legs.height + c.lower.height
+            fallback = c.lower.depth
+        else:
+            z0, height = placed.top_of_uppers - c.upper.height, c.upper.height
+            fallback = c.upper.depth
+        entries = next(
+            [e.label for e in row.modules]
+            for w in project.walls
+            if w.label == g.wall
+            for row in w.rows
+            if row.kind == g.row and any(e.label == g.label for e in row.modules)
+        )
+        i = entries.index(g.label)
+        # глубина — ближайший модуль ряда с каждой стороны (пеналы и пустые места не в счёт), более глубокий
+        near = [
+            d
+            for d in (
+                _nearest(entries[i + 1 :], depth_of, tall_of),
+                _nearest(entries[:i][::-1], depth_of, tall_of),
+            )
+            if d is not None
+        ]
+        depth = max(near) if near else wall_depths[g.wall].get(g.row, fallback)
+        gaps.append(
+            ViewGap(
+                label=g.label,
+                wall=g.wall,
+                row=g.row,
+                front=Rect(x=g.x, z=z0, width=g.width, height=height),
+                plan=_plan_box(wall, g.x, g.width, depth),
+                width=g.width,
+                appliances=appliances(g.label, gap=True),
             )
         )
     return ViewScene(
@@ -637,7 +670,7 @@ def _levels(scene: ViewScene, wall: str) -> list[Level]:
     if mods:
         levels.append(Level(name="ножки", z=scene.legs))
     if lowers:
-        levels.append(Level(name="верх нижних", z=max(m.front.z + m.front.height for m in lowers)))
+        levels.append(Level(name="верх нижних", z=_lower_top(mods, wall)))
     if uppers:
         levels.append(Level(name="низ верхних", z=min(m.front.z for m in uppers)))
     if uppers or any(m.tall for m in mods):

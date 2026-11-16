@@ -148,15 +148,20 @@ def test_facade_fill_comes_from_the_ral_table_and_unknown_colour_is_grey_and_nam
 
 
 def test_facades_are_the_facade_parts_of_the_module(home):
-    # Н1 base_drawers — три фасада ящиков, Н4 — один фасад 450 и глухая часть 600
+    # Н1 base_drawers — три фасада ящиков, Н4 — один фасад 450 и глухая часть 598 (от края фасада)
     result = petrov_views(home)
     n1 = next(m for m in result.scene.modules if m.label == "Н1")
     assert len(n1.facades) == 3 and {f.width for f in n1.facades} == {596}
     n4 = next(m for m in result.scene.modules if m.label == "Н4")
-    assert [f.width for f in n4.facades] == [450] and n4.blind_width == 600
-    assert n4.blind.x == 1750 + 1050 - 600  # глухая часть справа: Н4 последний в ряду стены A
+    assert [f.width for f in n4.facades] == [450] and n4.blind_width == 598
+    # глухая часть справа (Н4 последний в ряду стены A): от края фасада до края модуля (решение мастера, 9)
+    assert (n4.blind.x, n4.blind.width) == (2202, 598)
     page = wall_page(api.views_layout(result), "A")
-    assert "глухая часть 600" in [label.text for label in page.labels]
+    assert "глухая часть 598" in [label.text for label in page.labels]
+    v4 = next(m for m in result.scene.modules if m.label == "В4")
+    assert (v4.blind.x, v4.blind.width, v4.blind_width) == (2646, 154, 154)
+    for m in (n4, v4):  # край фасада не заходит за глухую часть
+        assert max(f.x + f.width for f in m.facades) <= m.blind.x
 
 
 def test_plan_names_the_gap_with_its_appliance_and_hatches_it(home):
@@ -426,8 +431,8 @@ def test_blind_part_of_a_corner_first_in_its_row_is_on_the_left(home):
         wall("Б", 2250, [corner("Н4", "base_corner", 1050, "A"), mod("Н5", "base_door", 1200)]),
     ]
     n4 = next(m for m in api.views_from_project(write(home, walls), home).scene.modules if m.label == "Н4")
-    assert n4.blind_width == 600 and n4.blind.x == 0
-    assert all(f.x >= 598 for f in n4.facades)
+    assert n4.blind_width == 598 and n4.blind.x == 0
+    assert min(f.x for f in n4.facades) == 598
 
 
 def test_plan_row_depth_is_the_deepest_module_of_the_row_with_facade(home):
@@ -457,7 +462,7 @@ def test_only_the_module_that_does_not_build_loses_its_facades(home):
     assert [label for label, m in broken.items() if not m.facades] == ["Н3"]
     for label in ("Н1", "Н5", "В5", "В6"):
         assert broken[label].facades == clean[label].facades, label
-    assert broken["Н4"].blind_width == 650
+    assert broken["Н4"].blind_width == 648  # от края фасада, не «ширина минус фасады»
 
 
 def test_order_views_draw_a_module_that_stopped_building_after_a_workshop_edit(home):
@@ -488,3 +493,30 @@ def test_views_layout_of_a_result_read_back_from_json_lays_the_pages_out_again(h
     assert [p.model_dump() for p in api.views_layout(again)] == [
         p.model_dump() for p in api.views_layout(result)
     ]
+
+
+def test_pdf_page_of_wall_a_names_both_blind_parts_by_the_facade_edge(home):
+    petrov_order(home)
+    text = " ".join(pages_of(api.views_and_save(ORDER, home))[1].split())  # узкая подпись переносится
+    assert "глухая часть 598" in text and "глухая часть 154" in text
+
+
+def test_petrov_upper_gap_is_as_deep_as_its_upper_neighbour_on_the_plan_and_in_3d(home):
+    result = petrov_views(home)
+    pm1 = next(g for g in result.scene.gaps if g.label == "ПМ1")
+    assert pm1.plan.x0 == 2461 and pm1.plan.x1 - pm1.plan.x0 == 339  # у стены Б, развёрнутой по оси x
+    box = next(m for m in result.scene3d.modules if m.label == "ПМ1")
+    assert box.depth == 339 and box.size_label == "Ш×В×Г 264×720×339 мм"
+    assert box.caption == "ПМ1 — пустое место, 264 мм"
+    assert (box.boxes[0].min[0], box.boxes[0].max[0]) == (2461, 2800)
+
+
+def test_camera_looks_at_half_of_the_tallest_box_of_the_scene(home):
+    assert petrov_views(home).scene3d.camera.target == [2800, 0, 1100]  # пенал 2200
+    from tests.test_placement import mod, wall, write
+
+    lowers = [mod(f"Н{i}", "base_door", 600) for i in range(1, 4)]
+    scene = api.views_from_project(write(home, [wall("A", 1800, lowers)]), home).scene3d
+    assert max(b.max[2] for m in scene.modules for b in m.boxes) == 820
+    assert scene.camera.target == [900, 0, 410]  # одна стена — её середина; половина верха нижних
+    assert long_wall(home).scene3d.camera.target[2] == 1100  # верхние до 2200 — половина их верха
