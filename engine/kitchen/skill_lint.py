@@ -460,7 +460,7 @@ def check_question_paths(skill: str, folder: Path) -> list[str]:
             fields = sections.get(section, {}).get("fields", {})
             known = section in sections and (not field or field == "*" or field in fields)
             if known and item_field and item_field != "*":  # поле элемента списка
-                known = item_field in fields[field].get("item", {})
+                known = item_field in fields.get(field, {}).get("item", {})
             if not known:
                 problems.append(f"{label}: строка {n}: поле `{path}` не из brief_schema.json")
     return problems
