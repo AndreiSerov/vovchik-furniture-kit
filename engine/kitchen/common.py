@@ -14,6 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from kitchen.errors import OrderError
+from kitchen.format import label_order
 from kitchen.models import Workshop
 from kitchen.parts import TEMPLATES, corner_on_left, gap_width, upper_corner_offset
 from kitchen.project import ModuleSpec, Project, Row, Wall, is_gap
@@ -126,6 +127,14 @@ def corner_offsets(project: Project, ws: Workshop) -> CornerOffsets:
     return found
 
 
+def _goes_first(m, other: tuple[float, ModuleSpec], x: float) -> bool:
+    """Пенал `m` ряда встаёт на отступ `x` раньше пенала другого ряда с тем же отступом, если его метка раньше
+    по `format.label_order` (решение мастера 2026-11-16, тикет 54): порядок не зависит от того, какой ряд
+    записан первым. Пенал другого ряда с меньшим отступом и не пенал на его отступе — после пенала, как раньше."""
+    at, tall = other
+    return is_tall(m) and at == x and label_order(m.label) < label_order(tall.label)
+
+
 def row_layouts(wall, offsets: CornerOffsets) -> list[list]:
     """Модули каждого ряда стены по порядку вдоль стены, с пеналами из других рядов: пенал входит в оба ряда
     (и в ряд со своим пеналом тоже). Единственное место, где решается, что стоит в ряду: сумма ряда
@@ -134,7 +143,8 @@ def row_layouts(wall, offsets: CornerOffsets) -> list[list]:
     смещения соседней стены в начале ряда (`offsets` — результат `corner_offsets`), поэтому отступы находятся
     повторными проходами, пока не перестанут меняться. Отступ пенала записывается сразу, как только ряд его
     посчитал: следующий ряд того же прохода уже видит его (иначе пеналы в разных рядах на одном месте
-    менялись бы местами на каждом проходе). Не сошлось за отведённое число проходов — ошибка."""
+    менялись бы местами на каждом проходе). Пеналы разных рядов на одном отступе стоят по порядку меток
+    (`_goes_first`). Не сошлось за отведённое число проходов — ошибка."""
     at: dict[int, float] = {}  # id пенала -> отступ от начала стены
     for _ in range(len(wall.rows) * 4 + 2):
         before = dict(at)
@@ -149,7 +159,7 @@ def row_layouts(wall, offsets: CornerOffsets) -> list[list]:
                     for m in other.modules
                     if is_tall(m) and id(m) in at
                 ),
-                key=lambda t: t[0],
+                key=lambda t: (t[0], label_order(t[1].label)),
             )
             unplaced = [
                 m
@@ -161,7 +171,7 @@ def row_layouts(wall, offsets: CornerOffsets) -> list[list]:
             merged: list = []
             x = float(offsets.of(wall.label, row.kind).start)
             for m in row.modules:
-                while talls and talls[0][0] <= x:
+                while talls and talls[0][0] <= x and not _goes_first(m, talls[0], x):
                     tall = talls.pop(0)[1]
                     merged.append(tall)
                     x += tall.width
