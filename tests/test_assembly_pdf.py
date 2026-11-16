@@ -171,7 +171,7 @@ def test_cli_order_text_and_json(home):
     p1 = next(m for m in data["modules"] if m["label"] == "П1")
     summary = f"  П1 — пенал: деталей 13, позиций фурнитуры {len(p1['hardware'])}, шагов {len(p1['steps'])}"
     assert summary in lines
-    assert "  Н6 — фасад посудомоечной машины: деталей 1, позиций фурнитуры 0, шагов 0" in lines
+    assert "  Н6 — фасад посудомоечной машины: деталей 1, позиций фурнитуры 1, шагов 0" in lines
     assert any("assembly.pdf" in line for line in lines)
 
 

@@ -286,7 +286,8 @@ def test_legs_and_handles_marked_workshop_get_steps_only_where_the_module_has_th
         has_legs = any(h.id == "leg_100" for h in m.hardware)
         assert has_legs == any(s.startswith("Опоры") for s in m.steps), m.label
         has_handles = any(h.id == "handle_profile" for h in m.hardware)
-        assert has_handles == any(s.startswith("Ручки") for s in m.steps), m.label
+        # у фасада ПММ ручка в списке, шага «Ручки» нет: фасад крепится к машине на объекте (тикет 55)
+        assert (has_handles and m.carcass) == any(s.startswith("Ручки") for s in m.steps), m.label
 
 
 def test_workshop_hardware_is_listed_in_hardware_yaml_order(base_door_project, home):

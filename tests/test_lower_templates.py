@@ -16,7 +16,7 @@ def no_legacy_shelves(base_door_project):
 
 
 def test_dishwasher_panel_600(home, base_door_project):
-    # ПРОВЕРИТЬ МАСТЕРУ: один фасад 716 × 596, фурнитура к ПММ не рассчитывается.
+    # ПРОВЕРИТЬ МАСТЕРУ: один фасад 716 × 596 и одна ручка; крепежа и ленты нет, они идут с машиной.
     project = json.loads(base_door_project.read_text(encoding="utf-8"))
     project["walls"][0]["rows"][0]["modules"][0]["template"] = "dishwasher_panel"
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
@@ -25,7 +25,7 @@ def test_dishwasher_panel_600(home, base_door_project):
     assert golden_dump(result) == expected
     (part,) = result.modules[0].parts
     assert (part.id, part.name, part.length, part.width) == ("Н1-фасад", "фасад", 716, 596)
-    assert result.hardware == {}
+    assert result.hardware == {"handle_profile": 1}
     assert result.facade_area == 0.4267
     assert result.edges == {}
 

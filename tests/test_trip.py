@@ -108,7 +108,7 @@ def test_petrov_site_hardware_is_summed_over_the_project(home):
     petrov(home)
     site = texts(api.trip_from_order(ORDER, home), "Фурнитура для монтажа")
     assert "Опора регулируемая 100 мм с клипсой — 26 шт" in site
-    assert "Ручка-профиль торцевая — 17 шт" in site
+    assert "Ручка-профиль торцевая — 18 шт" in site
     assert "Навес для верхних шкафов Camar 807 — 12 шт" in site
     assert len(site) == 3
 
