@@ -5,7 +5,6 @@
 """
 
 import re
-import unicodedata
 from typing import Literal
 
 from pydantic import BaseModel
@@ -23,7 +22,7 @@ from kitchen.common import (
     row_positions,
 )
 from kitchen.errors import KitchenError, WorkshopError
-from kitchen.format import num
+from kitchen.format import label_key, num
 from kitchen.models import SheetMaterial, Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
@@ -582,24 +581,13 @@ def _build(project: Project, ws: Workshop, found: list[Finding]):
     return dims, built
 
 
-_LOOKALIKE = str.maketrans("ABCEHKMOPTXYabcehkmoptxy", "АВСЕНКМОРТХУавсенкмортху")  # латиница → кириллица
-
-
-def _label_key(label: str) -> str:
-    """Метка для сравнения: NFKC (полноширинные цифры и буквы), без невидимых символов (категория Cf:
-    U+200B, U+FEFF, мягкий перенос) и пробелов по краям, без различия регистра и латинских двойников кириллицы."""
-    text = unicodedata.normalize("NFKC", label)
-    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
-    return text.strip().translate(_LOOKALIKE).casefold()
-
-
 def duplicate_labels(project: Project) -> list[Finding]:
     """Метка модуля уникальна в проекте: пенал, записанный в двух рядах, тоже повтор. Метки, совпадающие после
     нормализации (регистр, пробелы по краям, латинские «H1» и кириллические «Н1»), — повтор. Одна находка на
     метку, в сообщении все записи."""
     groups: dict[str, list[str]] = {}
     for _, module in _row_entries(project):
-        groups.setdefault(_label_key(module.label), []).append(module.label)
+        groups.setdefault(label_key(module.label), []).append(module.label)
     return [
         Finding(
             code="duplicate_label",

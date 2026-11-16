@@ -13,6 +13,7 @@
 Расстановку читают виды (тикет 41) и HTML (тикет 42).
 """
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -197,12 +198,14 @@ class Placement(BaseModel):
 
 @dataclass(frozen=True)
 class _Link:
-    """Угол: конец стены `end_of` встречается с началом стены `start_of`; его задаёт угловой модуль."""
+    """Угол: конец стены `end_of` встречается с началом стены `start_of`; его задаёт угловой модуль `module`,
+    который стоит на стене `wall`."""
 
     end_of: str
     start_of: str
     row: str
     module: str
+    wall: str
 
 
 def _listed(labels: list[str]) -> str:
@@ -217,8 +220,9 @@ def _how(link: _Link, a: str, b: str) -> str:
 
 def _links(project: Project) -> list[_Link]:
     """Углы проекта по угловым модулям. Угловой посередине ряда, несуществующая соседняя стена, два угловых
-    одного ряда в одном углу, противоречие рядов в одном углу, стена, конец или начало которой встречается с
-    двумя стенами, и стены, не связанные углами, — ошибки расстановки (все сразу)."""
+    одного ряда в одном углу, угловые обоих концов ряда к одной стене (тикет 54), противоречие рядов в одном
+    углу, стена, конец или начало которой встречается с двумя стенами, и стены, не связанные углами, — ошибки
+    расстановки (все сразу)."""
     labels = {w.label for w in project.walls}
     order = {w.label: i for i, w in enumerate(project.walls)}
     problems: list[str] = []
@@ -234,9 +238,9 @@ def _links(project: Project) -> list[_Link]:
             problems.append(corner_wall_message(m.label, adjacent, wall.label))
             continue
         if corner_on_left(row, m):
-            found.append(_Link(adjacent, wall.label, row.kind, m.label))
+            found.append(_Link(adjacent, wall.label, row.kind, m.label, wall.label))
         else:
-            found.append(_Link(wall.label, adjacent, row.kind, m.label))
+            found.append(_Link(wall.label, adjacent, row.kind, m.label, wall.label))
     pairs: dict[tuple[str, str], list[_Link]] = {}
     for link in found:
         key = tuple(sorted((link.end_of, link.start_of), key=order.__getitem__))
@@ -244,10 +248,20 @@ def _links(project: Project) -> list[_Link]:
     for (a, b), group in pairs.items():
         by_row = {kind: [link for link in group if link.row == kind] for kind in ("lower", "upper")}
         for kind, same in by_row.items():
-            if len(same) > 1:
-                problems.append(
-                    f"В углу {a}–{b} два угловых модуля {ROW_GEN[kind]} ряда: {_listed([s.module for s in same])}."
-                )
+            for end in (a, b):  # направление связи: один угол — один конец стены
+                corner = [link for link in same if link.end_of == end]
+                if len(corner) > 1:
+                    problems.append(
+                        f"В углу {a}–{b} два угловых модуля {ROW_GEN[kind]} ряда: "
+                        f"{_listed([s.module for s in corner])}."
+                    )
+            for w, other in ((a, b), (b, a)):  # оба конца ряда стены w ведут к одной стене (тикет 54)
+                own = [link for link in same if link.wall == w]
+                if len({link.end_of for link in own}) > 1:
+                    problems.append(
+                        f"Стена {w}: угловые модули {_listed([s.module for s in own])} {ROW_GEN[kind]} ряда "
+                        f"стоят на разных концах ряда, но оба угла ведут к {other}."
+                    )
         lower, upper = by_row["lower"], by_row["upper"]
         if lower and upper and len(lower) == len(upper) == 1 and lower[0].end_of != upper[0].end_of:
             problems.append(
@@ -302,6 +316,24 @@ def _chain(project: Project, links: list[_Link]) -> list[Wall]:
     return [by_label[label] for label in order]
 
 
+def _ring_gap(chain: list[Wall], links: list[_Link], tolerance: int) -> list[str]:
+    """Стены по кругу (последняя стена цепочки ведёт к первой, тикет 54): конец последней стены должен прийти в
+    начало первой. Расхождение — расстояние между ними, округлённое до мм; больше допуска `допуск_стены` —
+    ошибка расстановки. Цепочка без замыкания не проверяется."""
+    if not any(link.end_of == chain[-1].label and link.start_of == chain[0].label for link in links):
+        return []
+    x: Mm = 0
+    y: Mm = 0
+    for rotation, w in enumerate(chain):
+        du, dv = turn(rotation * 90, w.length, 0)
+        x, y = x + du, y + dv
+    gap = num(round(math.hypot(x, y)))
+    if gap <= tolerance:
+        return []
+    labels = ", ".join(w.label for w in chain)
+    return [f"Стены {labels} соединены по кругу, а длины не сходятся на {gap} мм."]
+
+
 def _facade_thickness(module: ModuleSpec, row: Row, project: Project, ws: Workshop) -> int:
     materials = resolve_materials(module, row, project.materials)
     facade_id = materials.facades_lower if lower_facades(module, row) else materials.facades_upper
@@ -350,6 +382,8 @@ def place_project(project: Project, ws: Workshop) -> Placement:
         links = _links(project)
     except OrderError as e:
         raise OrderError(problems + e.problems) from e
+    chain = _chain(project, links)
+    problems += _ring_gap(chain, links, c.corner_rules.wall_tolerance)
     if problems:
         raise OrderError(problems)
     offsets = corner_offsets(project, ws)
@@ -359,7 +393,7 @@ def place_project(project: Project, ws: Workshop) -> Placement:
     colors: dict[str, str | None] = {}
     origin: tuple[Mm, Mm] = (0, 0)
     rotation = 0
-    for w in _chain(project, links):
+    for w in chain:
         marks: list[OffsetPlace] = []
         for kind in ("lower", "upper"):
             o = offsets.of(w.label, kind)
