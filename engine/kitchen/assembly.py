@@ -98,7 +98,7 @@ def _steps(
             f"Задняя стенка {back.id} — {plural(plan.back_screws, 'саморез', 'самореза', 'саморезов')}"
         )
     pins = hardware.get(c.furniture.shelf_pins, 0)
-    if plan.shelves and pins and installed_here(c.furniture.shelf_pins):
+    if plan.shelves and installed_here(c.furniture.shelf_pins):
         lines["полки"].append(f"Полкодержатели — {pins} шт, полки: {_ids([s.shelf for s in plan.shelves])}")
     drawer_set = c.drawers.hardware
     if plan.drawers and installed_here(drawer_set):

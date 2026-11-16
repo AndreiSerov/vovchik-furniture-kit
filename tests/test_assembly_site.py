@@ -176,3 +176,24 @@ def test_trip_only_gaps_says_zero_modules(home):
     walls = [{"label": "A", "length": 600, "rows": [lower(gap("ПМ1", 600))]}]
     path = write(home, walls, appliances=[], name="gaps.json")
     assert trip_titles(api.trip_from_project(path, home)) == "Модули (0), пустых мест 1"
+
+
+def _lines(result):
+    return [ln.text for page in api.assembly_layout(result) for ln in page.lines]
+
+
+def test_workshop_items_have_no_site_note_and_site_items_do(home):
+    """Ревью 53: пометка «на объекте» — только у позиций «объект»."""
+    petrov(home)
+    lines = _lines(api.assembly_from_order(ORDER, home))
+    assert "Конфирмат 7x50 — 8 шт" in lines
+    assert "Ручка-профиль торцевая — 3 шт, на объекте" in lines
+    assert not any(t.startswith("Конфирмат") and "на объекте" in t for t in lines)
+
+
+def test_handles_marked_workshop_line_has_no_site_note(home):
+    petrov(home)
+    mark_workshop(home, "handle_profile")
+    result = api.assembly_from_order(ORDER, home)
+    lines = _lines(result.model_copy(update={"modules": [module_of(result, "Н1")]}))
+    assert "Ручка-профиль торцевая — 3 шт" in lines

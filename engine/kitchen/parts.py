@@ -130,7 +130,7 @@ class ModuleParts(BaseModel):
     module: str
     template: str
     parts: list[Part]
-    # вся фурнитура модуля («цех» и «объект»): КП описывает по ней модуль, сборочный лист берёт позиции «цех»;
+    # вся фурнитура модуля («цех» и «объект»): КП описывает по ней модуль, сборочный лист берёт её всю (шаги — у «цех»);
     # в JSON `kitchen parts` не входит
     hardware: dict[str, int] = Field(default_factory=dict, exclude=True)
     plan: AssemblyPlan = Field(default_factory=AssemblyPlan, exclude=True)

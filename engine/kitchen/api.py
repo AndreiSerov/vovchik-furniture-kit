@@ -1511,7 +1511,7 @@ def drilling_and_save(order: str, home: Path | None = None, on: date | None = No
 
 
 class AssemblyResult(Result):
-    """Сборочный лист: по модулям детали, фурнитура «цех» и шаги сборки; версия-источник."""
+    """Сборочный лист: по модулям детали, вся фурнитура (у «объект» — пометка) и шаги сборки; версия-источник."""
 
     source: PartsSource
     output: OutputInfo | None = None
