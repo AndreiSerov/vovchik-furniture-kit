@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 
-from kitchen.assembly import AssemblyModule
+from kitchen.assembly import AssemblyHardware, AssemblyModule
 from kitchen.drilling_pdf import TextLine
 from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area, register_fonts, wrap
 
@@ -43,6 +43,10 @@ class _Row(BaseModel):
     heading: bool = False  # заголовок раздела: не остаётся последней строкой страницы
 
 
+def _hardware_line(h: AssemblyHardware) -> str:
+    return f"{h.name} — {h.quantity} {h.unit}" + (", на объекте" if h.installed == "объект" else "")
+
+
 def _rows(module: AssemblyModule) -> list[_Row]:
     """Логические строки блока модуля (до переноса по ширине)."""
     if not module.carcass:
@@ -60,7 +64,7 @@ def _rows(module: AssemblyModule) -> list[_Row]:
         *(item(f"{p.mark} · {p.name} · {p.size} · {p.material}") for p in module.parts),
     ]
     if module.hardware:
-        rows += [sub("Фурнитура:"), *(item(f"{h.name} — {h.quantity} {h.unit}") for h in module.hardware)]
+        rows += [sub("Фурнитура:"), *(item(_hardware_line(h)) for h in module.hardware)]
     else:
         rows.append(sub("Фурнитура: нет", heading=False))
     if module.appliances:

@@ -136,12 +136,13 @@ def test_unknown_install_place_is_load_error(base_door_project, home):
     assert "ставится" in text and "склад" in text
 
 
-def test_site_hardware_is_not_in_workshop_sheet_and_handles_appear_when_marked_workshop(
+def test_site_hardware_is_listed_with_site_mark_and_handles_get_a_step_when_marked_workshop(
     base_door_project, home
 ):
     plain = api.assembly_from_project(base_door_project, home).modules[0]
     ids = [h.id for h in plain.hardware]
-    assert "hinge_71B3550" in ids and not {"handle_profile", "leg_100", "hanger_camar807"} & set(ids)
+    assert {"hinge_71B3550", "handle_profile", "leg_100"} <= set(ids)  # тикет 53: «объект» остаётся в списке
+    assert {h.id for h in plain.hardware if h.installed == "объект"} == {"handle_profile", "leg_100"}
     edit(
         home, "hardware.yaml", "{id: handle_profile, ставится: объект,", "{id: handle_profile, ставится: цех,"
     )
@@ -149,7 +150,7 @@ def test_site_hardware_is_not_in_workshop_sheet_and_handles_appear_when_marked_w
     handle = next(h for h in marked.hardware if h.id == "handle_profile")
     assert handle.quantity == 2 and handle.unit == "шт"  # две двери — две ручки
     assert "Ручки Ручка-профиль торцевая — 2 шт, фасады: Н1-фасад-Л, Н1-фасад-П" in marked.steps
-    assert [h.id for h in marked.hardware if h.id != "handle_profile"] == ids  # порядок hardware.yaml
+    assert [h.id for h in marked.hardware] == ids  # порядок hardware.yaml, состав тот же
 
 
 def test_hardware_line_has_catalog_name_and_count(base_door_project, home):
@@ -251,10 +252,7 @@ def test_drawer_and_hinge_steps_name_catalog_items_and_parts(home):
     petrov(home)
     result = api.assembly_from_order(ORDER, home)
     drawers = module_of(result, "Н1").steps
-    assert (
-        "Направляющие Tandembox antaro M 500, комплект — 3 компл., "
-        "ящики: Н1-дно-ящ-1, Н1-дно-ящ-2, Н1-дно-ящ-3" in drawers
-    )
+    assert "Направляющие Tandembox antaro M 500, комплект — 3 компл., ящиков: 3" in drawers
     lift = module_of(result, "В5").steps
     assert lift[-1] == "Подъёмник Blum Aventos HK-S — 1 шт, фасады: В5-фасад"
     assert not any(

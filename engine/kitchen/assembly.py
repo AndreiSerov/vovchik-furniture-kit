@@ -1,10 +1,11 @@
-"""Сборочный лист (4.4, тикет 22): по модулям детали, фурнитура «цех» и шаги сборки.
+"""Сборочный лист (4.4, тикеты 22, 53): по модулям детали, вся фурнитура (у «объект» — пометка) и шаги сборки.
 
 Шаги собираются из модели соединений, дверей, полок и ящиков модуля (`parts.AssemblyPlan`) и фурнитуры модуля;
 порядок этапов — ключ `сборка` construction.yaml. Чисел и формул здесь нет: количества берутся из расчёта деталей.
 """
 
 from collections import defaultdict
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -13,7 +14,6 @@ from kitchen.models import Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
     BACK_PANEL,
-    DRAWER_BOTTOM,
     TEMPLATES,
     ModuleParts,
     is_facade,
@@ -44,12 +44,13 @@ class AssemblyPart(BaseModel):
 
 
 class AssemblyHardware(BaseModel):
-    """Позиция фурнитуры «цех» с количеством; название — из `hardware.yaml`."""
+    """Позиция фурнитуры модуля с количеством; название и место — из `hardware.yaml`. У «объект» в листе пометка."""
 
     id: str
     name: str
     quantity: int
     unit: str = UNIT
+    installed: Literal["цех", "объект"]
 
 
 class AssemblyModule(BaseModel):
@@ -97,22 +98,21 @@ def _steps(
             f"Задняя стенка {back.id} — {plural(plan.back_screws, 'саморез', 'самореза', 'саморезов')}"
         )
     pins = hardware.get(c.furniture.shelf_pins, 0)
-    if plan.shelves and pins:
+    if plan.shelves and installed_here(c.furniture.shelf_pins):
         lines["полки"].append(f"Полкодержатели — {pins} шт, полки: {_ids([s.shelf for s in plan.shelves])}")
     drawer_set = c.drawers.hardware
-    if plan.drawers and hardware.get(drawer_set, 0):
-        bottoms = [p.id for p in built.parts if p.name == DRAWER_BOTTOM]
+    if plan.drawers and installed_here(drawer_set):
         lines["ящики"].append(
-            f"Направляющие {name_of[drawer_set][0]} — {hardware[drawer_set]} компл., ящики: {_ids(bottoms)}"
+            f"Направляющие {name_of[drawer_set][0]} — {hardware[drawer_set]} компл., ящиков: {len(plan.drawers)}"
         )
     hinges = c.furniture.hinges
-    if plan.doors and hardware.get(hinges, 0):
+    if plan.doors and installed_here(hinges):
         lines["фасады"].append(
             f"Петли {name_of[hinges][0]} — {hardware[hinges]} шт, "
             f"фасады: {_ids([d.facade for d in plan.doors])}"
         )
     lift = c.upper_rules.lift
-    if hardware.get(lift, 0):
+    if installed_here(lift):
         lines["фасады"].append(f"{name_of[lift][0]} — {hardware[lift]} шт, фасады: {_ids(facades)}")
     if installed_here(handles):  # ручки и опоры ставятся на объекте; в цехе — только если мастер так отметил
         lines["ручки"].append(
@@ -169,9 +169,14 @@ def build_assembly(project: Project, built: list[ModuleParts], ws: Workshop) -> 
                     AssemblyModule(
                         title=module_line(module, f"{dims.width}×{dims.height}×{dims.depth}"),
                         hardware=[
-                            AssemblyHardware(id=i.id, name=i.name, quantity=module_parts.hardware[i.id])
+                            AssemblyHardware(
+                                id=i.id,
+                                name=i.name,
+                                quantity=module_parts.hardware[i.id],
+                                installed=i.installed,
+                            )
                             for i in ws.hardware.items
-                            if module_parts.hardware.get(i.id, 0) > 0 and i.installed == "цех"
+                            if module_parts.hardware.get(i.id, 0) > 0
                         ],
                         steps=_steps(ws.construction.assembly, ws, module_parts, handles, name_of),
                         **common,

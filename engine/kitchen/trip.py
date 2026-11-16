@@ -112,14 +112,15 @@ def build_trip(
     project: Project, common: list[CommonItem], hardware: dict[str, int], ws: Workshop
 ) -> list[TripSection]:
     """Разделы чек-листа по порядку; пустой раздел остаётся с пустым списком."""
+    placed = [(row, m) for wall in project.walls for row in wall.rows for m in row.modules]
     modules = [
         f"{m.label} — {describe_gap(m, project)}"
         if is_gap(m)
         else module_line(m, f"{module_dims(m, row.kind, ws).width}")
-        for wall in project.walls
-        for row in wall.rows
-        for m in row.modules
+        for row, m in placed
     ]
+    gaps = sum(1 for _, m in placed if is_gap(m))
+    count = f"Модули ({len(modules) - gaps})" + (f", пустых мест {gaps}" if gaps else "")
     site = [
         f"{i.name} — {hardware[i.id]} {UNIT}"
         for i in ws.hardware.items
@@ -127,7 +128,7 @@ def build_trip(
     ]
     lists = ws.equipment.trip
     sections = [
-        (f"Модули ({len(modules)})", modules),
+        (count, modules),
         ("Общие позиции", _common_lines(project, common, ws)),
         ("Фурнитура для монтажа", site),
         ("Техника клиента", _appliance_lines(project)),

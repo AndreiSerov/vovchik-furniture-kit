@@ -81,7 +81,7 @@ def test_petrov_modules_section_lists_all_13_in_project_order(home):
     # 13 модулей и пустое место ПМ1 за верхним угловым стены Б (тикет 50)
     petrov(home)
     r = api.trip_from_order(ORDER, home)
-    assert section(r, "Модули").title == "Модули (14)"
+    assert section(r, "Модули").title == "Модули (13), пустых мест 1"
     items = texts(r, "Модули")
     parts = api.parts_from_order(ORDER, home)
     assert len(items) == 14
@@ -248,7 +248,7 @@ def test_petrov_pdf_has_header_sections_and_a_box_on_every_item(home):
     assert "Чек-лист выезда" in text
     assert "Клиент: Петров, +7 900 000-00-00" in text
     for title in (
-        "Модули (14)",
+        "Модули (13), пустых мест 1",
         "Общие позиции",
         "Фурнитура для монтажа",
         "Техника клиента",
@@ -335,7 +335,7 @@ def test_cli_order_text_and_json(home):
     assert lines[0] == MOCK and lines[-1] == MOCK
     assert "Чек-лист выезда:" in lines and "версия 1 проекта" in text.output
     assert "Клиент: Петров, +7 900 000-00-00" in lines
-    assert "Модули (14):" in lines and "  П1 — пенал, 600 мм" in lines
+    assert "Модули (13), пустых мест 1:" in lines and "  П1 — пенал, 600 мм" in lines
     assert "☐" not in text.output
     assert any("trip-checklist.pdf" in line for line in lines)
 
@@ -401,7 +401,7 @@ def test_trip_lists_the_gap_as_a_place(home):
 def test_gap_without_appliance_is_an_empty_place_first_in_its_row(home):
     path = fridge_project(home, 600, appliance={"type": "sink", "width": 600, "module": "Н1"})
     r = api.trip_from_project(path, home)
-    assert section(r, "Модули").title == "Модули (2)"
+    assert section(r, "Модули").title == "Модули (1), пустых мест 1"
     assert texts(r, "Модули") == ["ПМ1 — пустое место, 600 мм", "Н1 — нижний модуль, 600 мм"]
 
 
