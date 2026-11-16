@@ -46,7 +46,7 @@ def test_petrov_parts_from_order(petrov):
     assert result.edges["edge_08_white"].purchase_m == 50.9
     hw = result.hardware
     assert (hw["aventos_hks"], hw["bin_2sec"]) == (2, 1)  # подъёмники В1 и В5, ведро Н5 из ТЗ
-    assert (hw["hinge_71B3550"], hw["plate_173L6100"], hw["handle_profile"]) == (20, 20, 17)
+    assert (hw["hinge_71B3550"], hw["plate_173L6100"], hw["handle_profile"]) == (20, 20, 18)
     assert (hw["hanger_camar807"], hw["screw_3_5x16"]) == (12, 330)
 
 

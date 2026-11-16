@@ -145,6 +145,13 @@ def build_assembly(project: Project, built: list[ModuleParts], ws: Workshop) -> 
                     )
                     for p in module_parts.parts
                 ]
+                hardware = [
+                    AssemblyHardware(
+                        id=i.id, name=i.name, quantity=module_parts.hardware[i.id], installed=i.installed
+                    )
+                    for i in ws.hardware.items
+                    if module_parts.hardware.get(i.id, 0) > 0
+                ]
                 kinds = [APPLIANCE_NAMES[a.type] for a in project.appliances_at(module.label)]
                 common = {
                     "label": module.label,
@@ -158,7 +165,7 @@ def build_assembly(project: Project, built: list[ModuleParts], ws: Workshop) -> 
                         AssemblyModule(
                             title=module_line(module, f"{dims.width}"),
                             note=NO_CARCASS_NOTE.format(facades=_ids(facades)),
-                            hardware=[],
+                            hardware=hardware,
                             steps=[],
                             **common,
                         )
@@ -168,16 +175,7 @@ def build_assembly(project: Project, built: list[ModuleParts], ws: Workshop) -> 
                 blocks.append(
                     AssemblyModule(
                         title=module_line(module, f"{dims.width}×{dims.height}×{dims.depth}"),
-                        hardware=[
-                            AssemblyHardware(
-                                id=i.id,
-                                name=i.name,
-                                quantity=module_parts.hardware[i.id],
-                                installed=i.installed,
-                            )
-                            for i in ws.hardware.items
-                            if module_parts.hardware.get(i.id, 0) > 0
-                        ],
+                        hardware=hardware,
                         steps=_steps(ws.construction.assembly, ws, module_parts, handles, name_of),
                         **common,
                     )

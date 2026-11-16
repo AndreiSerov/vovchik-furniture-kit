@@ -50,7 +50,11 @@ def _hardware_line(h: AssemblyHardware) -> str:
 def _rows(module: AssemblyModule) -> list[_Row]:
     """Логические строки блока модуля (до переноса по ширине)."""
     if not module.carcass:
-        return [_Row(text=f"{module.title}: {module.note}", bold=False, size=_TEXT_SIZE, indent=0)]
+        rows = [_Row(text=f"{module.title}: {module.note}", bold=False, size=_TEXT_SIZE, indent=0)]
+        if module.hardware:  # фасад ПММ: ручка (тикет 55), та же строка фурнитуры, что у модулей
+            line = "; ".join(_hardware_line(h) for h in module.hardware)
+            rows.append(_Row(text=f"Фурнитура: {line}", bold=False, size=_TEXT_SIZE, indent=0))
+        return rows
 
     def sub(text: str, *, heading: bool = True) -> _Row:
         return _Row(text=text, bold=True, size=_SUB_SIZE, indent=0, heading=heading)
