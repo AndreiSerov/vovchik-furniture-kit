@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Проверка брифа кухни по правилам салона.
+"""Проверка брифа кухни по правилам мастера.
 
 Запуск:
     python3 check_brief.py brief.json [--settings settings.json] [--today ГГГГ-ММ-ДД]
@@ -8,7 +8,7 @@
 На выходе (stdout) — JSON:
     summary           — погонаж и счётчики
     missing_required  — пустые обязательные поля (covered_by: правило, которое уже задаёт этот вопрос)
-    conflicts         — противоречия и риски: designer_note для дизайнера,
+    conflicts         — противоречия и риски: designer_note — заметка мастеру,
                         client_question для клиента, ask = now | measure
     unknown_fields    — поля, которых нет в схеме (обычно опечатка)
     errors            — то, что не удалось разобрать
@@ -281,7 +281,7 @@ def budget_tight(brief: dict, s: dict) -> list[Finding]:
         if to_ceiling:
             return []  # уже сказано в tall_uppers_budget
         note = (
-            f"Бюджет {fmt_rub(amount)} ниже обычного минимума салона {fmt_rub(threshold)} "
+            f"Бюджет {fmt_rub(amount)} ниже моего обычного минимума {fmt_rub(threshold)} "
             "для такого погонажа. Обсудить упрощения: материалы фасадов, фурнитура, без верха на части стены."
         )
     elif amount < reserve and get(brief, "budget.flexibility") != "flexible":

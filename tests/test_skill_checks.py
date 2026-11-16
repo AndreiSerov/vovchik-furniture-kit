@@ -336,8 +336,8 @@ def test_shape_requires_status_log_stale_and_mock_banner(tmp_path):
     ]
 
 
-def test_brief_and_order_wait_for_their_tickets():
-    assert {"kitchen-brief", "kitchen-order"} <= skill_lint.SHAPE_EXEMPT
+def test_only_order_waits_for_its_ticket():
+    assert skill_lint.SHAPE_EXEMPT == {"kitchen-order"}
     assert set(skill_lint.SHAPE_REQUIREMENTS) == {
         "kitchen-project",
         "kitchen-production",
@@ -348,7 +348,15 @@ def test_brief_and_order_wait_for_their_tickets():
 
 
 def test_exempt_skill_without_shape_passes(tmp_path):
-    assert lint_named(tmp_path, "kitchen-brief", "Пусто.\n") == []
+    assert lint_named(tmp_path, "kitchen-order", "Пусто.\n") == []
+
+
+def test_brief_is_held_to_its_shape(tmp_path):
+    assert lint_named(tmp_path, "kitchen-brief", "Пусто.\n") == [
+        "kitchen-brief: нет шага kitchen brief save",
+        "kitchen-brief: нет шага kitchen log с --kind next",
+        "kitchen-brief: нет плашки «МОК-ДАННЫЕ»",
+    ]
 
 
 def test_skill_outside_the_list_has_no_shape_requirements(tmp_path):
