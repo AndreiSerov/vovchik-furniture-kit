@@ -102,7 +102,10 @@ def load_env(start: Path, environ: Mapping[str, str]) -> dict[str, str]:
     for folder in [start, *start.parents]:
         candidate = folder / ".env"
         if candidate.is_file():
-            merged = parse_dotenv(candidate.read_text(encoding="utf-8"))
+            try:
+                merged = parse_dotenv(candidate.read_text(encoding="utf-8"))
+            except UnicodeDecodeError as err:
+                raise UserError(f"{candidate}: файл не в UTF-8, пересохраните его в UTF-8.") from err
             break
     merged.update(environ)
     return merged
@@ -131,6 +134,8 @@ def load_catalog(folder: Path) -> dict:
         raise UserError(f"Каталог образцов: нет файла {path}.")
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except UnicodeDecodeError as err:
+        raise UserError(f"{path}: файл не в UTF-8, пересохраните его в UTF-8.") from err
     except yaml.YAMLError as err:
         raise UserError(f"{path}: YAML не разбирается: {err}") from err
     if not isinstance(data, dict) or not isinstance(data.get("shapes", []), list):
@@ -278,7 +283,7 @@ def openrouter_call(send: Send, key: str, model: str, prompt: str, photos, opts:
 def b64(text: str) -> bytes:
     try:
         return base64.b64decode(text, validate=True)
-    except ValueError as err:
+    except (ValueError, TypeError) as err:
         raise UserError("Сервис ответил без картинки: данные картинки повреждены.") from err
 
 
@@ -383,7 +388,7 @@ def generate(opts: argparse.Namespace, env: Mapping[str, str], send: Send) -> di
     key = env.get(KEYS[provider])
     if not key:
         raise UserError(f"Нет ключа {KEYS[provider]}: добавьте его в .env или в окружение.")
-    mark = opts.watermark or env.get("VISUALIZATION_WATERMARK")
+    mark = (opts.watermark or env.get("VISUALIZATION_WATERMARK") or "").strip()
     if not mark:
         raise UserError(
             "Нет водяного знака мастера: задайте VISUALIZATION_WATERMARK (имя и телефон) в .env или --watermark."
@@ -424,6 +429,11 @@ def generate(opts: argparse.Namespace, env: Mapping[str, str], send: Send) -> di
         images = PROVIDERS[provider](send, key, model, prompt, photos, options)
     except ServiceError as err:
         raise UserError(f"Сервис {provider} вернул ошибку {err.status}: {err.text[:500]}") from err
+    except (AttributeError, IndexError, KeyError, TypeError) as err:
+        # Ответ не той формы, что у сервиса в документации: после платного запроса — понятная ошибка, а не трейсбек.
+        raise UserError(
+            f"Сервис {provider} ответил без картинки: неожиданный формат ответа ({err!r})."
+        ) from err
 
     marked = [watermark(image, mark, mock, logo) for image in images]
     stamp = unique_stamp(out)

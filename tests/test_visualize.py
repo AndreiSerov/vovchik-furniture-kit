@@ -576,3 +576,124 @@ def test_ai_visualization_folders_are_ignored_by_git():
         assert subprocess.run(["git", "check-ignore", "-q", path], check=False, cwd=ROOT).returncode == 0, (
             path
         )
+
+
+# Ревью 2: кривые ответы и файлы, пробелы в тестах
+
+
+@pytest.mark.parametrize(
+    ("provider", "body"),
+    [
+        ("openai", {"data": [{"b64_json": 5}]}),
+        ("openrouter", {"choices": [{"message": "x"}]}),
+        ("openrouter", {"choices": [{"message": {"images": [{"image_url": "data:x"}]}}]}),
+        ("openrouter", {"choices": [{"message": {"images": [{"image_url": {"url": "data:image/png"}}]}}]}),
+    ],
+)
+def test_malformed_answer_is_russian_error(photos, tmp_path, capsys, provider, body):
+    env = {**ENV, "VISUALIZATION_PROVIDER": provider}
+    assert vz.main(args(photos, tmp_path / "out"), env=env, send=FakeSend(json.dumps(body).encode())) == 2
+    assert capsys.readouterr().err.startswith("Ошибка: ")
+
+
+def test_catalog_not_utf8_is_russian_error(tmp_path, capsys):
+    (tmp_path / "catalog.yaml").write_bytes("mock: true\nshapes: []\n# Угловая\n".encode("cp1251"))
+    assert vz.main(["catalog", "--catalog", str(tmp_path)], env={}) == 2
+    assert "UTF-8" in capsys.readouterr().err
+
+
+def test_dotenv_not_utf8_is_user_error(tmp_path):
+    (tmp_path / ".env").write_bytes(b"A=\xff\n")
+    with pytest.raises(vz.UserError, match="UTF-8"):
+        vz.load_env(tmp_path, {})
+
+
+def test_blank_watermark_fails_before_request(photos, tmp_path, capsys):
+    send = FakeSend(openai_answer())
+    assert (
+        vz.main(
+            args(photos, tmp_path / "out", "--watermark", "   "),
+            env={**ENV, "VISUALIZATION_WATERMARK": ""},
+            send=send,
+        )
+        == 2
+    )
+    assert send.calls == []
+
+
+def test_logo_from_env_is_on_saved_png(photos, tmp_path, capsys):
+    logo = tmp_path / "logo.png"
+    Image.new("RGBA", (50, 50), (255, 0, 0, 255)).save(logo)
+    env = {**ENV, "VISUALIZATION_WATERMARK_LOGO": str(logo)}
+    assert vz.main(args(photos, tmp_path / "out"), env=env, send=FakeSend(openai_answer())) == 0
+    got = Path(json.loads(capsys.readouterr().out)["images"][0]).read_bytes()
+    assert got == vz.watermark(result_png(), WATERMARK, False, vz.load_logo(str(logo)))
+
+
+def test_invalid_base64_is_russian_error(photos, tmp_path, capsys):
+    bad = json.dumps({"data": [{"b64_json": "!!!not base64"}]}).encode()
+    assert vz.main(args(photos, tmp_path / "out"), env=ENV, send=FakeSend(bad)) == 2
+    assert "повреждены" in capsys.readouterr().err
+
+
+def test_n_zero_is_error_before_request(photos, tmp_path, capsys):
+    send = FakeSend(openrouter_answer())
+    env = {**ENV, "VISUALIZATION_PROVIDER": "openrouter"}
+    assert vz.main(args(photos, tmp_path / "out", "--n", "0"), env=env, send=send) == 2
+    assert send.calls == [] and "--n" in capsys.readouterr().err
+
+
+def test_unknown_provider_is_error_before_request(photos, tmp_path, capsys):
+    send = FakeSend(openai_answer())
+    assert vz.main(args(photos, tmp_path / "out", "--provider", "midjourney"), env=ENV, send=send) == 2
+    assert send.calls == [] and "openrouter" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("mode", "needle"), [("hang", "не ответил"), ("drop", "оборвалась")])
+def test_network_failure_text_is_russian(silent_server, monkeypatch, mode, needle):
+    monkeypatch.setattr(vz, "TIMEOUT", 1)
+    with pytest.raises(vz.UserError, match=needle):
+        vz.http_send(silent_server(mode), {}, b"{}")
+
+
+def test_no_connection_text_is_russian():
+    with pytest.raises(vz.UserError, match="Нет связи"):
+        vz.http_send("http://127.0.0.1:1/", {}, b"{}")
+
+
+def test_watermark_text_height_is_3_percent():
+    raw = result_png((1000, 600))
+    img = Image.open(io.BytesIO(vz.watermark(raw, "ММММ", mock=False))).convert("RGB")
+    box = ImageChops.difference(img, Image.open(io.BytesIO(raw)).convert("RGB")).getbbox()
+    assert box is not None and 0.02 * 600 <= box[3] - box[1] <= 0.045 * 600
+
+
+def test_out_is_a_file_is_error_before_request(photos, tmp_path, capsys):
+    out = tmp_path / "out"
+    out.write_text("x")
+    send = FakeSend(openai_answer())
+    assert vz.main(args(photos, out), env=ENV, send=send) == 2
+    assert send.calls == [] and "Не создать папку" in capsys.readouterr().err
+
+
+def test_catalog_found_upward_from_cwd(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / "workshop").mkdir(parents=True)
+    make_catalog(tmp_path).rename(home / "workshop" / "sample-catalog")
+    deep = home / "orders" / "x"
+    deep.mkdir(parents=True)
+    monkeypatch.chdir(deep)
+    assert vz.main(["catalog"], env={}) == 0
+
+
+def test_catalog_not_a_mapping_is_error(tmp_path, capsys):
+    (tmp_path / "catalog.yaml").write_text("- straight\n", encoding="utf-8")
+    assert vz.main(["catalog", "--catalog", str(tmp_path)], env={}) == 2
+    assert "словарь" in capsys.readouterr().err
+
+
+def test_material_path_with_equals_sign(photos, tmp_path, capsys):
+    odd = png(tmp_path / "a=b.png")
+    argv = ["generate", "--room", str(photos["room"]), "--material", str(odd), "--out", str(tmp_path / "out")]
+    assert vz.main(argv, env=ENV, send=FakeSend(openai_answer())) == 0
+    assert json.loads(capsys.readouterr().out)["inputs"][1]["role"] == "material"
