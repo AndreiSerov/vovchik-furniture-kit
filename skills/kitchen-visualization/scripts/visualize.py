@@ -3,20 +3,24 @@
 # requires-python = ">=3.11"
 # dependencies = ["pillow>=10.1", "pyyaml>=6"]
 # ///
-"""Картинка примерного дизайна кухни: фото комнаты + образец + материалы → сервис генерации.
+"""ИИ-визуализация кухни: фото комнаты + образец + фото материалов → сервис генерации картинок.
 
 Запуск (uv сам поставит Pillow и PyYAML):
-    uv run design_image.py catalog [--catalog ПАПКА]
-    uv run design_image.py generate --room ФОТО [--sample ФОТО]... [--sample-type ID]
-        [--material [РОЛЬ=]ФОТО]... [--type ТЕКСТ] [--wishes ТЕКСТ] --out ПАПКА
+    uv run visualize.py catalog [--catalog ПАПКА]
+    uv run visualize.py generate --room ФОТО [--shape ФОРМА] [--sample ФОТО]...
+        [--material [РОЛЬ=]ФОТО]... [--wishes ТЕКСТ] --out ПАПКА
         [--provider openai|openrouter] [--model ИМЯ] [--n 1] [--size auto] [--quality medium]
         [--watermark ТЕКСТ] [--catalog ПАПКА]
 
-Настройки — переменные окружения или `.env` (ищется от текущей папки вверх, окружение важнее):
+ФОРМА — форма кухни из брифа: straight, corner, u_shape, island. Без --sample образец берётся
+из каталога образцов: первое фото этой формы.
+
+Настройки — переменные окружения или `.env` (ищется от текущей папки вверх, ближайший; окружение важнее):
     OPENAI_API_KEY, OPENROUTER_API_KEY — ключи сервисов
-    DESIGN_PROVIDER (openai), DESIGN_MODEL, DESIGN_QUALITY — сервис, модель, качество
-    DESIGN_WATERMARK — текст водяного знака мастера (обязателен), DESIGN_WATERMARK_LOGO — PNG-логотип
-    DESIGN_CATALOG — папка каталога образцов с catalog.yaml
+    VISUALIZATION_PROVIDER (openai), VISUALIZATION_MODEL, VISUALIZATION_QUALITY (medium)
+    VISUALIZATION_WATERMARK — водяной знак мастера, имя и телефон (обязателен)
+    VISUALIZATION_WATERMARK_LOGO — PNG-логотип рядом со знаком
+    VISUALIZATION_CATALOG — папка каталога образцов (иначе workshop/sample-catalog/)
 
 stdout — JSON с описанием результата; ошибки — stderr по-русски, код возврата 2.
 Скрипт не зависит от движка `kitchen` и работает в любой папке.
@@ -26,10 +30,11 @@ from __future__ import annotations
 
 import argparse
 import base64
+import http.client
 import io
 import json
 import os
-import shutil
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -39,15 +44,20 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 
 FONT = Path(__file__).resolve().parents[1] / "assets" / "DejaVuSans.ttf"
 MOCK_LINE = "МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА"
+SHAPES = {"straight": "прямая", "corner": "угловая", "u_shape": "П-образная", "island": "только остров"}
 DEFAULT_MODELS = {"openai": "gpt-image-1", "openrouter": "google/gemini-2.5-flash-image"}
 KEYS = {"openai": "OPENAI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
 OPENAI_URL = "https://api.openai.com/v1/images/edits"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 TIMEOUT = 300
+REMOVE_OLD = (
+    "Remove any existing kitchen furniture and appliances from the room in Image 1 "
+    "and place the new kitchen there."
+)
 
 Send = Callable[[str, dict, bytes], bytes]
 
@@ -63,6 +73,11 @@ class ServiceError(Exception):
         self.text = text
 
 
+class RussianParser(argparse.ArgumentParser):
+    def error(self, message: str):
+        raise UserError(f"неверные аргументы: {message}")
+
+
 # --- настройки ---
 
 
@@ -75,14 +90,14 @@ def parse_dotenv(text: str) -> dict[str, str]:
         line = line.removeprefix("export ")
         key, _, value = line.partition("=")
         value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-            value = value[1:-1]
+        end = value.find(value[0], 1) if value[:1] in ("'", '"') else -1
+        value = value[1:end] if end > 0 else re.sub(r"\s+#.*$", "", value)
         values[key.strip()] = value
     return values
 
 
 def load_env(start: Path, environ: Mapping[str, str]) -> dict[str, str]:
-    """`.env` ближайший к `start` вверх по дереву, поверх — окружение."""
+    """Ближайший к `start` `.env` вверх по дереву, поверх — окружение."""
     merged: dict[str, str] = {}
     for folder in [start, *start.parents]:
         candidate = folder / ".env"
@@ -93,18 +108,18 @@ def load_env(start: Path, environ: Mapping[str, str]) -> dict[str, str]:
     return merged
 
 
-# --- каталог ---
+# --- каталог образцов ---
 
 
 def find_catalog(env: Mapping[str, str], flag: str | None) -> Path | None:
     if flag:
         return Path(flag)
-    if env.get("DESIGN_CATALOG"):
-        return Path(env["DESIGN_CATALOG"])
+    if env.get("VISUALIZATION_CATALOG"):
+        return Path(env["VISUALIZATION_CATALOG"])
     home = env.get("KITCHEN_HOME")
     starts = [Path(home)] if home else [Path.cwd(), *Path.cwd().parents]
     for folder in starts:
-        candidate = folder / "workshop" / "design-catalog"
+        candidate = folder / "workshop" / "sample-catalog"
         if (candidate / "catalog.yaml").is_file():
             return candidate
     return None
@@ -114,22 +129,35 @@ def load_catalog(folder: Path) -> dict:
     path = folder / "catalog.yaml"
     if not path.is_file():
         raise UserError(f"Каталог образцов: нет файла {path}.")
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    types, missing = [], []
-    for item in data.get("types") or []:
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as err:
+        raise UserError(f"{path}: YAML не разбирается: {err}") from err
+    if not isinstance(data, dict) or not isinstance(data.get("shapes", []), list):
+        raise UserError(f"{path}: нужен словарь с mock и списком shapes.")
+    shapes, missing = [], []
+    for n, item in enumerate(data.get("shapes") or [], 1):
+        if not isinstance(item, dict) or item.get("id") not in SHAPES:
+            raise UserError(f"{path}: форма {n}: id должен быть одним из {', '.join(SHAPES)}.")
+        names = item.get("фото") or []
+        if not isinstance(names, list):
+            raise UserError(f"{path}: форма {item['id']}: фото — список имён файлов в квадратных скобках.")
         photos = []
-        for name in item.get("фото") or []:
-            photo = (folder / name).resolve()
+        for name in names:
+            photo = (folder / str(name)).resolve()
             (photos if photo.is_file() else missing).append(str(photo))
-        types.append(
+        shapes.append(
             {
-                "id": str(item["id"]),
-                "название": item.get("название", item["id"]),
+                "id": item["id"],
+                "название": item.get("название", SHAPES[item["id"]]),
                 "описание": item.get("описание", ""),
                 "фото": photos,
             }
         )
-    return {"mock": bool(data.get("mock", False)), "types": types, "missing": missing}
+    result = {"mock": bool(data.get("mock", False)), "shapes": shapes, "missing": missing}
+    if result["mock"]:
+        result["warning"] = MOCK_LINE
+    return result
 
 
 # --- фото ---
@@ -155,27 +183,31 @@ def read_photo(path: Path) -> tuple[bytes, str]:
     return data, mime
 
 
+def safe_name(text: str) -> str:
+    """Роль в имени файла: буквы, цифры и дефис."""
+    return re.sub(r"[^\w-]+", "-", text).strip("-") or "x"
+
+
 # --- промпт ---
 
 
-def build_prompt(kitchen_type: str | None, wishes: str | None, roles: list[str]) -> str:
+def build_prompt(shape: str | None, wishes: str | None, roles: list[str]) -> str:
     lines = ["Photorealistic interior visualization of a custom-made kitchen.", "", "Input images:"]
     for n, role in enumerate(roles, 1):
         if role == "room":
             text = (
-                "the client's empty room (base image). Keep its walls, windows, doors, floor, "
-                "ceiling, lighting and camera perspective exactly."
+                "the client's room (base image). Keep its walls, windows, doors, floor, ceiling, pipes, "
+                "lighting and camera perspective exactly."
             )
         elif role == "sample":
-            text = "sample kitchen from the cabinet maker's work: follow its layout and style."
+            text = "sample kitchen from the cabinet maker's work: follow its layout, proportions and style."
         else:
             what = role.split(":", 1)[1] if ":" in role else ""
             text = f"material sample{f' for: {what}' if what else ''}. Reproduce its colour and texture."
         lines.append(f"- Image {n}: {text}")
-    lines.append("")
-    lines.append("Place the new kitchen into the room from Image 1.")
-    if kitchen_type:
-        lines.append(f"Kitchen layout type (Russian): {kitchen_type}.")
+    lines += ["", REMOVE_OLD]
+    if shape:
+        lines.append(f"Kitchen shape: {shape} (Russian: {SHAPES[shape]}).")
     if wishes:
         lines.append(f"Cabinet maker's wishes (Russian): {wishes}")
     lines += [
@@ -211,13 +243,15 @@ def openai_call(send: Send, key: str, model: str, prompt: str, photos, opts: dic
     body, content_type = multipart(fields, files)
     headers = {"Authorization": f"Bearer {key}", "Content-Type": content_type}
     answer = load_json(send(OPENAI_URL, headers, body))
-    images = [base64.b64decode(d["b64_json"]) for d in answer.get("data") or [] if d.get("b64_json")]
+    data = answer.get("data") or []
+    images = [b64(d["b64_json"]) for d in data if isinstance(d, dict) and d.get("b64_json")]
     if not images:
         raise UserError(f"Сервис ответил без картинки: {json.dumps(answer, ensure_ascii=False)[:500]}")
     return images
 
 
 def openrouter_call(send: Send, key: str, model: str, prompt: str, photos, opts: dict) -> list[bytes]:
+    """OpenRouter отдаёт одну картинку на запрос, поэтому `n` картинок — `n` запросов."""
     content: list[dict] = [{"type": "text", "text": prompt}]
     for data, mime in photos:
         uri = f"data:{mime};base64,{base64.b64encode(data).decode()}"
@@ -230,7 +264,7 @@ def openrouter_call(send: Send, key: str, model: str, prompt: str, photos, opts:
         answer = load_json(send(OPENROUTER_URL, headers, json.dumps(payload).encode()))
         message = ((answer.get("choices") or [{}])[0]).get("message") or {}
         found = [
-            decode_data_uri(img["image_url"]["url"])
+            b64(img["image_url"]["url"].split(",", 1)[1])
             for img in message.get("images") or []
             if str(img.get("image_url", {}).get("url", "")).startswith("data:")
         ]
@@ -241,15 +275,21 @@ def openrouter_call(send: Send, key: str, model: str, prompt: str, photos, opts:
     return images
 
 
-def decode_data_uri(uri: str) -> bytes:
-    return base64.b64decode(uri.split(",", 1)[1])
+def b64(text: str) -> bytes:
+    try:
+        return base64.b64decode(text, validate=True)
+    except ValueError as err:
+        raise UserError("Сервис ответил без картинки: данные картинки повреждены.") from err
 
 
 def load_json(raw: bytes) -> dict:
     try:
-        return json.loads(raw)
+        answer = json.loads(raw)
     except json.JSONDecodeError as err:
         raise UserError(f"Сервис ответил не JSON: {raw[:300]!r}") from err
+    if not isinstance(answer, dict):
+        raise UserError(f"Сервис ответил без картинки: {str(answer)[:300]}")
+    return answer
 
 
 def ext(mime: str) -> str:
@@ -265,6 +305,10 @@ def http_send(url: str, headers: dict, body: bytes) -> bytes:
         raise ServiceError(err.code, err.read().decode("utf-8", "replace")) from err
     except urllib.error.URLError as err:
         raise UserError(f"Нет связи с сервисом {url}: {err.reason}") from err
+    except TimeoutError as err:
+        raise UserError(f"Сервис {url} не ответил за {TIMEOUT} с, попробуйте ещё раз.") from err
+    except (OSError, http.client.HTTPException) as err:
+        raise UserError(f"Связь с сервисом {url} оборвалась: {err!r}") from err
 
 
 PROVIDERS = {"openai": openai_call, "openrouter": openrouter_call}
@@ -273,8 +317,11 @@ PROVIDERS = {"openai": openai_call, "openrouter": openrouter_call}
 # --- водяной знак ---
 
 
-def watermark(image: bytes, text: str, mock: bool, logo: Path | None = None) -> bytes:
-    base = Image.open(io.BytesIO(image)).convert("RGBA")
+def watermark(image: bytes, text: str, mock: bool, logo: Image.Image | None = None) -> bytes:
+    try:
+        base = Image.open(io.BytesIO(image)).convert("RGBA")
+    except (UnidentifiedImageError, OSError) as err:
+        raise UserError("Сервис ответил без картинки: данные не открываются как картинка.") from err
     layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
     size = max(12, round(min(base.size) * 0.03))
@@ -290,12 +337,19 @@ def watermark(image: bytes, text: str, mock: bool, logo: Path | None = None) -> 
         draw.text((x - left, y - top), line, font=font, fill=fill, stroke_width=2, stroke_fill=(0, 0, 0, 120))
         y -= size // 3
     if logo is not None:
-        mark = Image.open(logo).convert("RGBA")
+        mark = logo.copy()
         mark.thumbnail((size * 4, size * 4))
         layer.alpha_composite(mark, (base.width - margin - mark.width, max(0, y - mark.height)))
     out = io.BytesIO()
     Image.alpha_composite(base, layer).convert("RGB").save(out, "PNG")
     return out.getvalue()
+
+
+def load_logo(path: str) -> Image.Image:
+    try:
+        return Image.open(path).convert("RGBA")
+    except (UnidentifiedImageError, OSError) as err:
+        raise UserError(f"Логотип VISUALIZATION_WATERMARK_LOGO не открывается: {path}") from err
 
 
 # --- команды ---
@@ -308,94 +362,113 @@ def parse_material(value: str) -> tuple[str, Path]:
     return "", Path(value)
 
 
+def unique_stamp(out: Path) -> str:
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    candidate, n = stamp, 2
+    while (out / f"visualization-{candidate}.json").exists():
+        candidate, n = f"{stamp}-{n}", n + 1
+    return candidate
+
+
 def generate(opts: argparse.Namespace, env: Mapping[str, str], send: Send) -> dict:
-    provider = (opts.provider or env.get("DESIGN_PROVIDER") or "openai").lower()
+    if not opts.room:
+        raise UserError("Нет фото комнаты: передайте --room <фото>.")
+    if opts.n < 1:
+        raise UserError("--n должно быть не меньше 1.")
+    if opts.shape and opts.shape not in SHAPES:
+        raise UserError(f"Неизвестная форма кухни «{opts.shape}»: {', '.join(SHAPES)}.")
+    provider = (opts.provider or env.get("VISUALIZATION_PROVIDER") or "openai").lower()
     if provider not in PROVIDERS:
         raise UserError(f"Неизвестный сервис «{provider}»: openai или openrouter.")
     key = env.get(KEYS[provider])
     if not key:
         raise UserError(f"Нет ключа {KEYS[provider]}: добавьте его в .env или в окружение.")
-    mark = opts.watermark or env.get("DESIGN_WATERMARK")
+    mark = opts.watermark or env.get("VISUALIZATION_WATERMARK")
     if not mark:
-        raise UserError("Нет водяного знака мастера: задайте DESIGN_WATERMARK в .env или --watermark.")
-    model = opts.model or env.get("DESIGN_MODEL") or DEFAULT_MODELS[provider]
-    logo = Path(env["DESIGN_WATERMARK_LOGO"]) if env.get("DESIGN_WATERMARK_LOGO") else None
+        raise UserError(
+            "Нет водяного знака мастера: задайте VISUALIZATION_WATERMARK (имя и телефон) в .env или --watermark."
+        )
+    model = opts.model or env.get("VISUALIZATION_MODEL") or DEFAULT_MODELS[provider]
+    logo_path = env.get("VISUALIZATION_WATERMARK_LOGO")
+    logo = load_logo(logo_path) if logo_path else None
 
     inputs: list[tuple[str, Path]] = [("room", Path(opts.room))]
     inputs += [("sample", Path(p)) for p in opts.sample]
-    kitchen_type, mock = opts.type, False
-    if opts.sample_type:
+    mock = False
+    if not opts.sample and opts.shape:
         folder = find_catalog(env, opts.catalog)
         if folder is None:
-            raise UserError("Каталог образцов не найден: задайте --catalog или DESIGN_CATALOG.")
+            raise UserError("Каталог образцов не найден: задайте --catalog или VISUALIZATION_CATALOG.")
         catalog = load_catalog(folder)
-        chosen = next((t for t in catalog["types"] if t["id"] == opts.sample_type), None)
-        if chosen is None:
-            known = ", ".join(t["id"] for t in catalog["types"]) or "пусто"
-            raise UserError(f"В каталоге нет типа «{opts.sample_type}». Есть: {known}.")
-        if not chosen["фото"]:
-            raise UserError(f"У типа «{opts.sample_type}» в каталоге нет фото: пришлите фото образца.")
-        inputs += [("sample", Path(p)) for p in chosen["фото"][:1]]
-        kitchen_type = kitchen_type or chosen["название"]
+        chosen = next((s for s in catalog["shapes"] if s["id"] == opts.shape), None)
+        if chosen is None or not chosen["фото"]:
+            raise UserError(
+                f"У формы «{SHAPES[opts.shape]}» в каталоге нет фото: пришлите фото образца (--sample)."
+            )
+        inputs.append(("sample", Path(chosen["фото"][0])))
         mock = catalog["mock"]
     for value in opts.material:
         role, path = parse_material(value)
         inputs.append((f"material:{role}" if role else "material", path))
 
     photos = [read_photo(path) for _, path in inputs]
-    roles = [role for role, _ in inputs]
-    prompt = build_prompt(kitchen_type, opts.wishes, roles)
-    options = {"n": opts.n, "size": opts.size, "quality": opts.quality or env.get("DESIGN_QUALITY", "medium")}
+    prompt = build_prompt(opts.shape, opts.wishes, [role for role, _ in inputs])
+    quality = opts.quality or env.get("VISUALIZATION_QUALITY") or "medium"
+    options = {"n": opts.n, "size": opts.size, "quality": quality}
+    out = Path(opts.out)
+    try:
+        (out / "inputs").mkdir(parents=True, exist_ok=True)
+    except OSError as err:
+        raise UserError(f"Не создать папку результата {out}: {err}") from err
     try:
         images = PROVIDERS[provider](send, key, model, prompt, photos, options)
     except ServiceError as err:
         raise UserError(f"Сервис {provider} вернул ошибку {err.status}: {err.text[:500]}") from err
 
-    out = Path(opts.out)
-    (out / "inputs").mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    marked = [watermark(image, mark, mock, logo) for image in images]
+    stamp = unique_stamp(out)
     copies = []
-    for n, ((role, path), (_, mime)) in enumerate(zip(inputs, photos, strict=True), 1):
-        copy = out / "inputs" / f"{stamp}-{n}-{role.replace(':', '-')}{ext(mime)}"
-        shutil.copyfile(path, copy)
-        copies.append({"role": role, "path": str(copy.resolve()), "source": str(path)})
-    text = f"{mark}\n{MOCK_LINE}" if mock else mark
+    for n, ((role, _), (data, mime)) in enumerate(zip(inputs, photos, strict=True), 1):
+        copy = out / "inputs" / f"{stamp}-{n}-{safe_name(role)}{ext(mime)}"
+        copy.write_bytes(data)
+        copies.append({"role": role, "path": str(copy.resolve())})
     saved = []
-    for n, image in enumerate(images, 1):
-        target = out / f"design-{stamp}-{n}.png"
-        target.write_bytes(watermark(image, mark, mock, logo))
+    for n, image in enumerate(marked, 1):
+        target = out / f"visualization-{stamp}-{n}.png"
+        target.write_bytes(image)
         saved.append(str(target.resolve()))
     result = {
         "provider": provider,
         "model": model,
         "prompt": prompt,
-        "kitchen_type": kitchen_type,
+        "shape": opts.shape,
         "wishes": opts.wishes,
         "inputs": copies,
         "images": saved,
-        "watermark": text,
+        "watermark": f"{mark}\n{MOCK_LINE}" if mock else mark,
         "mock": mock,
         "created": datetime.now().isoformat(timespec="seconds"),
-        "json": str((out / f"design-{stamp}.json").resolve()),
+        "json": str((out / f"visualization-{stamp}.json").resolve()),
     }
+    if mock:
+        result["warning"] = MOCK_LINE
     Path(result["json"]).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     return result
 
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Картинка примерного дизайна кухни.")
-    sub = p.add_subparsers(dest="command", required=True)
-    cat = sub.add_parser("catalog", help="типы кухонь из каталога образцов")
+    p = RussianParser(prog="visualize.py", description="ИИ-визуализация кухни.")
+    sub = p.add_subparsers(dest="command", required=True, parser_class=RussianParser)
+    cat = sub.add_parser("catalog", help="формы кухни и фото образцов из каталога")
     cat.add_argument("--catalog")
-    gen = sub.add_parser("generate", help="сделать картинку")
-    gen.add_argument("--room", required=True, help="фото комнаты клиента")
+    gen = sub.add_parser("generate", help="сделать ИИ-визуализацию")
+    gen.add_argument("--room", help="фото комнаты клиента (обязательно)")
+    gen.add_argument("--shape", help=f"форма кухни: {', '.join(SHAPES)}")
     gen.add_argument("--sample", action="append", default=[], help="фото образца кухни")
-    gen.add_argument("--sample-type", help="id типа из каталога (берётся его первое фото)")
     gen.add_argument("--material", action="append", default=[], help="[РОЛЬ=]ФОТО материала")
-    gen.add_argument("--type", help="тип кухни словами")
-    gen.add_argument("--wishes", help="пожелания мастера")
-    gen.add_argument("--out", required=True, help="папка для результата")
-    gen.add_argument("--provider", choices=sorted(PROVIDERS))
+    gen.add_argument("--wishes", help="пожелания мастера о виде и материалах")
+    gen.add_argument("--out", help="папка для результата (обязательно)")
+    gen.add_argument("--provider")
     gen.add_argument("--model")
     gen.add_argument("--n", type=int, default=1)
     gen.add_argument("--size", default="auto")
@@ -408,17 +481,17 @@ def parser() -> argparse.ArgumentParser:
 def main(
     argv: list[str] | None = None, env: Mapping[str, str] | None = None, send: Send | None = None
 ) -> int:
-    opts = parser().parse_args(argv)
-    settings = load_env(Path.cwd(), os.environ) if env is None else dict(env)
     try:
+        opts = parser().parse_args(argv)
+        settings = load_env(Path.cwd(), os.environ) if env is None else dict(env)
         if opts.command == "catalog":
             folder = find_catalog(settings, opts.catalog)
             if folder is None:
-                raise UserError("Каталог образцов не найден: задайте --catalog или DESIGN_CATALOG.")
+                raise UserError("Каталог образцов не найден: задайте --catalog или VISUALIZATION_CATALOG.")
             result = load_catalog(folder)
         else:
-            if opts.n < 1:
-                raise UserError("--n должно быть не меньше 1.")
+            if not opts.out:
+                raise UserError("Нет папки результата: передайте --out <папка>.")
             result = generate(opts, settings, send or http_send)
     except UserError as err:
         print(f"Ошибка: {err}", file=sys.stderr)

@@ -83,9 +83,9 @@
 - [x] 31 — Триггеры и «продолжи заказ Петрова» (6.6) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 48 — Уборка этапа 6 ([спека](docs/specs/stage-6-skills.md))
 
-## Этап 7. Картинка дизайна
+## Этап 7. ИИ-визуализация
 
-- [ ] 56 — Скилл `kitchen-design`: картинка по фото комнаты, образца и материалов ([спека](docs/specs/stage-7-design-image.md)); живой вызов — manual
+- [ ] 56 — Скилл `kitchen-visualization`: ИИ-визуализация по фото комнаты, образца и материалов ([спека](docs/specs/stage-7-ai-visualization.md)); живой вызов — manual
 
 ## Бэклог (после MVP)
 
