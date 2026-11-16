@@ -148,7 +148,7 @@ def test_facade_fill_comes_from_the_ral_table_and_unknown_colour_is_grey_and_nam
 
 
 def test_facades_are_the_facade_parts_of_the_module(home):
-    # Н1 base_drawers — три фасада ящиков, Н4 — один фасад 450 и глухая часть 600
+    # Н1 base_drawers — три фасада ящиков, Н4 — один фасад 450 и глухая часть 598 (от края фасада)
     result = petrov_views(home)
     n1 = next(m for m in result.scene.modules if m.label == "Н1")
     assert len(n1.facades) == 3 and {f.width for f in n1.facades} == {596}

@@ -300,7 +300,7 @@ def build_scene(project: Project, placed: Placement, parts: list[ModuleParts], w
                 _nearest(entries[i + 1 :], depth_of, tall_of),
                 _nearest(entries[:i][::-1], depth_of, tall_of),
             )
-            if d
+            if d is not None
         ]
         depth = max(near) if near else wall_depths[g.wall].get(g.row, fallback)
         gaps.append(
