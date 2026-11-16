@@ -91,6 +91,61 @@ def test_kitchen_project_skill_has_its_triggers_and_names_the_ticket_commands():
     assert "kitchen check --project" in body
 
 
+def test_kitchen_project_skill_regression_guards():
+    body = (skill_lint.DEFAULT_ROOT / "kitchen-project" / "SKILL.md").read_text(encoding="utf-8")
+    assert "Нет заказа или проекта — скажи об этом и остановись" not in body
+    assert "v0" not in body
+    assert "Проекта ещё нет" in body
+    if "3d --project" in body:
+        assert "Файл не записан" in body
+
+
+def test_brief_and_order_requirements_work_when_not_exempt(tmp_path, monkeypatch):
+    monkeypatch.setattr(skill_lint, "SHAPE_EXEMPT", set())
+
+    def fresh(n):
+        d = tmp_path / str(n)
+        d.mkdir()
+        return d
+
+    assert lint_named(fresh(1), "kitchen-brief", "Пусто.\n") == [
+        "kitchen-brief: нет шага kitchen brief save",
+        "kitchen-brief: нет шага kitchen log с --kind next",
+        "kitchen-brief: нет плашки «МОК-ДАННЫЕ»",
+    ]
+    assert lint_named(fresh(2), "kitchen-order", "Пусто.\n") == [
+        "kitchen-order: нет шага kitchen status",
+        "kitchen-order: нет раздела «Устарело»",
+    ]
+    brief = "`kitchen brief save <заказ> <файл>`, `kitchen log <заказ> x --kind next`, МОК-ДАННЫЕ.\n"
+    order = "`kitchen status <заказ>`, Устарело.\n"
+    assert lint_named(fresh(3), "kitchen-brief", brief) == []
+    assert lint_named(fresh(4), "kitchen-order", order) == []
+
+
+def test_frontmatter_words_do_not_count(tmp_path):
+    d = tmp_path / "kitchen-project"
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        "---\nname: kitchen-project\ndescription: Устарело и МОК-ДАННЫЕ\n---\n\n"
+        "`kitchen status <заказ>`, `kitchen log <заказ> x --kind done`, `kitchen log <заказ> y --kind next`.\n",
+        encoding="utf-8",
+    )
+    assert skill_lint.lint(tmp_path) == [
+        "kitchen-project: нет раздела «Устарело»",
+        "kitchen-project: нет плашки «МОК-ДАННЫЕ»",
+    ]
+
+
+def test_kind_with_equals_and_fenced_continued_log_count(tmp_path):
+    body = (
+        "Устарело, МОК-ДАННЫЕ, `kitchen status <заказ>`.\n\n"
+        "`kitchen log <заказ> x --kind=done`\n\n"
+        '```\nkitchen log <заказ> \\\n  --kind next "y"\n```\n'
+    )
+    assert lint_named(tmp_path, "kitchen-project", body) == []
+
+
 def test_kitchen_project_eval_describes_the_petrov_scenario():
     path = skill_lint.DEFAULT_ROOT / "kitchen-project" / "evals" / "evals.json"
     data = json.loads(path.read_text(encoding="utf-8"))
