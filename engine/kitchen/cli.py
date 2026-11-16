@@ -676,7 +676,7 @@ def _render_quote(r: api.QuoteResult) -> str:
         f"Итого: {api.money(r.price)}",
         f"Предоплата ({api.percent(r.prepayment_share)}): {api.money(r.prepayment)}",
         f"Остаток: {api.money(r.balance)}",
-        f"Срок изготовления и монтажа: {api.plural(r.days, 'рабочий день', 'рабочих дня', 'рабочих дней')}",
+        f"Срок изготовления и монтажа: {api.working_days(r.days)}",
     ]
     if r.economy:
         e = r.economy

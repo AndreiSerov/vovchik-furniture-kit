@@ -44,6 +44,11 @@ def client_name(brief: dict[str, Any]) -> str:
     return "" if found is None else str(found)
 
 
+def client_phone(brief: dict[str, Any]) -> str:
+    found = value(brief, "client.phone")
+    return "" if found is None else str(found).strip()
+
+
 def check(brief: dict[str, Any], today: date) -> dict[str, Any]:
     """Результат check_brief.py; бриф с `errors` или `unknown_fields` не принимается."""
     cb = _checker()

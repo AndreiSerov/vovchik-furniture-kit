@@ -351,11 +351,13 @@ def test_workshop_not_found_message_is_the_one_the_skill_quotes(tmp_path, monkey
 def test_scenario_status_has_the_right_dalshe_section(home):
     api.order_new(ORDER, client="Петров П. П.", home=home)
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
-    api.log_add(ORDER, "next", "согласовать фасады", home)
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
     api.estimate_and_save(ORDER, home)
     api.quote_and_save(ORDER, 35, home)
     api.production_and_save(ORDER, home)
+    api.log_add(
+        ORDER, "next", "согласовать фасады", home
+    )  # импорт, смета, КП и производство «Дальше» сбрасывают (57)
     assert section(api.status("Петров", home).text, "Дальше").endswith("согласовать фасады")
     api.log_add(ORDER, "done", "фасады согласованы", home)
     assert section(api.status("Петров", home).text, "Дальше") == "Пока ничего."

@@ -238,7 +238,7 @@ def _digits(text: str) -> str:
     return re.sub(r"\D", "", text)
 
 
-def _is_phone_query(text: str) -> bool:
+def is_phone_query(text: str) -> bool:
     """Запрос без букв и с 10+ цифрами — телефон; номер заказа ГГГГ-NNN (7 цифр) им не считается."""
     return not any(c.isalpha() for c in text) and len(_digits(text)) >= 10
 
@@ -246,7 +246,7 @@ def _is_phone_query(text: str) -> bool:
 def find_order(conn: sqlite3.Connection, query: str) -> sqlite3.Row:
     """Точный номер, `номер-фамилия`, телефон клиента или подстрока фамилии или имени (кириллица и латиница)."""
     rows = conn.execute("SELECT * FROM orders ORDER BY number").fetchall()
-    if _is_phone_query(query):
+    if is_phone_query(query):
         tail = _digits(query)[-10:]  # последние 10 цифр: +7, 8 и без кода — один номер
         hits = [r for r in rows if _digits(r["phone"])[-10:] == tail]  # короче 10 цифр не совпадёт с tail
         return _single(hits, query)

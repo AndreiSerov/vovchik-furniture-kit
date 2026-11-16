@@ -33,6 +33,11 @@ def plural(count: int, one: str, few: str, many: str) -> str:
     return f"{count} {form}"
 
 
+def working_days(count: int) -> str:
+    """Срок в рабочих днях: «21 рабочий день», «3 рабочих дня» (КП, PDF и журнал — одно место)."""
+    return plural(count, "рабочий день", "рабочих дня", "рабочих дней")
+
+
 def num(value: float, digits: int | None = None) -> int | float:
     """Целое число — целым (85000, не 85000.0); дробное — как есть или округлённое до `digits` знаков."""
     if float(value).is_integer():
