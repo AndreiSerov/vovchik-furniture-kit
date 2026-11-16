@@ -251,3 +251,25 @@ def test_command_line_fails_on_a_violator_and_passes_on_real_skills():
 def test_scripts_check_runs_the_skill_lint_on_an_active_line():
     text = (REPO / "scripts" / "check").read_text(encoding="utf-8")
     assert re.search(r"^uv run python -m kitchen\.skill_lint\s*$", text, re.MULTILINE)
+
+
+def test_frontmatter_code_spans_do_not_count_as_steps(tmp_path):
+    d = tmp_path / "kitchen-project"
+    d.mkdir()
+    (d / "SKILL.md").write_text(
+        "---\nname: kitchen-project\ndescription: Сначала `kitchen status <заказ>`.\n---\n\n"
+        "Устарело, МОК-ДАННЫЕ, `kitchen log <заказ> x --kind done`, `kitchen log <заказ> y --kind next`.\n",
+        encoding="utf-8",
+    )
+    assert skill_lint.lint(tmp_path) == ["kitchen-project: нет шага kitchen status"]
+
+
+def test_step_needs_whole_words(tmp_path):
+    body = (
+        "Устарело, МОК-ДАННЫЕ, `notkitchen status <заказ>`.\n"
+        "`kitchen log <заказ> x --kind donex`, `kitchen log <заказ> y --kind next`.\n"
+    )
+    assert lint_named(tmp_path, "kitchen-project", body) == [
+        "kitchen-project: нет шага kitchen status",
+        "kitchen-project: нет шага kitchen log с --kind done",
+    ]
