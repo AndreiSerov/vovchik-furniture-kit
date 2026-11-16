@@ -70,6 +70,7 @@ __all__ = [
     "HOLE_PURPOSES",
     "OUTPUT_RECOMPUTE",
     "PRODUCTION_KINDS",
+    "PRODUCTION_RECOMPUTE",
     "AssemblyModule",
     "AssemblyPageLayout",
     "AssemblyResult",
@@ -312,6 +313,7 @@ class StatusResult(Result):
 
 
 OUTPUT_RECOMPUTE = store.OUTPUT_RECOMPUTE
+PRODUCTION_RECOMPUTE = store.PRODUCTION_RECOMPUTE
 
 
 LOG_KINDS = ("done", "decision", "next", "note")

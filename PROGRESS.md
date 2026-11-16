@@ -80,7 +80,7 @@
 - [x] 29 — Скилл `kitchen-estimate` (6.3, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [x] 43 — `kitchen-brief`: голос мастера и одна вилка (6.5, 6.4) ([спека](docs/specs/stage-6-skills.md))
 - [x] 44 — Быстрый опрос и эвалы `kitchen-brief` (6.5) ([спека](docs/specs/stage-6-skills.md))
-- [ ] 31 — Триггеры и «продолжи заказ Петрова» (6.6) ([спека](docs/specs/stage-6-skills.md))
+- [x] 31 — Триггеры и «продолжи заказ Петрова» (6.6) ([спека](docs/specs/stage-6-skills.md))
 - [ ] 48 — Уборка этапа 6 ([спека](docs/specs/stage-6-skills.md))
 
 ## Бэклог (после MVP)

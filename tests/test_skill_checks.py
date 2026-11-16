@@ -52,12 +52,19 @@ VIOLATIONS = {
     "trigger_duplicate": ["triggers.json: фраза 2: дубль фразы 1 «  составь  БРИФ» (скилл kitchen-bad)"],
     "trigger_unknown_skill": ["triggers.json: фраза 2: неизвестный скилл «kitchen-nope»"],
     "skill_without_phrase": ["kitchen-bad: нет ни одной фразы в triggers.json"],
+    "skill_one_phrase": ["kitchen-other: одна фраза в triggers.json, нужно не меньше двух"],
+    "triggers_too_few": ["triggers.json: фраз 9, нужно не меньше 10"],
+    "triggers_empty": [
+        "triggers.json: фраз 0, нужно не меньше 10",
+        "kitchen-bad: нет ни одной фразы в triggers.json",
+    ],
     "triggers_bad_structure": ['triggers.json: строка 1: нужен объект {"phrases": [...]}'],
     "triggers_not_json": [
         "triggers.json: строка 1: не JSON: Expecting property name enclosed in double quotes"
     ],
     "triggers_bad_phrase": [
         "triggers.json: фраза 1: нужны непустой text и skill, и больше ничего",
+        "triggers.json: фраз 0, нужно не меньше 10",
         "kitchen-bad: нет ни одной фразы в triggers.json",
     ],
 }
@@ -73,8 +80,8 @@ def test_every_violator_fixture_has_an_expected_message():
     assert cases == set(VIOLATIONS)
 
 
-@pytest.mark.parametrize("case", ["ok_empty_triggers", "ok_no_triggers_file", "ok_shape"])
-def test_empty_trigger_set_passes(case):
+@pytest.mark.parametrize("case", ["ok_no_triggers_file", "ok_shape"])
+def test_folder_without_a_phrase_set_passes(case):
     assert skill_lint.lint(BAD / case) == []
 
 
@@ -205,6 +212,7 @@ def test_kitchen_estimate_skill_has_its_triggers_and_names_the_ticket_commands()
     assert mine == {
         "Посчитай закупку Петрову",
         "Сколько выйдет кухня Петрова",
+        "Сколько выйдет Петров?",
         "Сделай КП Петрову",
         "А если подешевле?",
     }
@@ -234,9 +242,7 @@ def test_kitchen_estimate_eval_asks_the_term_and_refuses_the_mock_send():
     assert "kitchen quote 2026-047-petrov --days 20" in send["setup"]
 
 
-def test_brief_and_order_requirements_work_when_not_exempt(tmp_path, monkeypatch):
-    monkeypatch.setattr(skill_lint, "SHAPE_EXEMPT", set())
-
+def test_brief_and_order_requirements_pass_on_a_matching_text(tmp_path):
     def fresh(n):
         d = tmp_path / str(n)
         d.mkdir()
@@ -340,8 +346,8 @@ def test_shape_requires_status_log_stale_and_mock_banner(tmp_path):
     ]
 
 
-def test_only_order_waits_for_its_ticket():
-    assert skill_lint.SHAPE_EXEMPT == {"kitchen-order"}
+def test_no_skill_is_exempt_from_its_shape():
+    assert skill_lint.SHAPE_EXEMPT == set()
     assert set(skill_lint.SHAPE_REQUIREMENTS) == {
         "kitchen-project",
         "kitchen-production",
@@ -351,8 +357,11 @@ def test_only_order_waits_for_its_ticket():
     }
 
 
-def test_exempt_skill_without_shape_passes(tmp_path):
-    assert lint_named(tmp_path, "kitchen-order", "Пусто.\n") == []
+def test_order_is_held_to_its_shape(tmp_path):
+    assert lint_named(tmp_path, "kitchen-order", "Пусто.\n") == [
+        "kitchen-order: нет шага kitchen status",
+        "kitchen-order: нет раздела «Устарело»",
+    ]
 
 
 def test_brief_is_held_to_its_shape(tmp_path):
