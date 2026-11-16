@@ -6,6 +6,10 @@
     {"text": "Поменяй ширину Н2 у Петрова на 450", "skill": "kitchen-project"},
     {"text": "Покажи 3D кухни Петрова", "skill": "kitchen-project"},
     {"text": "Сделай раскрой Петрову", "skill": "kitchen-production"},
-    {"text": "Что везти на монтаж к Петрову", "skill": "kitchen-production"}
+    {"text": "Что везти на монтаж к Петрову", "skill": "kitchen-production"},
+    {"text": "Посчитай закупку Петрову", "skill": "kitchen-estimate"},
+    {"text": "Сколько выйдет кухня Петрова", "skill": "kitchen-estimate"},
+    {"text": "Сделай КП Петрову", "skill": "kitchen-estimate"},
+    {"text": "А если подешевле?", "skill": "kitchen-estimate"}
   ]
 }

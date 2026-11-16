@@ -194,6 +194,42 @@ def test_kitchen_production_step_1_stops_without_a_project_and_wording_guards():
     assert "<документ>: посчитан из версии K, пересчитан из версии N" in body
 
 
+def test_kitchen_estimate_skill_has_its_triggers_and_names_the_ticket_commands():
+    root = skill_lint.DEFAULT_ROOT
+    phrases = json.loads((root / "triggers.json").read_text(encoding="utf-8"))["phrases"]
+    mine = {p["text"] for p in phrases if p["skill"] == "kitchen-estimate"}
+    assert mine == {
+        "Посчитай закупку Петрову",
+        "Сколько выйдет кухня Петрова",
+        "Сделай КП Петрову",
+        "А если подешевле?",
+    }
+    body = (root / "kitchen-estimate" / "SKILL.md").read_text(encoding="utf-8")
+    for command in ("status", "check", "purchase", "estimate", "quote", "brief show", "log"):
+        assert f"kitchen {command} " in body, command
+    assert "kitchen estimate <заказ> --economy" in body
+    assert "kitchen quote <заказ> --days N" in body
+    assert "Какой срок изготовления и монтажа вписать в КП, в рабочих днях?" in body
+    assert "клиенту не отправляю; что заменить — MOCKS.md" in body
+    assert "первая строка" not in body.lower()
+
+
+def test_kitchen_estimate_eval_asks_the_term_and_refuses_the_mock_send():
+    path = skill_lint.DEFAULT_ROOT / "kitchen-estimate" / "evals" / "evals.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["skill_name"] == "kitchen-estimate"
+    by_prompt = {case["prompt"]: case for case in data["evals"]}
+    assert len(by_prompt) == 2
+    for case in data["evals"]:
+        assert "scripts/petrov-sandbox" in case["setup"]
+        assert len(case["assertions"]) >= 5
+    quote = next(c for p, c in by_prompt.items() if "«Сделай КП Петрову»" in p)
+    assert any("не вызвана" in a and "quote" in a for a in quote["assertions"])
+    send = next(c for p, c in by_prompt.items() if "«Отправь КП клиенту в телеграм»" in p)
+    assert any("Telegram" in a and "VK" in a for a in send["assertions"])
+    assert "kitchen quote 2026-047-petrov --days 20" in send["setup"]
+
+
 def test_brief_and_order_requirements_work_when_not_exempt(tmp_path, monkeypatch):
     monkeypatch.setattr(skill_lint, "SHAPE_EXEMPT", set())
 
@@ -387,3 +423,71 @@ def test_kitchen_production_step_4_quotes_the_markers_the_commands_print():
         "«Источник: заказ …, версия N проекта»",
     ):
         assert marker in step4, marker
+
+
+def _estimate_body():
+    return (skill_lint.DEFAULT_ROOT / "kitchen-estimate" / "SKILL.md").read_text(encoding="utf-8")
+
+
+def _step(n):
+    return _estimate_body().split(f"\n{n}. **")[1].split(f"\n{n + 1}. **")[0]
+
+
+def test_kitchen_estimate_r29_B1_every_route_lists_check_and_quote_lists_estimate():
+    routes = [line for line in _step(2).splitlines() if line.lstrip().startswith("- ")]
+    assert len(routes) == 5, routes
+    for line in routes:
+        steps = re.search(r"шаги ([\d, ]+)\.", line).group(1).split(", ")
+        assert steps[0] == "3", line
+        assert steps[-2:] == ["8", "9"], line
+    quote = next(line for line in routes if "КП" in line)
+    assert "шаги 3, 5, 7, 8, 9" in quote, quote
+
+
+def test_kitchen_estimate_problems_keep_variant_term_not_converted_budget_skipped():
+    assert "а вариант всё равно дай" in _step(6)
+    assert "`warnings`" in _step(6)
+    ask = _estimate_body().split("1. Спроси срок")[1].split("2. `kitchen quote")[0]
+    assert "не переводи сам" in ask and "спроси ещё раз" in ask, ask
+    assert "только если мастер не просил «экономию»" in _step(5)
+    assert "Мастер просил другое — только предложи" in _step(8)
+    assert "сделать проект (kitchen-project), потом смета" not in _estimate_body()
+
+
+def test_kitchen_estimate_r29_B2_problems_alone_do_not_cancel_economy():
+    assert not re.search(r"problems[^.]*не пуст[^.]*не получился", _step(6))
+
+
+def test_kitchen_estimate_r29_B3_non_number_term_is_asked_again_before_quote():
+    ask = _estimate_body().split("1. Спроси срок")[1].split("2. `kitchen quote")[0]
+    assert "не число" in ask or "не целое" in ask, ask
+
+
+def test_kitchen_estimate_skill_keeps_the_ticket_rules():
+    for text in (
+        "не бери его из брифа",
+        "Пересчёт устаревшего КП — снова спроси срок",
+        "Мастер просил КП — срок спроси заново",
+        "срок прошлого КП не повторяй",
+        "внутренний документ",
+        "«КП посчитано на мок-данных — в PDF водяной знак, клиенту не отправляю; что заменить — MOCKS.md»",
+        "в том числе через Telegram или VK",
+        "«Пока ничего.»",
+        "Проекта ещё нет",
+        "--kind decision",
+        "economy.price",
+        "economy.saving",
+        "client_text",
+        "budget.amount_rub.value",
+    ):
+        assert text in _estimate_body(), text
+
+
+def test_kitchen_estimate_r29_journal_is_last_and_mock_phrases_are_split():
+    body = _estimate_body()
+    assert _step(8).startswith("Устаревшее.")
+    assert _step(9).startswith("Запиши журнал.")
+    assert "срок без согласия не спрашивай" in _step(8)
+    assert "Посчитано на мок-данных мастерской — клиенту не отправляю; что заменить — MOCKS.md" in body
+    assert "Фразу про КП не говори, если КП не делали" in body
+    assert "сначала шаг 5" not in _step(6)
