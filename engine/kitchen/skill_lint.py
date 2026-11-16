@@ -330,8 +330,8 @@ SHAPE_REQUIREMENTS: dict[str, list[tuple[str, Shape]]] = {
     ],
     "kitchen-order": [STATUS, STALE],
 }
-# kitchen-brief — до тикета 43, kitchen-order — до тикета 31.
-SHAPE_EXEMPT = {"kitchen-brief", "kitchen-order"}
+# kitchen-order — до тикета 31.
+SHAPE_EXEMPT = {"kitchen-order"}
 
 
 def check_shape(skill: str, lines: list[str]) -> list[str]:
