@@ -319,10 +319,25 @@ def _step(n):
     return _estimate_body().split(f"\n{n}. **")[1].split(f"\n{n + 1}. **")[0]
 
 
-def test_kitchen_estimate_r29_B1_every_money_route_goes_through_check():
-    for line in _step(2).splitlines():
-        if re.search(r"шаг [4-7]\b", line):
-            assert re.search(r"шаг(и)? 3", line), line
+def test_kitchen_estimate_r29_B1_every_route_lists_check_and_quote_lists_estimate():
+    routes = [line for line in _step(2).splitlines() if line.lstrip().startswith("- ")]
+    assert len(routes) == 5, routes
+    for line in routes:
+        steps = re.search(r"шаги ([\d, ]+)\.", line).group(1).split(", ")
+        assert steps[0] == "3", line
+        assert steps[-2:] == ["8", "9"], line
+    quote = next(line for line in routes if "КП" in line)
+    assert "шаги 3, 5, 7, 8, 9" in quote, quote
+
+
+def test_kitchen_estimate_problems_keep_variant_term_not_converted_budget_skipped():
+    assert "а вариант всё равно дай" in _step(6)
+    assert "`warnings`" in _step(6)
+    ask = _estimate_body().split("1. Спроси срок")[1].split("2. `kitchen quote")[0]
+    assert "не переводи сам" in ask and "спроси ещё раз" in ask, ask
+    assert "только если мастер не просил «экономию»" in _step(5)
+    assert "Мастер просил другое — только предложи" in _step(8)
+    assert "сделать проект (kitchen-project), потом смета" not in _estimate_body()
 
 
 def test_kitchen_estimate_r29_B2_problems_alone_do_not_cancel_economy():
