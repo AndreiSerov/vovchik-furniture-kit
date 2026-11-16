@@ -522,3 +522,68 @@ def test_fork_keys_quoted_by_the_skill_are_printed_by_quick_estimate(home):
     keys = re.findall(r"`(\w+)`", ready[0])
     assert {"total_low", "total_high", "mock"} <= set(keys)
     assert set(keys) <= set(data), set(keys) - set(data)
+
+
+def test_template_section_6_carries_the_premium_phrase_verbatim():
+    section6 = read("assets", "brief_template.md").split("## 6.")[1]
+    assert PHRASE_PREMIUM in section6
+    assert "«с такими материалами цена будет выше вилки»" not in section6
+
+
+def test_antresol_word_is_not_in_the_client_why_of_the_mandatory_part():
+    questions = read("references", "questions.md")
+    assert "говорить клиенту" in questions.split("## 0.")[0]  # «Зачем» — текст клиенту
+    mandatory = questions.split("## Обязательная часть")[1].split("\n## ")[0]
+    whys = re.findall(r"\*Зачем:\*([^(\n]*)", mandatory)
+    assert len(whys) >= 3
+    assert not [w for w in whys if "антресол" in w.lower()], whys
+
+
+def test_mock_phrase_sits_only_in_the_mock_branch():
+    mock = next(l for l in fork_lines() if l.startswith('- `"mock": true`'))
+    real = next(l for l in fork_lines() if l.startswith('- `"mock": false`'))
+    assert PHRASE_MOCK in mock and PHRASE_MOCK not in real
+
+
+def test_template_section_4_keeps_the_fork_from_the_client_on_mock():
+    section4 = read("assets", "brief_template.md").split("## 4.")[1].split("\n## ")[0]
+    assert "на моке цену клиенту не называть" in section4 and "«цену назову после замера»" in section4
+
+
+def test_duplicate_surname_never_lets_the_agent_pick_a_number():
+    assert "сам не выбирай" in dup_line()
+
+
+def test_check_brief_step_says_exit_0_with_errors():
+    check = next(t for t in steps(read("SKILL.md")).values() if "python3 scripts/check_brief.py" in t)
+    assert "Код выхода 0 — при любом брифе" in check
+
+
+def test_interview_mandatory_part_is_never_dropped_by_the_limit():
+    interview = read("SKILL.md").split("## Интервью")[1]
+    rule = next(l for l in interview.splitlines() if l.startswith("2. **Обязательная часть"))
+    assert "в лимит не отбрасывается" in rule
+    assert "отложить" not in rule and "можно" not in rule.split(":**")[0]
+
+
+def test_save_ref_is_taken_from_the_saved_line_not_from_a_banner_line():
+    save = steps(read("SKILL.md"))[7]
+    assert "из этой строки" in save
+    assert not re.search(r"(перв|последн)\w* строк", save.lower())
+
+
+def test_unknown_field_text_quoted_by_the_skill_is_printed_by_brief_save(home, tmp_path):
+    brief = json.loads((REPO / "tests" / "fixtures" / "petrov_brief.json").read_text(encoding="utf-8"))
+    brief["room"]["foo"] = {"value": 1, "source": "client"}
+    path = tmp_path / "unknown.json"
+    path.write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
+    result = CliRunner().invoke(app, ["brief", "save", "petrov", str(path)])
+    assert result.exit_code == 1
+    assert "Неизвестное поле брифа: room.foo (опечатка?)." in result.output
+    assert "Бриф не сохранён." in result.output
+    quoted = re.findall(r"«(Неизвестное поле[^»]*)»", steps(read("SKILL.md"))[7])
+    assert quoted == ["Неизвестное поле брифа: … (опечатка?)."]
+
+
+def test_log_step_runs_only_after_save():
+    assert "Только после сохранения" in steps(read("SKILL.md"))[8]
