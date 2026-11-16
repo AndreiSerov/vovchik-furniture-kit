@@ -345,3 +345,41 @@ def test_diff_puts_the_kit_line_before_the_position_line(home, tmp_path):
         "Н6: техника посудомойка → не задано",
         "Н6: положение Б, нижний, 2 → Б, нижний, 1",
     ]
+
+
+# Повторное ревью 51: правило пар приборов одного вида (`common.pair_by_model_then_order`).
+def test_diff_pairs_appliances_by_model_ignoring_case_before_order(home, tmp_path):
+    three = [
+        {"type": "fridge", "width": 450, "model": "X", "module": "ПМ1"},
+        {"type": "fridge", "width": 500, "model": "Y", "module": "ПМ1"},
+        {"type": "fridge", "width": 600, "model": "Z", "module": "ПМ1"},
+    ]
+
+    def relabel(d):
+        mine = [a for a in d["appliances"] if a["type"] == "fridge"]
+        mine[1]["model"], mine[2]["model"] = "y", "z"
+        d["appliances"] = [a for a in d["appliances"] if a["type"] != "fridge"] + [mine[2], mine[1], mine[0]]
+
+    petrov_versions(tmp_path, lambda d: d["appliances"].extend(three), relabel)
+    assert api.diff_project("petrov", 2, 3).changes == [
+        "ПМ1: холодильник: модель Y → y",
+        "ПМ1: холодильник: модель Z → z",
+    ]
+
+
+def test_diff_pairs_appliances_without_models_in_list_order(home, tmp_path):
+    two = [
+        {"type": "fridge", "width": 450, "module": "ПМ1"},
+        {"type": "fridge", "width": 500, "module": "ПМ1"},
+    ]
+
+    def widen(d):
+        for a in d["appliances"]:
+            if a["type"] == "fridge":
+                a["width"] += 10
+
+    petrov_versions(tmp_path, lambda d: d["appliances"].extend(two), widen)
+    assert api.diff_project("petrov", 2, 3).changes == [
+        "ПМ1: холодильник: ширина 450 → 460",
+        "ПМ1: холодильник: ширина 500 → 510",
+    ]

@@ -357,3 +357,15 @@ def test_fridge_not_in_kitchen_wins_over_free_standing_in_a_module(home):
     save_brief(home, {"wall": "none", "built_in": False, "width_mm": 600})
     found = codes(home, fridge_in_module_project(home))
     assert "fridge_not_in_kitchen" in found and "fridge_in_module" not in found
+
+
+def test_no_pairing_warning_when_the_brief_has_none_of_that_kind(home):
+    """Повторное ревью 51: в брифе нет холодильников — пар «по порядку» нет, есть только «нет в брифе»."""
+    brief = sergey()
+    del brief["appliances"]["hood"], brief["appliances"]["fridge"]
+    (home / "brief.json").write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
+    api.brief_save(ORDER, home / "brief.json", home)
+    walls = [{"label": "A", "length": 1900, "rows": [lower(gap("ПМ1", 1300), base("Н1"))]}]
+    fridges = [{"type": "fridge", "width": 600, "module": "ПМ1"}] * 2
+    found = [f.code for f in api.check_project(write(home, walls, appliances=fridges), home).findings]
+    assert found.count("appliance_not_in_brief") == 2 and "appliance_pairing" not in found
