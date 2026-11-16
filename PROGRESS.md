@@ -50,7 +50,7 @@
 - [x] 20 — Присадка: направляющие и полкодержатели (4.1, 4.2) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [x] 22 — Сборочный лист (4.4) ([спека](docs/specs/stage-4-drilling-assembly.md))
 - [x] 53 — Ответы мастера по уборке этапа 4: фурнитура на объекте, число ящиков, счёт модулей ([спека](docs/specs/stage-4-drilling-assembly.md))
-- [ ] 55 — Ручка на фасаде ПММ ([спека](docs/specs/stage-4-drilling-assembly.md))
+- [x] 55 — Ручка на фасаде ПММ ([спека](docs/specs/stage-4-drilling-assembly.md))
 
 Чек-лист выезда (40) сделан в этапе 6 после схемы брифа (30); уборка этапа 4 (46) стоит там же.
 
