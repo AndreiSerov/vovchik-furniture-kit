@@ -37,11 +37,8 @@ def test_quick_field_paths_exist_in_the_schema():
     sections = json.loads(read("references", "brief_schema.json"))["sections"]
     paths = [p for q in quick_questions() for p in re.findall(r"`([a-z_.*]+)`", q.split("«")[0])]
     assert len(paths) >= 9, paths  # фильтр не пустой
-    for path in paths:
-        section, _, field = path.partition(".")
-        assert section in sections, path
-        if field and field != "*":
-            assert field in sections[section]["fields"], path
+    for path in paths:  # существование путей проверяет `skill_lint.check_question_paths` (scripts/check)
+        assert path.partition(".")[0] in sections, path
     assert {"timeline.desired_date", "budget.amount_rub", "budget.includes_appliances"} <= set(paths)
     assert "deadline" not in paths
 
