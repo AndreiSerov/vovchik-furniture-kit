@@ -57,6 +57,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 | `kitchen-project` | проект кухни: стены, модули, материалы | есть |
 | `kitchen-production` | детали, раскрой, кромка, сборочный лист, чек-лист выезда | есть |
 | `kitchen-estimate` | закупка, смета, «экономия», КП | есть |
+| `kitchen-order` | «продолжи заказ Петрова», «где остановились»: прочитать статус и передать нужному скиллу | есть |
 
 ## Done means
 

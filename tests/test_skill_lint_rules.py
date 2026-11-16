@@ -3,6 +3,8 @@
 Фикстуры-нарушители по одной на правило — в `test_skill_checks.py`.
 """
 
+import json
+
 import pytest
 from kitchen import skill_lint
 
@@ -230,7 +232,7 @@ def test_duplicate_phrase_ignores_case_yo_and_trailing_punctuation(tmp_path):
     lint_text(tmp_path, HEAD + "Текст\n")
     write_triggers(
         tmp_path,
-        '{"phrases": [{"text": "Ёлка", "skill": "kitchen-x"}, {"text": "елка!", "skill": "kitchen-x"}]}',
+        with_padding({"text": "Ёлка", "skill": "kitchen-x"}, {"text": "елка!", "skill": "kitchen-x"}),
     )
     assert skill_lint.lint(tmp_path) == ["triggers.json: фраза 2: дубль фразы 1 «елка!» (скилл kitchen-x)"]
 
@@ -239,7 +241,7 @@ def test_empty_phrase_text_and_extra_phrase_key_are_errors(tmp_path):
     lint_text(tmp_path, HEAD + "Текст\n")
     write_triggers(
         tmp_path,
-        '{"phrases": [{"text": "  ", "skill": "kitchen-x"}, {"text": "a", "skill": "kitchen-x", "note": 1}]}',
+        with_padding({"text": "  ", "skill": "kitchen-x"}, {"text": "a", "skill": "kitchen-x", "note": 1}),
     )
     assert skill_lint.lint(tmp_path) == [
         "triggers.json: фраза 1: нужны непустой text и skill, и больше ничего",
@@ -249,8 +251,54 @@ def test_empty_phrase_text_and_extra_phrase_key_are_errors(tmp_path):
 
 def test_one_bad_phrase_gives_one_message_not_a_missing_phrase_too(tmp_path):
     lint_text(tmp_path, HEAD + "Текст\n")
-    write_triggers(tmp_path, '{"phrases": [{"text": "", "skill": "kitchen-x"}]}')
+    write_triggers(tmp_path, with_padding({"text": "", "skill": "kitchen-x"}))
     assert len(skill_lint.lint(tmp_path)) == 1
+
+
+def phrases(**per_skill):
+    """JSON набора фраз: `kitchen_x=3` — три разные фразы скилла kitchen-x."""
+    items = [
+        {"text": f"фраза {skill} {n}", "skill": skill.replace("_", "-")}
+        for skill, count in per_skill.items()
+        for n in range(count)
+    ]
+    return json.dumps({"phrases": items}, ensure_ascii=False)
+
+
+def with_padding(*items):
+    """Заданные фразы и десять обычных, чтобы набор прошёл по числу фраз."""
+    pad = [{"text": f"запасная {n}", "skill": "kitchen-x"} for n in range(10)]
+    return json.dumps({"phrases": [*items, *pad]}, ensure_ascii=False)
+
+
+def two_skills(tmp_path):
+    lint_text(tmp_path, HEAD + "Текст\n")
+    lint_text(tmp_path, HEAD.replace("kitchen-x", "kitchen-y") + "Текст\n", name="kitchen-y")
+
+
+def test_fewer_than_ten_phrases_is_an_error(tmp_path):
+    two_skills(tmp_path)
+    write_triggers(tmp_path, phrases(kitchen_x=5, kitchen_y=4))
+    assert skill_lint.lint(tmp_path) == ["triggers.json: фраз 9, нужно не меньше 10"]
+    write_triggers(tmp_path, phrases(kitchen_x=5, kitchen_y=5))
+    assert skill_lint.lint(tmp_path) == []
+
+
+def test_skill_with_one_phrase_is_an_error_even_with_enough_in_total(tmp_path):
+    two_skills(tmp_path)
+    write_triggers(tmp_path, phrases(kitchen_x=10, kitchen_y=1))
+    assert skill_lint.lint(tmp_path) == ["kitchen-y: одна фраза в triggers.json, нужно не меньше двух"]
+    write_triggers(tmp_path, phrases(kitchen_x=9, kitchen_y=2))
+    assert skill_lint.lint(tmp_path) == []
+
+
+def test_empty_phrase_set_is_an_error_when_the_file_exists(tmp_path):
+    lint_text(tmp_path, HEAD + "Текст\n")
+    write_triggers(tmp_path, '{"phrases": []}')
+    assert skill_lint.lint(tmp_path) == [
+        "triggers.json: фраз 0, нужно не меньше 10",
+        "kitchen-x: нет ни одной фразы в triggers.json",
+    ]
 
 
 def test_arithmetic_next_to_a_length_unit_is_caught(tmp_path):
