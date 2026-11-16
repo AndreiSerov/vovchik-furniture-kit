@@ -66,6 +66,7 @@ __all__ = [
     "find_material",
     "lower_facades",
     "module_dims",
+    "module_line",
     "niche_item",
     "required_thickness",
     "resolve_materials",
@@ -218,6 +219,12 @@ def _whole(value: Num, what: str) -> int:
 def gap_width(gap: Gap) -> int:
     """Ширина пустого места в целых миллиметрах, как у модулей."""
     return _whole(gap.width, f"Ширина пустого места {gap.label}")
+
+
+def module_line(module: ModuleSpec, size: str) -> str:
+    """«П1 — пенал, 600 мм»: метка, название шаблона и размер (`size` — «600» или «600×720×560»). Одна строка
+    для чек-листа выезда и заголовка модуля в сборочном листе."""
+    return f"{module.label} — {TEMPLATES[module.template].title}, {size} мм"
 
 
 def module_dims(module: ModuleSpec, row_kind: str, ws: Workshop) -> ModuleDims:

@@ -504,3 +504,54 @@ def test_long_item_stays_inside_the_right_margin(home):
     for page in api.trip_layout(result.model_copy(update={"sections": sections})):
         for line in page.lines:
             assert line.x + line.width <= 200 * MM + 1e-6, line.text
+
+
+# Уборка этапа 4 (тикет 46).
+def test_client_name_with_spaces_around_is_printed_trimmed(home):
+    brief = json.loads((FIXTURES / "petrov_brief.json").read_text(encoding="utf-8"))
+    brief["client"]["name"] = {"value": "  Петров  ", "source": "client"}
+    path = home / "brief-spaces.json"
+    path.write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
+    petrov(home, path)
+    assert api.trip_from_order(ORDER, home).header.client == "Петров, +7 900 000-00-00"
+
+
+def test_production_cli_prints_the_empty_brief_warning(home):
+    api.order_new(ORDER, home=home)
+    api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
+    out = runner.invoke(app, ["production", "petrov"]).output
+    assert "Предупреждения:" in out and "брифа нет — шапка пустая" in out
+
+
+def test_continuation_page_starts_at_the_top_without_the_heading_gap(home):
+    """Заголовок раздела, с которого начинается следующая страница, стоит у верха поля: отступ перед разделом
+    на новой странице не нужен."""
+    petrov(home)
+    result = api.trip_from_order(ORDER, home)
+    first = result.sections[0]
+    titles = {s.title for s in result.sections}
+    seen = 0
+    for n in range(1, 60):
+        items = [first.items[0].model_copy(update={"text": f"строка {i}"}) for i in range(n)]
+        sections = [first.model_copy(update={"items": items}), *result.sections[1:]]
+        for page in api.trip_layout(result.model_copy(update={"sections": sections}))[1:]:
+            head = page.lines[0]
+            assert head.y == pytest.approx(page.top - 13.0 + (13.0 - head.size) / 2), (n, head.text)
+            seen += head.text in titles
+    assert seen  # случай «заголовок первой строкой страницы» в переборе был
+
+
+def test_two_line_heading_is_not_split_between_pages(home):
+    petrov(home)
+    result = api.trip_from_order(ORDER, home)
+    first, second = result.sections[:2]
+    long = second.model_copy(update={"title": "Очень длинное название раздела чек-листа " * 4})
+    for n in range(1, 90):
+        items = [first.items[0].model_copy(update={"text": f"строка {i}"}) for i in range(n)]
+        sections = [first.model_copy(update={"items": items}), long, *result.sections[2:]]
+        pages = api.trip_layout(result.model_copy(update={"sections": sections}))
+        for page in pages[:-1]:
+            assert not page.lines[-1].bold, (
+                n,
+                page.lines[-1].text,
+            )  # заголовок (жирный) не последний на странице

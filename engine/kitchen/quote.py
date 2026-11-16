@@ -148,14 +148,6 @@ def _hardware_phrase(name: str, many: str | None, count: int) -> str:
     return _counted(count, "m", many, many) if many else f"{name} ({count} шт.)"
 
 
-OTHER_APPLIANCE = "другая техника"
-
-
-def _appliance(appliance) -> str:
-    """Прибор словами брифа; `other` — «другая техника»: модель (в ней бывает марка) клиенту не идёт."""
-    return OTHER_APPLIANCE if appliance.type == "other" else APPLIANCE_NAMES[appliance.type]
-
-
 def describe_module(module: ModuleSpec, row: Row, built: ModuleParts, project: Project, ws: Workshop) -> str:
     """«нижний модуль с тремя ящиками, 600 мм; техника: мойка». Ящики, двери и полки считаются из деталей
     модуля (то же, что идёт в раскрой); карусель, ведро, сушка и подъёмный фасад — по фурнитуре модуля и
@@ -183,7 +175,8 @@ def describe_module(module: ModuleSpec, row: Row, built: ModuleParts, project: P
         if h in named:
             extras.append(_hardware_phrase(named[h], plural_names.get(h), count))
     text = template.title + (f" с {_enumerate(extras)}" if extras else "") + f", {module.width:g} мм"
-    kinds = [_appliance(a) for a in project.appliances_at(module.label)]
+    # названия видов без модели: в модели бывает марка
+    kinds = [APPLIANCE_NAMES[a.type] for a in project.appliances_at(module.label)]
     return text + (f"; техника: {', '.join(kinds)}" if kinds else "")
 
 

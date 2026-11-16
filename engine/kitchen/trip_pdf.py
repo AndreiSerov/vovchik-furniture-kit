@@ -28,6 +28,7 @@ _HANGING = 14.0  # перенесённая часть строки идёт п�
 
 
 class TripPageLayout(BaseModel):
+    top: float  # верх рабочего поля страницы: от него считается первая строка
     lines: list[TextLine]
 
 
@@ -81,8 +82,9 @@ def layout(header: TripHeader, sections: list[TripSection]) -> list[TripPageLayo
     y -= 8
     for n, row in enumerate(physical):
         need = _LEADING + row.gap_before
-        if row.heading and n + 1 < len(physical):
-            need += _LEADING  # заголовок не остаётся последней строкой страницы
+        if row.heading:  # заголовок целиком и ещё строка после него: он не остаётся последним на странице
+            pieces = next((k for k, r in enumerate(physical[n:]) if not r.heading), len(physical) - n)
+            need += _LEADING * (pieces - 1 + (n + pieces < len(physical)))
         if y - need < area.y and pages[-1]:
             pages.append([])
             y = top
@@ -91,7 +93,7 @@ def layout(header: TripHeader, sections: list[TripSection]) -> list[TripPageLayo
         pages[-1].append(
             text(row.text, row.size, row.bold, area.x + row.indent, y + (_LEADING - row.size) / 2)
         )
-    return [TripPageLayout(lines=lines) for lines in pages]
+    return [TripPageLayout(top=top, lines=lines) for lines in pages]
 
 
 def write_trip(

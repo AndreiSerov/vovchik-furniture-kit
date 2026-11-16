@@ -301,3 +301,14 @@ def test_workshop_hardware_is_listed_in_hardware_yaml_order(base_door_project, h
     order = [i["id"] for i in yaml.safe_load(path.read_text(encoding="utf-8"))["позиции"]]
     ids = [h.id for h in api.assembly_from_project(base_door_project, home).modules[0].hardware]
     assert ids[0] == "screw_3_5x16" and ids == sorted(ids, key=order.index)
+
+
+def test_cli_line_names_the_module_even_when_the_template_title_has_a_comma(home):
+    """Строка CLI берёт название без размеров: запятая в названии шаблона её не обрывает."""
+    from kitchen.cli import _render_assembly
+
+    petrov(home)
+    result = api.assembly_from_order(ORDER, home)
+    first = result.modules[0].model_copy(update={"title": "П1 — пенал, с духовкой, 600×2100×560 мм"})
+    text = _render_assembly(result.model_copy(update={"modules": [first]}))
+    assert "  П1 — пенал, с духовкой: деталей" in text

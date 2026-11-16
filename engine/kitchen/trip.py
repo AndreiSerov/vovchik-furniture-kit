@@ -13,7 +13,7 @@ from kitchen import brief as brief_text
 from kitchen.assembly import UNIT
 from kitchen.common import CommonItem, size_countertop
 from kitchen.models import Workshop
-from kitchen.parts import APPLIANCE_NAMES, TEMPLATES, module_dims
+from kitchen.parts import APPLIANCE_NAMES, module_dims, module_line
 from kitchen.project import Project, is_gap
 from kitchen.quote import describe_gap
 
@@ -115,7 +115,7 @@ def build_trip(
     modules = [
         f"{m.label} — {describe_gap(m, project)}"
         if is_gap(m)
-        else f"{m.label} — {TEMPLATES[m.template].title}, {module_dims(m, row.kind, ws).width} мм"
+        else module_line(m, f"{module_dims(m, row.kind, ws).width}")
         for wall in project.walls
         for row in wall.rows
         for m in row.modules

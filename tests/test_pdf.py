@@ -111,3 +111,16 @@ def test_landscape_page_keeps_footer_and_watermark(tmp_path):
     assert seen == [page_area(landscape=True)] and seen[0].w > seen[0].h
     text = page.extract_text()
     assert text.count(MOCK_BANNER) == 2 and "стр. 1 из 1" in text
+
+
+def test_wrap_keeps_a_line_that_is_exactly_as_wide_as_the_limit():
+    register_fonts()
+    width = stringWidth("слово слово", FONT, 10)
+    assert wrap("слово слово", False, 10, width) == ["слово слово"]
+    assert wrap("слово слово", False, 10, width - 0.01) == ["слово", "слово"]
+
+
+def test_wrap_cuts_a_word_wider_than_the_limit_down_to_one_letter():
+    register_fonts()
+    width = stringWidth("Ш", FONT, 10) + 0.01  # помещается одна буква, две — нет
+    assert wrap("ШШШ", False, 10, width) == ["Ш", "Ш", "Ш"]

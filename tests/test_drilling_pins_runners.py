@@ -399,3 +399,15 @@ def test_back_row_is_measured_from_the_shelf_back_edge_not_from_the_side_start(h
     )
     for side in parts[:2]:
         assert rows(side) == {57: R300, 483: R300}, side.id
+
+
+def test_holes_touching_with_zero_bridge_are_not_a_clash(home, base_door_project):
+    """Перемычка 0 мм (Ø5 с шагом 5: края сходятся в точке) — не пересечение (решение агента по поручению
+    мастера, сверить после MVP); шаг 4 — уже пересечение."""
+    pins = "отверстий_в_ряду: 5, шаг: 32, отступ_от_передней_кромки_полки: 37"
+    edit_construction(home, pins, pins.replace("шаг: 32", "шаг: 5"))
+    p = parts_of(api.parts_from_project(base_door_project, home))
+    assert rows(p["Н1-бок-Л"])[57] == [287.5, 292.5, 297.5, 302.5, 307.5]
+    edit_construction(home, "шаг: 5,", "шаг: 4,")
+    with pytest.raises(OrderError, match="пересекается"):
+        api.parts_from_project(base_door_project, home)
