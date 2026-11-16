@@ -33,10 +33,15 @@ def _checker() -> ModuleType:
     return module
 
 
+@cache
+def _schema() -> dict[str, Any]:
+    """Схема брифа читается один раз: шапка чек-листа спрашивает подписи по пять раз."""
+    return json.loads(_checker().SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
 def client_name(brief: dict[str, Any]) -> str:
-    cb = _checker()
-    value = cb.get(brief, "client.name")
-    return "" if cb.is_empty(value) else str(value).strip()
+    found = value(brief, "client.name")
+    return "" if found is None else str(found)
 
 
 def check(brief: dict[str, Any], today: date) -> dict[str, Any]:
@@ -133,17 +138,21 @@ def appliances(brief: dict[str, Any]) -> list[BriefAppliance]:
 
 
 def value(brief: dict[str, Any], path: str) -> Any:
-    """Значение поля брифа по пути «раздел.поле» (обёртка `{value, source}` снята); пусто — `None`."""
+    """Значение поля брифа по пути «раздел.поле» (обёртка `{value, source}` снята, у строки обрезаны пробелы по
+    краям); пусто или одни пробелы — `None`."""
     cb = _checker()
     found = cb.get(brief, path)
-    return None if cb.is_empty(found) else found
+    if cb.is_empty(found):
+        return None
+    if isinstance(found, str):
+        return found.strip() or None
+    return found
 
 
 def value_label(path: str, raw: Any) -> str:
     """Подпись значения перечня из `value_labels` схемы брифа («floor_evenness», «even» → «ровный»);
     подписи нет — само значение."""
-    cb = _checker()
-    schema = json.loads(cb.SCHEMA_PATH.read_text(encoding="utf-8"))
+    schema = _schema()
     section, _, name = path.partition(".")
     labels = schema["sections"][section]["fields"][name].get("value_labels", {})
     return labels.get(raw, str(raw))

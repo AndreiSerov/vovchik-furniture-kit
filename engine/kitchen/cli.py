@@ -377,7 +377,9 @@ def drilling(
 def _render_assembly(r: api.AssemblyResult) -> str:
     lines = ["Сборочный лист:", _render_source(r.source)]
     for m in r.modules:
-        name = m.title.split(",")[0]  # «П1 — пенал»: метка и название шаблона без размеров
+        name = m.title.rsplit(", ", 1)[
+            0
+        ]  # «П1 — пенал»: метка и название шаблона без размеров (запятая в названии бывает)
         lines.append(
             f"  {name}: деталей {len(m.parts)}, позиций фурнитуры {len(m.hardware)}, шагов {len(m.steps)}"
         )
@@ -762,8 +764,9 @@ def _render_production(r: api.ProductionResult) -> str:
         lines.append(
             f"Чек-лист выезда PDF: {r.trip.output.file} (версия проекта {r.trip.output.source_version})"
         )
-    if r.purchase.warnings:
-        lines.append("Предупреждения: " + "; ".join(r.purchase.warnings))
+    warnings = [*r.purchase.warnings, *(w for w in r.trip.warnings if w not in r.purchase.warnings)]
+    if warnings:
+        lines.append("Предупреждения: " + "; ".join(warnings))
     return "\n".join(lines)
 
 

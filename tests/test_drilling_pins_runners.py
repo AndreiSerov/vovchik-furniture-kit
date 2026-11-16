@@ -378,3 +378,36 @@ def test_row_past_the_side_edge_without_a_cover_shifts(home, base_door_project):
     edit_construction(home, "отступ_спереди: 20", "отступ_спереди: 70")
     p = parts_of(api.parts_from_project(base_door_project, home))
     assert rows(p["Н1-бок-Л"])[107] == [581.5, 613.5, 645.5, 677.5, 709.5]
+
+
+def test_back_row_is_measured_from_the_shelf_back_edge_not_from_the_side_start(home, base_door_project):
+    """Шаблоны ставят полку вплотную к задней кромке боковины, и «от начала боковины» совпадало с «от задней
+    кромки полки». Полка на 40 мм от задней кромки: задний ряд — 37 от неё (77 от задней кромки боковины,
+    560 − 77 = 483 от передней), передний — 37 от её передней кромки (540 − 37 = 503 от задней, 57 от передней)."""
+    from kitchen.drilling import apply_drilling
+    from kitchen.geometry import PinnedShelf
+    from kitchen.workshop import load_workshop
+
+    p = parts_of(api.parts_from_project(base_door_project, home))
+    shelf = p["Н1-полка"]
+    assert (shelf.position.y, shelf.width) == (0, 540)
+    moved = shelf.model_copy(update={"position": shelf.position.model_copy(update={"y": 40}), "width": 500})
+    sides = ("Н1-бок-Л", "Н1-бок-П")
+    plain = [p[s].model_copy(update={"holes": None, "base_edges": None}) for s in sides]
+    parts, _ = apply_drilling(
+        "Н1", [*plain, moved], [], [], load_workshop(home), shelves=[PinnedShelf("Н1-полка", sides)]
+    )
+    for side in parts[:2]:
+        assert rows(side) == {57: R300, 483: R300}, side.id
+
+
+def test_holes_touching_with_zero_bridge_are_not_a_clash(home, base_door_project):
+    """Перемычка 0 мм (Ø5 с шагом 5: края сходятся в точке) — не пересечение (решение агента по поручению
+    мастера, сверить после MVP); шаг 4 — уже пересечение."""
+    pins = "отверстий_в_ряду: 5, шаг: 32, отступ_от_передней_кромки_полки: 37"
+    edit_construction(home, pins, pins.replace("шаг: 32", "шаг: 5"))
+    p = parts_of(api.parts_from_project(base_door_project, home))
+    assert rows(p["Н1-бок-Л"])[57] == [287.5, 292.5, 297.5, 302.5, 307.5]
+    edit_construction(home, "шаг: 5,", "шаг: 4,")
+    with pytest.raises(OrderError, match="пересекается"):
+        api.parts_from_project(base_door_project, home)

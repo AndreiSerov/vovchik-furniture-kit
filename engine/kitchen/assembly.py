@@ -18,6 +18,7 @@ from kitchen.parts import (
     ModuleParts,
     is_facade,
     module_dims,
+    module_line,
     resolve_materials,
 )
 from kitchen.project import Project
@@ -155,7 +156,7 @@ def build_assembly(project: Project, built: list[ModuleParts], ws: Workshop) -> 
                     facades = [p.id for p in module_parts.parts if is_facade(p)]
                     blocks.append(
                         AssemblyModule(
-                            title=f"{module.label} — {template.title}, {dims.width} мм",
+                            title=module_line(module, f"{dims.width}"),
                             note=NO_CARCASS_NOTE.format(facades=_ids(facades)),
                             hardware=[],
                             steps=[],
@@ -166,7 +167,7 @@ def build_assembly(project: Project, built: list[ModuleParts], ws: Workshop) -> 
                 handles = resolve_materials(module, row, project.materials).handles
                 blocks.append(
                     AssemblyModule(
-                        title=f"{module.label} — {template.title}, {dims.width}×{dims.height}×{dims.depth} мм",
+                        title=module_line(module, f"{dims.width}×{dims.height}×{dims.depth}"),
                         hardware=[
                             AssemblyHardware(id=i.id, name=i.name, quantity=module_parts.hardware[i.id])
                             for i in ws.hardware.items

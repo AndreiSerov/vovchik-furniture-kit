@@ -3,10 +3,10 @@
 from kitchen import formulas
 from kitchen.errors import OrderError
 from kitchen.formulas import FormulaError
+from kitchen.geometry import Position
 from kitchen.models import Workshop
 from kitchen.parts import (
     ModuleDims,
-    Position,
     Span,
     TemplateOut,
     _calc,

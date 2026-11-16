@@ -31,10 +31,10 @@ from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError, ProjectFileError
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
 from kitchen.format import num, plural
+from kitchen.geometry import PURPOSE_RU
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
-    PURPOSE_RU,
     ROW_NOM,
     EdgeTotals,
     ModuleParts,

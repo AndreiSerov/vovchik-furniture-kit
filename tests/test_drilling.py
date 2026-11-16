@@ -427,3 +427,13 @@ def test_cup_outside_facade_is_a_module_error(home, base_door_project):
     edit_construction(home, "отступ_от_кромки_фасада: 22", "отступ_от_кромки_фасада: 10")
     with pytest.raises(OrderError, match="чашка петли.*выходит за деталь"):
         api.parts_from_project(base_door_project, home)
+
+
+def test_hinge_side_on_wall_corner_is_an_error(home):
+    """Ревью 46: сторона петель у верхнего углового (`wall_corner`) — ошибка, как у нижнего."""
+    petrov = json.loads(PETROV.read_text(encoding="utf-8"))
+    petrov["walls"][0]["rows"][1]["modules"][3]["contents"] = {"hinge_side": "right"}  # В4 — wall_corner
+    path = home / "petrov.json"
+    path.write_text(json.dumps(petrov, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(OrderError, match="В4.*углового.*мест"):
+        api.parts_from_project(path, home)
