@@ -367,3 +367,23 @@ def test_step_needs_whole_words(tmp_path):
         "kitchen-project: нет шага kitchen status",
         "kitchen-project: нет шага kitchen log с --kind done",
     ]
+
+
+def test_kitchen_production_eval_expects_the_single_document_journal_entry():
+    path = skill_lint.DEFAULT_ROOT / "kitchen-production" / "evals" / "evals.json"
+    (case,) = json.loads(path.read_text(encoding="utf-8"))["evals"]
+    assert "документы цеха из версии 2" not in case["expected_output"]
+    assert "карта раскроя из версии 2" in case["expected_output"]
+
+
+def test_kitchen_production_step_4_quotes_the_markers_the_commands_print():
+    body = (skill_lint.DEFAULT_ROOT / "kitchen-production" / "SKILL.md").read_text(encoding="utf-8")
+    step4 = body.split("4. **")[1].split("5. **")[0]
+    for marker in (
+        "«Файл: …»",
+        "«… PDF: …»",
+        "«версия проекта N»",
+        "«Детали проекта …:»",
+        "«Источник: заказ …, версия N проекта»",
+    ):
+        assert marker in step4, marker
