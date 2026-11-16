@@ -11,7 +11,7 @@ from kitchen.result import MOCK_BANNER
 from pypdf import PdfReader
 from typer.testing import CliRunner
 
-from tests.test_check_brief import c, run, sergey
+from tests.test_check_brief import c, cb, run, sergey
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ORDER = "2026-047-petrov"
@@ -200,3 +200,70 @@ def test_integral_float_in_object_enum_key(home):
     assert run(brief)["errors"] == []
     brief["appliances"]["hood"] = c({"kind": 2.0})
     assert any("appliances.hood.kind" in e for e in run(brief)["errors"])
+
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+def test_production_bundle_edging_map_follows_the_rounding_step_of_home(home, monkeypatch):
+    path = home / "workshop" / "construction.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("вверх до 0.1 м", "вверх до 0.05 м"), encoding="utf-8"
+    )
+    petrov(home)
+    monkeypatch.delenv("KITCHEN_HOME")
+    monkeypatch.chdir(REPO)  # у репозитория свой workshop/ с шагом 0.1
+    result = api.production_and_save(ORDER, home)
+    pdf = home / "orders" / ORDER / "out" / "edging-map.pdf"
+    text = "\n".join(page.extract_text() for page in PdfReader(pdf).pages)
+    assert result.edging.purchase_digits == 2
+    for total in result.edging.edges.values():
+        assert f"{total.purchase_m:.2f}" in text
+
+
+def test_edges_cli_keeps_three_decimals_for_clean_and_allowance(home):
+    petrov(home)
+    out = runner.invoke(app, ["edges", ORDER]).output
+    for edge_id, t in api.parts_from_order(ORDER, home).edges.items():
+        assert (
+            f"Кромка {edge_id}: чистая {t.clean_m:.3f} м, с припуском {t.with_allowance_m:.3f} м, "
+            f"к закупке {t.purchase_m:.1f} м"
+        ) in out
+
+
+def test_boolean_is_not_a_number_in_enum():
+    brief = sergey()
+    brief.setdefault("workzone", {})["sink_bowls"] = c(True)
+    assert any("workzone.sink_bowls" in e and "не из перечня" in e for e in run(brief)["errors"])
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"), [("storage", "upper_height", 720.5), ("workzone", "sink_bowls", 2.5)]
+)
+def test_fractional_float_is_not_rounded_into_the_enum(section, field, value):
+    brief = sergey()
+    brief.setdefault(section, {})[field] = c(value)
+    assert any(f"{section}.{field}" in e and "не из перечня" in e for e in run(brief)["errors"])
+
+
+def test_integral_float_in_object_enum_key_of_any_schema():
+    schema = {"sections": {"s": {"fields": {"o": {"type": "object", "item": {"n": "enum: 1, 2 — число"}}}}}}
+    assert cb.enum_errors({"s": {"o": c({"n": 2.0})}}, schema) == []
+    assert cb.enum_errors({"s": {"o": c({"n": 3.0})}}, schema) == ["s.o.n: 3.0 не из перечня 1, 2"]
+
+
+def test_parts_and_production_edge_line_follow_the_rounding_step(home):
+    path = home / "workshop" / "construction.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("вверх до 0.1 м", "вверх до 0.05 м"), encoding="utf-8"
+    )
+    petrov(home)
+    for command in ("parts", "production"):
+        out = runner.invoke(app, [command, ORDER]).output
+        for total in api.parts_from_order(ORDER, home).edges.values():
+            assert f"к закупке {total.purchase_m:.2f} м" in out
+
+
+def test_rub_grouping_in_quick_estimate_text(home):
+    out = runner.invoke(app, ["quick-estimate", "--meters", "3.6"]).output
+    assert "  За пог. м: 85 000 – 110 000 ₽" in out

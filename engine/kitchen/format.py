@@ -47,7 +47,7 @@ def group_digits(value: int) -> str:
 
 
 def purchase_digits(step_m: float) -> int:
-    """Знаков после точки у кромки «к закупке»: один, если шаг округления не мельче 0.1 м,
-    иначе столько, сколько знаков у шага (0.05 м — два)."""
+    """Знаков после точки у кромки «к закупке»: столько, сколько знаков у шага округления, но не меньше
+    одного (0.1 м — один, 0.05 м и 0.25 м — два)."""
     exponent = Decimal(str(step_m)).normalize().as_tuple().exponent
     return max(1, -exponent) if isinstance(exponent, int) else 1

@@ -138,6 +138,7 @@ __all__ = [
     "estimate_from_order",
     "estimate_from_project",
     "export_project",
+    "group_digits",
     "import_project",
     "list_outputs",
     "load_workshop",
@@ -1151,6 +1152,7 @@ class PartsResult(Result):
     common: list[CommonItem]  # общие позиции кухни: цоколь, шина, навесы, LED, столешница
     findings: list[Finding]
     warnings: list[str]
+    purchase_digits: int = Field(default=1, exclude=True)  # знаков у «к закупке»; в JSON не идёт
 
 
 def _project_hash(project: Project) -> str:
@@ -1209,6 +1211,7 @@ def _build_parts(
         common=compute_common(project, workshop, computed.hardware),
         findings=run_checks(project, workshop, json.loads(brief["data"]) if brief else None),
         warnings=[*computed.warnings, *extra_warnings],
+        purchase_digits=purchase_digits(workshop.construction.edging.purchase_rounding.step_m),
         mock=workshop.is_mock,
         mock_files=workshop.mock_files,
     )
@@ -1458,10 +1461,9 @@ class EdgingResult(Result):
     )  # знаков у «к закупке» по шагу округления; в JSON не идёт
 
 
-def _edging(parts: PartsResult, home: Path | None = None) -> EdgingResult:
-    step = load_workshop(home).construction.edging.purchase_rounding.step_m
+def _edging(parts: PartsResult) -> EdgingResult:
     return EdgingResult(
-        purchase_digits=purchase_digits(step),
+        purchase_digits=parts.purchase_digits,
         source=parts.source,
         parts=[p for m in parts.modules for p in m.parts if any(p.edges.values())],
         edges=parts.edges,
@@ -1472,11 +1474,11 @@ def _edging(parts: PartsResult, home: Path | None = None) -> EdgingResult:
 
 
 def edges_from_order(order: str, home: Path | None = None) -> EdgingResult:
-    return _edging(parts_from_order(order, home), home)
+    return _edging(parts_from_order(order, home))
 
 
 def edges_from_project(path: Path, home: Path | None = None) -> EdgingResult:
-    return _edging(parts_from_project(path, home), home)
+    return _edging(parts_from_project(path, home))
 
 
 def edges_and_save(order: str, home: Path | None = None, on: date | None = None) -> EdgingResult:

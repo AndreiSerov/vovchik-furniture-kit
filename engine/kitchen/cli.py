@@ -266,7 +266,7 @@ def _render_parts(r: api.PartsResult) -> str:
     for edge_id, e in r.edges.items():
         lines.append(
             f"Кромка {edge_id}: чистая {e.clean_m:.3f} м, с припуском "
-            f"{e.with_allowance_m:.3f} м, к закупке {e.purchase_m:.1f} м"
+            f"{e.with_allowance_m:.3f} м, к закупке {e.purchase_m:.{r.purchase_digits}f} м"
         )
     lines.append(f"Фасады: {r.facade_area:.4f} м²")
     for color, area in r.facade_area_by_color.items():
@@ -839,7 +839,7 @@ def _dumps(data: object) -> str:
 
 
 def _rub(n: float) -> str:
-    return f"{n:,.0f}".replace(",", " ")
+    return api.group_digits(round(n))
 
 
 def _render_estimate(r: api.QuickEstimate) -> str:
