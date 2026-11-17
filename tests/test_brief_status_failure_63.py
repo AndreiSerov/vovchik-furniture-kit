@@ -50,3 +50,17 @@ def test_cli_json_has_warnings(blocked):
     r = runner.invoke(app, ["brief", "save", "petrov", str(PETROV), "--json"])
     assert r.exit_code == 0, r.output
     assert "status.md не записан" in json.loads(r.output)["warnings"][0]
+
+
+def test_warning_has_single_period_before_repeat(blocked):
+    w = api.brief_save("petrov", PETROV).warnings[0]
+    assert w.endswith(". Повторите: kitchen status 2026-001-petrov.") and ".. " not in w
+
+
+def test_existing_order_also_warns(home):
+    first = api.brief_save("petrov", PETROV)
+    status = home / "orders" / first.order / "status.md"
+    status.unlink()
+    status.mkdir()
+    r = api.brief_save(first.order, PETROV)
+    assert not r.created and r.warnings

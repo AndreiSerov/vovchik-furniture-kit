@@ -107,3 +107,29 @@ def test_script_and_save_give_the_same_errors(home, tmp_path):
     assert [f"Ошибка в брифе: {x}" for x in direct] == [
         x for x in e.value.problems if x.startswith("Ошибка в брифе")
     ]
+
+
+def test_int_in_boolean_field_is_an_error():
+    brief = petrov()
+    brief["room"]["has_island"] = {"value": 1, "source": "client"}
+    assert "room.has_island: 1 — ожидалось да/нет" in run(brief)["errors"]
+
+
+def test_empty_key_inside_object_is_not_checked():
+    brief = petrov()
+    brief["appliances"]["fridge"] = {"value": {"width_mm": None, "model": ""}, "source": "client"}
+    assert run(brief)["errors"] == []
+
+
+def test_empty_list_item_is_not_checked():
+    brief = petrov()
+    brief["appliances"]["items"]["value"].append(None)
+    assert run(brief)["errors"] == []
+
+
+def test_wrong_list_field_gives_one_error():
+    brief = petrov()
+    brief["room"]["walls"] = {"value": "A 2800", "source": "client"}
+    assert [e for e in run(brief)["errors"] if e.startswith("room.walls")] == [
+        "room.walls: 'A 2800' — ожидалось список"
+    ]
