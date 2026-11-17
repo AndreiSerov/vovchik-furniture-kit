@@ -107,3 +107,17 @@ def test_petrov_on_standard_workshop_has_same_findings_as_before(home):
         ("appliance_no_data", "warning", "Н5"),
         ("no_back_panel", "warning", "Н5"),
     ]
+
+
+def test_saw_equal_to_sheet_is_no_finding_and_cut_passes(home):
+    """Граница (ревью 61): лист 2800 при максимуме реза 2800 — раскрой режет, находки нет."""
+    _edit_workshop(home, "equipment.yaml", "макс_длина_реза: 3200", "макс_длина_реза: 2800")
+    api.cut_from_project(PETROV, home)
+    assert codes(PETROV, home, "sheet_over_saw") == []
+
+
+def test_sheet_over_saw_carries_numbers(home):
+    """Ревью 61: в JSON находки — длина подрезки и максимум станка."""
+    _small_saw(home)
+    [f] = [f for f in codes(PETROV, home, "sheet_over_saw") if f.subject == "ldsp_16_white"]
+    assert (f.value, f.limit) == (2800, 2500)
