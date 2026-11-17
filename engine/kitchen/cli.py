@@ -803,6 +803,7 @@ def _render_brief_saved(r: api.BriefSaveResult) -> str:
             head,
             f"  Не заполнено обязательных полей: {r.missing_required}",
             f"  Противоречий и рисков: {r.conflicts}",
+            *(f"Предупреждение: {w}" for w in r.warnings),
         ]
     )
 

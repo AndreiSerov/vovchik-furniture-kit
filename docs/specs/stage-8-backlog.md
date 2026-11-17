@@ -87,7 +87,7 @@ MVP закрыт (тикеты 01–59). В бэклоге `PROGRESS.md` леж�
 
 **Blocked by:** —
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Решения мастера (2026-11-17):** строго — целое поле принимает `int` и дробное без дробной части (`2700.0`, как `enum_text`), не принимает `bool` и строки; строковое — только `str`. Пустое значение (`None`, `""`, `[]`, `{}`) не проверяется, как сейчас.
 
@@ -101,11 +101,11 @@ MVP закрыт (тикеты 01–59). В бэклоге `PROGRESS.md` леж�
 - Сбой `status.md`: первая строка «Заказ X: бриф сохранён.» (или «заведён, бриф сохранён»), строки о полях и противоречиях как сейчас, затем `Предупреждение: status.md не записан: <причина>. Повторите: kitchen status <заказ>.`; в `--json` то же в `warnings`.
 
 **Проверки приёмки (каждая — тест):**
-- [ ] 1. `tests/fixtures/petrov_brief.json` с `appliances.fridge = "60 см у входа"` → `check_brief.check` даёт ошибку по пути `appliances.fridge`; `api.brief_save` отклоняет бриф.
-- [ ] 2. `room.ceiling_height_mm = "2700"` → ошибка; `2700.0` → без ошибки; `true` → ошибка.
-- [ ] 3. `appliances.items[0].type = "toaster"` → ошибка перечня с путём `appliances.items[0].type`.
-- [ ] 4. `petrov_brief.json` и `sergey()` из `tests/test_check_brief.py` проходят без ошибок; тесты `skills/kitchen-brief` зелёные.
-- [ ] 5. `orders/<заказ>/status.md` — папка → `api.brief_save` возвращает результат с предупреждением, бриф в БД есть; CLI exit 0, печатает «бриф сохранён» и «status.md не записан».
+- [x] 1. `tests/fixtures/petrov_brief.json` с `appliances.fridge = "60 см у входа"` → `check_brief.check` даёт ошибку по пути `appliances.fridge`; `api.brief_save` отклоняет бриф.
+- [x] 2. `room.ceiling_height_mm = "2700"` → ошибка; `2700.0` → без ошибки; `true` → ошибка.
+- [x] 3. `appliances.items[0].type = "toaster"` → ошибка перечня с путём `appliances.items[0].type`.
+- [x] 4. `petrov_brief.json` и `sergey()` из `tests/test_check_brief.py` проходят без ошибок; тесты `skills/kitchen-brief` зелёные.
+- [x] 5. `orders/<заказ>/status.md` — папка → `api.brief_save` возвращает результат с предупреждением, бриф в БД есть; CLI exit 0, печатает «бриф сохранён» и «status.md не записан».
 
 ## Тикет 64 — Чек-лист выезда: этаж и лифт отдельными полями
 
