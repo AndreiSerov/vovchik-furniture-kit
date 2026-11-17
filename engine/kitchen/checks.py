@@ -244,7 +244,7 @@ def _pair(project: Project, brief: list[BriefAppliance], ws: Workshop, found: li
             )
     for items in leftover_brief.values():
         for b in items:
-            if not b.built_in or b.wall == NOT_IN_KITCHEN:  # холодильника на кухне нет
+            if not b.built_in or b.not_in_kitchen:  # холодильника на кухне нет
                 continue
             if any(accepts(name, b.type, ws) for name in TEMPLATES):
                 found.append(
@@ -286,9 +286,6 @@ def _inner_width(dims: ModuleDims, ws: Workshop) -> int:
     )
 
 
-NOT_IN_KITCHEN = "none"  # `appliances.fridge.wall` брифа: холодильник не на кухне
-
-
 def _fridge_vs_brief(
     appliance: Appliance, label: str, pair: BriefAppliance | None, *, in_gap: bool
 ) -> list[Finding]:
@@ -296,7 +293,7 @@ def _fridge_vs_brief(
     модуле». Брифа или пары нет — сравнивать не с чем."""
     if appliance.type != "fridge" or pair is None:
         return []
-    if pair.wall == NOT_IN_KITCHEN:
+    if pair.not_in_kitchen:
         return [
             Finding(
                 code="fridge_not_in_kitchen",
@@ -381,7 +378,7 @@ def _gap_appliances(
     for appliance in fits:
         pair = paired[id(appliance)]
         found += _fridge_vs_brief(appliance, gap.label, pair, in_gap=True)
-        if appliance.type == "fridge" and pair is not None and pair.built_in and pair.wall != NOT_IN_KITCHEN:
+        if appliance.type == "fridge" and pair is not None and pair.built_in and not pair.not_in_kitchen:
             found.append(
                 Finding(
                     code="gap_built_in",

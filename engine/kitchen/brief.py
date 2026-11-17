@@ -97,6 +97,11 @@ class BriefAppliance:
     warnings: list[str] = field(default_factory=list)
     wall: str | None = None  # метка стены из брифа или `none` (холодильник не на кухне)
 
+    @property
+    def not_in_kitchen(self) -> bool:
+        """Холодильник брифа не на кухне (`appliances.fridge.wall: none`); у остальных приборов `wall` не значит этого."""
+        return self.type == "fridge" and self.wall == "none"
+
 
 def _mm(value: Any) -> int | None:
     return (

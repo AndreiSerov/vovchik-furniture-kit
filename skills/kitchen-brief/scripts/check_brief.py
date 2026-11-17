@@ -114,13 +114,24 @@ def appliance_name(item: dict) -> str:
 CORNERS = {"corner": 1, "u_shape": 2}
 
 
+def number(value: Any) -> float:
+    """Число для расчёта; неверный тип (строка, да/нет) — 0: об ошибке типа уже сказано в `errors`."""
+    return value if isinstance(value, int | float) and not isinstance(value, bool) else 0
+
+
+def fridge_out_of_kitchen(fridge: Any) -> bool:
+    """Холодильник брифа не на кухне: `wall: none` (как `BriefAppliance.not_in_kitchen` движка, пробелы срезаются)."""
+    wall = sub(fridge, "wall")
+    return isinstance(wall, str) and wall.strip() == "none"
+
+
 def running_meters(brief: dict, base_depth_mm: int = 600) -> float | None:
     """Погонаж низа: стены минус перекрытие в углах плюс длина острова."""
     walls = get(brief, "room.walls")
     if not isinstance(walls, list):
         walls = []
     lengths = [
-        w.get("length_mm") or 0
+        number(w.get("length_mm"))
         for w in walls
         if isinstance(w, dict) and w.get("furnished", True) is not False
     ]
@@ -128,7 +139,7 @@ def running_meters(brief: dict, base_depth_mm: int = 600) -> float | None:
     if total:
         corners = min(len(lengths) - 1, CORNERS.get(get(brief, "room.shape"), 0))
         total -= max(corners, 0) * base_depth_mm
-    total += sub(get(brief, "room.island"), "length_mm") or 0
+    total += number(sub(get(brief, "room.island"), "length_mm"))
     return round(total / 1000, 2) if total else None
 
 
@@ -318,7 +329,11 @@ def builtin_without_model(brief: dict, s: dict) -> list[Finding]:
         elif item.get("built_in") is None and item.get("type") in TYPICALLY_BUILT_IN:
             unclear.append(appliance_name(item))
     fridge = get(brief, "appliances.fridge")
-    if sub(fridge, "built_in") is True and is_empty(sub(fridge, "model")):
+    if (
+        sub(fridge, "built_in") is True
+        and is_empty(sub(fridge, "model"))
+        and not fridge_out_of_kitchen(fridge)
+    ):
         no_model.append("холодильник")
         model_paths.add("appliances.fridge")
     hood = get(brief, "appliances.hood")
@@ -416,7 +431,7 @@ def fridge_door(brief: dict, s: dict) -> list[Finding]:
 @rule("fridge_place")
 def fridge_place(brief: dict, s: dict) -> list[Finding]:
     fridge = get(brief, "appliances.fridge")
-    if is_empty(fridge) or not isinstance(fridge, dict) or sub(fridge, "wall") == "none":
+    if is_empty(fridge) or not isinstance(fridge, dict) or fridge_out_of_kitchen(fridge):
         return []
     names = {w.get("name") for w in get(brief, "room.walls") or [] if isinstance(w, dict)}
     wall = sub(fridge, "wall")
@@ -441,7 +456,7 @@ def over_fridge(brief: dict, s: dict) -> list[Finding]:
     fridge = get(brief, "appliances.fridge")
     if get(brief, "storage.upper_height") != "to_ceiling" or not is_empty(get(brief, "storage.over_fridge")):
         return []
-    if sub(fridge, "built_in") is True or sub(fridge, "wall") == "none":
+    if sub(fridge, "built_in") is True or fridge_out_of_kitchen(fridge):
         return []
     return [
         Finding(
@@ -746,9 +761,15 @@ def enum_text(value: Any) -> str:
     return str(value)
 
 
+def _item_kind(desc: Any) -> str:
+    """Тип ключа по описанию «integer», «string: пояснение», «enum: a, b»; пустое описание — пустой тип."""
+    words = str(desc).split(":")[0].split()
+    return words[0] if words else ""
+
+
 def _enum_values(desc: Any) -> list[str] | None:
-    """Перечень из описания ключа «enum: a, b (пояснение), c»; не перечень — `None`."""
-    if not str(desc).startswith("enum: "):
+    """Перечень из описания ключа «enum: a, b (пояснение), c — пояснение»; не перечень — `None`."""
+    if _item_kind(desc) != "enum" or not str(desc).startswith("enum: "):
         return None
     listed = re.sub(r"\([^)]*\)", "", str(desc)[6:]).split("—")[0]
     return [v.strip() for v in listed.split(",")]
@@ -830,15 +851,12 @@ def type_errors(brief: dict, schema: dict) -> list[str]:
                 out.append(error)
                 continue
             if spec.get("type") == "list" and isinstance(spec.get("item"), dict):
-                out += [
-                    e
-                    for i, el in enumerate(value)
-                    if not is_empty(el)
-                    for e in [_type_error(f"{path}[{i}]", el, "object")]
-                    if e
-                ]
+                for i, el in enumerate(value):
+                    error = None if is_empty(el) else _type_error(f"{path}[{i}]", el, "object")
+                    if error:
+                        out.append(error)
             for key_path, key_value, desc in _keyed(value, spec, path):
-                kind = str(desc).split(":")[0].split()[0]
+                kind = _item_kind(desc)
                 error = _type_error(key_path, key_value, kind) if kind != "enum" else None
                 if error:
                     out.append(error)
