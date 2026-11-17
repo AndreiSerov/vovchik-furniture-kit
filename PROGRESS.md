@@ -97,6 +97,7 @@
 - [x] 62 — Бриф: холодильник не на кухне ([спека](docs/specs/stage-8-backlog.md))
 - [x] 63 — Бриф: типы полей и сбой `status.md` ([спека](docs/specs/stage-8-backlog.md))
 - [x] 64 — Чек-лист выезда: этаж и лифт отдельными полями ([спека](docs/specs/stage-8-backlog.md))
+- [ ] 65 — Уборка этапа 8 ([спека](docs/specs/stage-8-backlog.md))
 
 ## Бэклог (после MVP)
 
