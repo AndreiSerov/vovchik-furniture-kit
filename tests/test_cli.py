@@ -168,3 +168,14 @@ def test_import_text_without_warnings_is_one_line():
     from kitchen.cli import _render_import
 
     assert _render_import(result) == "Заказ o: принята версия 2 проекта."
+
+
+def test_reimport_text_prints_warnings_under_the_unchanged_line(home, tmp_path):
+    runner.invoke(app, ["order", "new", "2026-047-petrov"])
+    p = _project_file(tmp_path)
+    first = runner.invoke(app, ["import", "petrov", str(p)])
+    again = runner.invoke(app, ["import", "petrov", str(p)])
+    shown = [line for line in again.output.splitlines() if line and line != MOCK_BANNER]
+    warnings = [line for line in first.output.splitlines() if line.startswith("[предупреждение]")]
+    assert warnings
+    assert shown == ["Заказ 2026-047-petrov: без изменений, текущая версия проекта — 1.", *warnings]

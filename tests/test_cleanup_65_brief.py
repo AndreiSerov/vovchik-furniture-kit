@@ -1,5 +1,7 @@
 """Тикет 65: уборка брифа (М1, М3 и пункты ревью тикетов 62 и 63)."""
 
+import pytest
+
 from tests.test_check_brief import SCHEMA, SKILL, c, cb, rules, run, sergey, with_fridge
 
 FRIDGE_RULES = {"fridge_place", "over_fridge"}
@@ -69,3 +71,24 @@ def test_skill_step_7_names_the_placeholder_type():
     text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
     assert "ожидалось <тип>" in text
     assert "ожидалось целое число | строка" not in text
+
+
+@pytest.mark.parametrize("bad", ["1800", True])
+@pytest.mark.parametrize("budget", [100000, 300000])
+def test_budget_rules_are_silent_and_meters_none_on_wrong_length_type(bad, budget):
+    brief = sergey()
+    brief["room"]["walls"] = c([{"name": "A", "length_mm": bad}, {"name": "B", "length_mm": 1800}])
+    brief["budget"] = {"amount_rub": c(budget)}
+    brief["storage"]["upper_height"] = c("to_ceiling")
+    result = run(brief)
+    assert result["summary"]["running_meters"] is None
+    assert not {"tall_uppers_budget", "budget_tight"} & rules(result)
+    assert len(result["errors"]) == 1
+
+
+def test_island_length_type_error_gives_no_partial_meters():
+    brief = sergey()
+    brief["room"]["island"] = c({"length_mm": "1500"})
+    result = run(brief)
+    assert result["errors"] == ["room.island.length_mm: '1500' — ожидалось целое число"]
+    assert result["summary"]["running_meters"] is None

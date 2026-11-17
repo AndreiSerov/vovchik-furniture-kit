@@ -114,9 +114,17 @@ def appliance_name(item: dict) -> str:
 CORNERS = {"corner": 1, "u_shape": 2}
 
 
-def number(value: Any) -> float:
-    """Число для расчёта; неверный тип (строка, да/нет) — 0: об ошибке типа уже сказано в `errors`."""
-    return value if isinstance(value, int | float) and not isinstance(value, bool) else 0
+def is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def wrong_length_type(brief: dict) -> bool:
+    """Длина стены или острова не число (строка, да/нет): погонажа нет, правила бюджета молчат;
+    об ошибке типа уже сказано в `errors`."""
+    walls = get(brief, "room.walls")
+    values = [w.get("length_mm") for w in walls if isinstance(w, dict)] if isinstance(walls, list) else []
+    values.append(sub(get(brief, "room.island"), "length_mm"))
+    return any(not is_empty(v) and not is_number(v) for v in values)
 
 
 def fridge_out_of_kitchen(fridge: Any) -> bool:
@@ -127,11 +135,13 @@ def fridge_out_of_kitchen(fridge: Any) -> bool:
 
 def running_meters(brief: dict, base_depth_mm: int = 600) -> float | None:
     """Погонаж низа: стены минус перекрытие в углах плюс длина острова."""
+    if wrong_length_type(brief):
+        return None
     walls = get(brief, "room.walls")
     if not isinstance(walls, list):
         walls = []
     lengths = [
-        number(w.get("length_mm"))
+        (w.get("length_mm") or 0)
         for w in walls
         if isinstance(w, dict) and w.get("furnished", True) is not False
     ]
@@ -139,7 +149,7 @@ def running_meters(brief: dict, base_depth_mm: int = 600) -> float | None:
     if total:
         corners = min(len(lengths) - 1, CORNERS.get(get(brief, "room.shape"), 0))
         total -= max(corners, 0) * base_depth_mm
-    total += number(sub(get(brief, "room.island"), "length_mm"))
+    total += sub(get(brief, "room.island"), "length_mm") or 0
     return round(total / 1000, 2) if total else None
 
 
@@ -253,7 +263,7 @@ def sink_window(brief: dict, s: dict) -> list[Finding]:
 @rule("tall_uppers_budget")
 def tall_uppers_budget(brief: dict, s: dict) -> list[Finding]:
     amount = get(brief, "budget.amount_rub")
-    if get(brief, "storage.upper_height") != "to_ceiling" or is_empty(amount):
+    if get(brief, "storage.upper_height") != "to_ceiling" or is_empty(amount) or wrong_length_type(brief):
         return []
     threshold = budget_threshold(brief, s, "min_budget_to_ceiling_per_reference_length")
     if amount >= threshold:
@@ -278,7 +288,7 @@ def tall_uppers_budget(brief: dict, s: dict) -> list[Finding]:
 @rule("budget_tight")
 def budget_tight(brief: dict, s: dict) -> list[Finding]:
     amount = get(brief, "budget.amount_rub")
-    if is_empty(amount):
+    if is_empty(amount) or wrong_length_type(brief):
         return []
     to_ceiling = get(brief, "storage.upper_height") == "to_ceiling"
     key = (
@@ -882,10 +892,7 @@ def check(brief: dict, settings: dict, schema: dict) -> dict:
     missing = check_required(brief, schema)
     for m in missing:
         m["covered_by"] = next((c.rule for c in conflicts if m["path"] in c.paths), None)
-    try:
-        meters = running_meters(brief, settings["base_depth_mm"])
-    except (TypeError, ValueError):  # неверный тип длины — об этом уже сказано в errors
-        meters = None
+    meters = running_meters(brief, settings["base_depth_mm"])
     return {
         "summary": {
             "running_meters": meters,
