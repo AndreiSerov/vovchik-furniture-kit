@@ -172,9 +172,9 @@ def describe_module(module: ModuleSpec, row: Row, built: ModuleParts, project: P
         extras.append("выдвижным фасадом")
     if shelves:
         extras.append(_counted(shelves, "f", "полкой", "полками"))
-    for h, count in hardware.items():
-        if h in named:
-            extras.append(_hardware_phrase(named[h], plural_names.get(h), count))
+    for item in ws.hardware.items:  # порядок `hardware.yaml`, как в сборочном листе
+        if item.id in named and hardware.get(item.id, 0) > 0:
+            extras.append(_hardware_phrase(named[item.id], plural_names.get(item.id), hardware[item.id]))
     text = template.title + (f" с {_enumerate(extras)}" if extras else "") + f", {module.width:g} мм"
     # названия видов без модели: в модели бывает марка
     kinds = [APPLIANCE_NAMES[a.type] for a in project.appliances_at(module.label)]

@@ -559,6 +559,23 @@ def test_client_names_live_in_hardware_yaml(tmp_path):
     assert "с двумя дверями и ведром-вертушкой" in {m.label: m.text for m in changed.modules}["Н2"]
 
 
+def test_composition_follows_hardware_yaml_order_for_client_names(tmp_path):
+    """Тикет 65, проверка 8: ручки в `hardware.yaml` стоят раньше ведра, значит и в фразе КП — раньше."""
+    changed = small_quote(
+        tmp_path,
+        copy.deepcopy(SMALL),
+        **{
+            "hardware.yaml": (
+                "{id: handle_profile, ставится: объект,",
+                '{id: handle_profile, для_клиента: "ручкой", для_клиента_мн: "ручками", ставится: объект,',
+            )
+        },
+    )
+    assert {m.label: m.text for m in changed.modules}["Н2"] == (
+        "модуль под мойку с двумя дверями, двумя ручками и выдвижным ведром, 750 мм; техника: мойка"
+    )
+
+
 def with_materials(**overrides):
     project = copy.deepcopy(SMALL)
     project["materials"] = {

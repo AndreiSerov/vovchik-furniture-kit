@@ -45,14 +45,9 @@ def one_module_project(home, template, width=None, **extra):
     return path
 
 
-def test_petrov_parts_equal_snapshot_before_refactoring(home):
-    """Проверка 1."""
+def test_petrov_has_18_handles(home):
+    """Проверка 1: число ручек Петрова; детали Петрова держат эталоны и `test_petrov.py`."""
     parts = api.parts_from_project(FIXTURES / "petrov_project.json", home)
-    snapshot = json.loads((FIXTURES / "petrov_parts_before_60.json").read_text(encoding="utf-8"))
-    dump = parts.model_dump(
-        mode="json", exclude={"source", "findings"}
-    )  # источник и находки зависят от брифа в БД
-    assert dump == snapshot
     assert parts.hardware["handle_profile"] == 18
 
 
@@ -75,6 +70,21 @@ def test_handles_equal_facades_times_per_unit(home, template, width, extra, per_
     assert module.hardware["handle_profile"] == facades * per_unit
 
 
+@pytest.mark.parametrize(
+    ("template", "width", "extra", "handles"),
+    [
+        ("base_drawers", None, {}, 3),
+        ("tall_oven", None, {}, 2),
+        ("base_door", 900, {"contents": {"doors": 2}}, 2),
+        ("base_door", 400, {}, 1),
+    ],
+)
+def test_handles_per_template_are_concrete_numbers(home, template, width, extra, handles):
+    """Проверка 3, числа по шаблонам (тикет 65): не пересчёт того же правила."""
+    parts = api.parts_from_project(one_module_project(home, template, width, **extra), home)
+    assert parts.modules[0].hardware["handle_profile"] == handles
+
+
 def test_handles_registry_is_covered():
     schema = json.loads((ENGINE / "schemas" / "project.schema.json").read_text(encoding="utf-8"))
     assert sorted(schema["$defs"]["ModuleSpec"]["properties"]["template"]["enum"]) == sorted(TEMPLATES)
@@ -87,11 +97,6 @@ def test_module_without_facades_has_no_handle_key(home):
     assert not any(p.area_m2 is not None for p in module.parts)
     assert "handle_profile" not in module.hardware
     assert "handle_profile" not in parts.hardware
-
-
-def test_golden_files_exist_for_check_2():
-    """Проверка 2: эталоны сравнивают тесты шаблонов; файлы на месте и не правятся этим тикетом."""
-    assert len(list(GOLDEN_DIR.glob("*.json"))) >= 13
 
 
 def test_handles_per_unit_is_used_in_one_place():
