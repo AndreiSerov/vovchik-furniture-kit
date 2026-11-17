@@ -148,3 +148,23 @@ def test_check_workshop_prints_client_name_warning(home):
         "ПРЕДУПРЕЖДЕНИЕ hardware.yaml: позиция «bin_2sec»: есть для_клиента_мн, но нет для_клиента"
         in r.output
     )
+
+
+def test_import_text_prints_check_warnings_under_the_version_line(home, tmp_path):
+    """Тикет 65, проверка 1: текст импорта показывает те же предупреждения, что `kitchen check`."""
+    runner.invoke(app, ["order", "new", "2026-047-petrov"])
+    p = _project_file(tmp_path)
+    checked = json.loads(runner.invoke(app, ["check", "--project", str(p), "--json"]).output)
+    expected = [f"[предупреждение] {f['message']}" for f in checked["findings"] if f["level"] == "warning"]
+    assert expected
+    r = runner.invoke(app, ["import", "petrov", str(p)])
+    lines = [line for line in r.output.splitlines() if line and line != MOCK_BANNER]
+    assert lines[0] == "Заказ 2026-047-petrov: принята версия 1 проекта."
+    assert lines[1 : 1 + len(expected)] == expected
+
+
+def test_import_text_without_warnings_is_one_line():
+    result = api.ImportResult(order="o", changed=True, version=2, previous_version=1, content_hash="h")
+    from kitchen.cli import _render_import
+
+    assert _render_import(result) == "Заказ o: принята версия 2 проекта."
