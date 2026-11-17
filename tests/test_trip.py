@@ -431,6 +431,23 @@ def test_header_has_floor_and_elevator_after_the_address(home):
     petrov(home, path)
     lines = api.trip_from_order(ORDER, home).header.lines()
     assert lines[1:3] == ["Адрес: Москва", "Этаж: 5, лифт: грузовой"]
+    header = api.trip_from_order(ORDER, home).header
+    assert header.storey == "5" and header.elevator == "грузовой"
+
+
+def test_header_without_floor_and_elevator_has_dash_fields(home):
+    petrov(home)
+    header = api.trip_from_order(ORDER, home).header
+    assert header.lines()[2] == "Этаж: —, лифт: —"
+    assert header.storey == "—" and header.elevator == "—"
+
+
+def test_cli_json_header_has_split_floor_fields(home):
+    petrov(home, brief_with_installation(home, walls_evenness="uneven", floor_evenness="even"))
+    header = json.loads(runner.invoke(app, ["trip", "petrov", "--json"]).output)["header"]
+    assert not {"floor_lift", "floor", "walls"} & set(header)
+    assert header["storey"] == "—" and header["elevator"] == "—"
+    assert header["floor_evenness"] == "ровный" and header["walls_evenness"] == "неровные"
 
 
 @pytest.mark.parametrize(

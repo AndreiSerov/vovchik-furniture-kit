@@ -113,14 +113,14 @@ MVP закрыт (тикеты 01–59). В бэклоге `PROGRESS.md` леж�
 
 **Blocked by:** —
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Решения агента (2026-11-17, сверить после MVP):** `elevator` хранит подпись как напечатано («грузовой», «—»), `storey` — строку («5», «—»), как остальные поля шапки. Запись DECISIONS темы 40 (шапка) обновить.
 
 **Вывод:** текст «Этаж: <этаж>, лифт: <подпись лифта>», при отсутствии значения «—»; JSON `header`: `storey`, `elevator`, `floor_evenness`, `walls_evenness` вместо `floor_lift`, `floor`, `walls`.
 
 **Проверки приёмки (каждая — тест):**
-- [ ] 1. Бриф Петрова с `client.floor = 5`, `client.elevator = "freight"` → `lines()[2] == "Этаж: 5, лифт: грузовой"`, `storey == "5"`, `elevator == "грузовой"`.
-- [ ] 2. Без `floor` и `elevator` → «Этаж: —, лифт: —».
-- [ ] 3. `kitchen trip <заказ> --json` → в `header` нет `floor_lift`, `floor`, `walls`; есть `storey`, `elevator`, `floor_evenness`, `walls_evenness`.
-- [ ] 4. Текст CLI и строки раскладки PDF чек-листа Петрова равны снимку до правки.
+- [x] 1. Бриф Петрова с `client.floor = 5`, `client.elevator = "freight"` → `lines()[2] == "Этаж: 5, лифт: грузовой"`, `storey == "5"`, `elevator == "грузовой"`.
+- [x] 2. Без `floor` и `elevator` → «Этаж: —, лифт: —».
+- [x] 3. `kitchen trip <заказ> --json` → в `header` нет `floor_lift`, `floor`, `walls`; есть `storey`, `elevator`, `floor_evenness`, `walls_evenness`.
+- [x] 4. Текст CLI и строки раскладки PDF чек-листа Петрова равны снимку до правки.
