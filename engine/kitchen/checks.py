@@ -54,7 +54,7 @@ __all__ = ["Finding", "along_texture", "check_project", "part_fit_findings"]
 
 
 class Finding(BaseModel):
-    """Находка проверки. `subject` — модуль, деталь или стена; `value` и `limit` — числа проверки."""
+    """Находка проверки. `subject` — модуль, деталь, стена или (у находок всего проекта) номер заказа; `value` и `limit` — числа проверки."""
 
     code: str
     level: Literal["error", "warning"]
@@ -688,9 +688,7 @@ def _drilling_mismatch(
     project: Project, built: list[tuple[ModuleSpec, TemplateOut]], ws: Workshop
 ) -> list[Finding]:
     """Присадка не сходится с фурнитурой (`drilling.reconcile`): предупреждение с текстом отказа присадки.
-    Модуль, не посчитавшийся, дал бы неполные суммы, поэтому тогда сверки нет."""
-    if len(built) != sum(1 for _ in _modules(project)):
-        return []
+    Сверка линейна по модулям, поэтому идёт по собранным; не собравшийся модуль виден как `module_build`."""
     hardware: Counter = Counter()
     for _, out in built:
         hardware.update(out.hardware)
@@ -698,7 +696,7 @@ def _drilling_mismatch(
     try:
         reconcile(parts, dict(hardware), ws)
     except OrderError as e:
-        return [Finding(code="drilling_mismatch", level="warning", subject="", message=str(e))]
+        return [Finding(code="drilling_mismatch", level="warning", subject=project.order, message=str(e))]
     return []
 
 

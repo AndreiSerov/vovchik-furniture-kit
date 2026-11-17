@@ -47,6 +47,8 @@ def test_two_plates_per_hinge_is_drilling_mismatch(home):
     assert f.level == "warning"
     assert f.message == str(refusal.value)
     assert "планк" in f.message
+    new_order()
+    assert any("Присадка не сходится" in w for w in api.import_project("petrov", PETROV).warnings)
 
 
 def test_no_shelves_no_hinges_gives_no_drilling_finding(home):
@@ -121,3 +123,16 @@ def test_sheet_over_saw_carries_numbers(home):
     _small_saw(home)
     [f] = [f for f in codes(PETROV, home, "sheet_over_saw") if f.subject == "ldsp_16_white"]
     assert (f.value, f.limit) == (2800, 2500)
+
+
+def test_drilling_mismatch_is_found_even_when_one_module_does_not_build(home, tmp_path):
+    """Тикет 65, проверка 6: сверка линейна по модулям; subject — номер заказа проекта."""
+    _edit_workshop(home, "construction.yaml", "полкодержателей: 4", "полкодержателей: 2")
+    data = json.loads(PETROV.read_text(encoding="utf-8"))
+    data["walls"][0]["rows"][0]["modules"][0]["template"] = "foo"
+    path = tmp_path / "broken.json"
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    found = api.check_project(path, home).findings
+    assert {"module_build", "drilling_mismatch"} <= {f.code for f in found}
+    [mismatch] = [f for f in found if f.code == "drilling_mismatch"]
+    assert mismatch.subject == data["order"]
