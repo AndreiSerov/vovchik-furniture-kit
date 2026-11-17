@@ -429,9 +429,8 @@ def test_header_has_floor_and_elevator_after_the_address(home):
     path = home / "brief-floor.json"
     path.write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
     petrov(home, path)
-    lines = api.trip_from_order(ORDER, home).header.lines()
-    assert lines[1:3] == ["Адрес: Москва", "Этаж: 5, лифт: грузовой"]
     header = api.trip_from_order(ORDER, home).header
+    assert header.lines()[1:3] == ["Адрес: Москва", "Этаж: 5, лифт: грузовой"]
     assert header.storey == "5" and header.elevator == "грузовой"
 
 

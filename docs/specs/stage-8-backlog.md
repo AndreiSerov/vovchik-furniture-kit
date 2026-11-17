@@ -131,7 +131,7 @@ MVP закрыт (тикеты 01–59). В бэклоге `PROGRESS.md` леж�
 
 **Blocked by:** 60, 61, 62, 63, 64
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Решения мастера (2026-11-17):**
 - (М1) Холодильник брифа «не на кухне» (`wall: none`) модели не требует: `check_brief.py` правило `builtin_without_model` для него молчит — ни конфликта, ни вопроса клиенту (как движок после тикета 62).
@@ -151,12 +151,12 @@ MVP закрыт (тикеты 01–59). В бэклоге `PROGRESS.md` леж�
 - Остальные тексты не меняются; КП, смета, детали Петрова — без изменений.
 
 **Проверки приёмки (каждая — тест):**
-- [ ] 1. `kitchen import` Петрова в `home` без брифа: текст содержит строки `[предупреждение] …` с текстами всех warning-находок `check`; импорт без предупреждений — текст как до тикета.
-- [ ] 2. `check_brief.check(with_fridge(sergey(), wall="none", built_in=True))`: нет `builtin_without_model` по холодильнику; `wall="A", built_in=True` без модели — конфликт остаётся.
-- [ ] 3. Бриф с `fridge.wall = " none "`: нет `fridge_place` и `over_fridge`.
-- [ ] 4. Бриф с `walls[0].length_mm = "1800"` и бюджетом: в `errors` одна ошибка типа, нет `TypeError`.
-- [ ] 5. `appliances.items[i].fuel = "plasma"` → ошибка перечня; `"gas"` → нет.
-- [ ] 6. Петров + Н-модуль с ошибкой сборки + «полкодержателей: 2»: в `check` и `module_build`, и `drilling_mismatch`; у `drilling_mismatch` subject — номер заказа проекта.
-- [ ] 7. Ручки: base_drawers 3, tall_oven 2, base_door 900 — 2, base_door 400 — 1.
-- [ ] 8. КП Петрова (текст и JSON) равен снимку до тикета; `quote.describe_module` при `для_клиента` у ручек — порядок как в `hardware.yaml`.
-- [ ] 9. `rg "petrov_parts_before_60"` пусто; `scripts/check` зелёный.
+- [x] 1. `kitchen import` Петрова в `home` без брифа: текст содержит строки `[предупреждение] …` с текстами всех warning-находок `check`; импорт без предупреждений — текст как до тикета.
+- [x] 2. `check_brief.check(with_fridge(sergey(), wall="none", built_in=True))`: нет `builtin_without_model` по холодильнику; `wall="A", built_in=True` без модели — конфликт остаётся.
+- [x] 3. Бриф с `fridge.wall = " none "`: нет `fridge_place` и `over_fridge`.
+- [x] 4. Бриф с `walls[0].length_mm = "1800"` и бюджетом: в `errors` одна ошибка типа, нет `TypeError`.
+- [x] 5. `appliances.items[i].fuel = "plasma"` → ошибка перечня; `"gas"` → нет.
+- [x] 6. Петров + Н-модуль с ошибкой сборки + «полкодержателей: 2»: в `check` и `module_build`, и `drilling_mismatch`; у `drilling_mismatch` subject — номер заказа проекта.
+- [x] 7. Ручки: base_drawers 3, tall_oven 2, base_door 900 — 2, base_door 400 — 1.
+- [x] 8. КП Петрова (текст и JSON) равен снимку до тикета; `quote.describe_module` при `для_клиента` у ручек — порядок как в `hardware.yaml`.
+- [x] 9. `rg "petrov_parts_before_60"` пусто; `scripts/check` зелёный.
