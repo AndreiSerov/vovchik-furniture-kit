@@ -136,6 +136,5 @@ def build_tall_oven(
     out.hardware[hw.shelf_pins] += shelf.pins
     out.hardware[hw.legs] += c.legs.up_to_800 if W <= c.legs.threshold else c.legs.over_800
     out.hardware[hw.screws] += c.screws_3_5x16.per_drawer
-    out.hardware[materials.handles] += 2 * c.handles.per_unit
     out.hardware[c.drawers.hardware] += 1
     return out

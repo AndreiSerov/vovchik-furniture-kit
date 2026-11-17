@@ -14,7 +14,7 @@ MVP закрыт (тикеты 01–59). В бэклоге `PROGRESS.md` леж�
 
 **Blocked by:** —
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Решения агента (2026-11-17, сверить после MVP):**
 - Ручки добавляет `parts.build_module` после `template.build`: `sum(is_facade(p) for p in out.parts) * per_unit` на позицию `materials.handles` модуля; строки ручек из шаблонов убираются.
@@ -24,12 +24,12 @@ MVP закрыт (тикеты 01–59). В бэклоге `PROGRESS.md` леж�
 **Вывод:** тексты и JSON не меняются.
 
 **Проверки приёмки (каждая — тест):**
-- [ ] 1. `tests/fixtures/petrov_project.json` → `api.parts_from_project`: `model_dump()` равен снимку до рефакторинга как dict; `hardware["handle_profile"] == 18`.
-- [ ] 2. Все `tests/golden/*.json` проходят без правки.
-- [ ] 3. Параметризованный тест по всем шаблонам `TEMPLATES` (включая `wall_lift` 600 и `base_door` с 1 и 2 дверьми) на одномодульном проекте: ручек = деталей с `is_facade` × `per_unit`.
-- [ ] 4. `construction.yaml` «ручки: по 2 на фасад» → у Петрова 36 (`tests/test_dishwasher_handle.py` зелёный).
-- [ ] 5. Модуль без фасадов: ключа `handle_profile` в `hardware` нет.
-- [ ] 6. `handles.per_unit` встречается в `engine/kitchen` в одном месте (тест-страж по тексту исходников).
+- [x] 1. `tests/fixtures/petrov_project.json` → `api.parts_from_project`: `model_dump()` равен снимку до рефакторинга как dict; `hardware["handle_profile"] == 18`.
+- [x] 2. Все `tests/golden/*.json` проходят без правки.
+- [x] 3. Параметризованный тест по всем шаблонам `TEMPLATES` (включая `wall_lift` 600 и `base_door` с 1 и 2 дверьми) на одномодульном проекте: ручек = деталей с `is_facade` × `per_unit`.
+- [x] 4. `construction.yaml` «ручки: по 2 на фасад» → у Петрова 36 (`tests/test_dishwasher_handle.py` зелёный).
+- [x] 5. Модуль без фасадов: ключа `handle_profile` в `hardware` нет.
+- [x] 6. `handles.per_unit` встречается в `engine/kitchen` в одном месте (тест-страж по тексту исходников).
 
 ## Тикет 61 — Отказы из-за правил мастерской — находки проверок
 
