@@ -746,8 +746,34 @@ def enum_text(value: Any) -> str:
     return str(value)
 
 
+def _enum_values(desc: Any) -> list[str] | None:
+    """Перечень из описания ключа «enum: a, b (пояснение), c»; не перечень — `None`."""
+    if not str(desc).startswith("enum: "):
+        return None
+    listed = re.sub(r"\([^)]*\)", "", str(desc)[6:]).split("—")[0]
+    return [v.strip() for v in listed.split(",")]
+
+
+def _keyed(value: Any, spec: dict, path: str) -> list[tuple[str, Any, str]]:
+    """Пары (путь, значение, описание) ключей объекта и элементов списка по `item` схемы."""
+    item = spec.get("item")
+    if not isinstance(item, dict):
+        return []
+    if spec.get("type") == "object" and isinstance(value, dict):
+        return [(f"{path}.{k}", value[k], d) for k, d in item.items() if not is_empty(value.get(k))]
+    if spec.get("type") == "list" and isinstance(value, list):
+        return [
+            (f"{path}[{i}].{k}", el[k], d)
+            for i, el in enumerate(value)
+            if isinstance(el, dict)
+            for k, d in item.items()
+            if not is_empty(el.get(k))
+        ]
+    return []
+
+
 def enum_errors(brief: dict, schema: dict) -> list[str]:
-    """Значение enum-поля не из перечня схемы; у полей-объектов — ключи вида «enum: a, b»."""
+    """Значение enum-поля не из перечня схемы; у полей-объектов и элементов списков — ключи «enum: a, b»."""
     out = []
     for sec_key, sec in schema["sections"].items():
         for name, spec in sec["fields"].items():
@@ -757,20 +783,71 @@ def enum_errors(brief: dict, schema: dict) -> list[str]:
             path = f"{sec_key}.{name}"
             if spec.get("type") == "enum" and enum_text(value) not in spec["values"]:
                 out.append(f"{path}: {value!r} не из перечня {', '.join(spec['values'])}")
-            elif spec.get("type") == "object" and isinstance(value, dict):
-                for key, desc in spec.get("item", {}).items():
-                    if not str(desc).startswith("enum: ") or is_empty(value.get(key)):
-                        continue
-                    listed = re.sub(r"\([^)]*\)", "", str(desc)[6:]).split("—")[0]
-                    allowed = [v.strip() for v in listed.split(",")]
-                    if enum_text(value[key]) not in allowed:
-                        out.append(f"{path}.{key}: {value[key]!r} не из перечня {', '.join(allowed)}")
+            for key_path, key_value, desc in _keyed(value, spec, path):
+                allowed = _enum_values(desc)
+                if allowed is not None and enum_text(key_value) not in allowed:
+                    out.append(f"{key_path}: {key_value!r} не из перечня {', '.join(allowed)}")
+    return out
+
+
+# тип схемы -> (проверка значения, название в сообщении)
+TYPE_CHECKS: dict[str, tuple[Callable[[Any], bool], str]] = {
+    # целое: int или дробное без дробной части (2700.0); bool и строки — нет
+    "integer": (
+        lambda v: (
+            not isinstance(v, bool) and (isinstance(v, int) or (isinstance(v, float) and v.is_integer()))
+        ),
+        "целое число",
+    ),
+    "string": (lambda v: isinstance(v, str), "строка"),
+    "boolean": (lambda v: isinstance(v, bool), "да/нет"),
+    "object": (lambda v: isinstance(v, dict), "объект"),
+    "list": (lambda v: isinstance(v, list), "список"),
+}
+
+
+def _type_error(path: str, value: Any, kind: str) -> str | None:
+    check_value, label = TYPE_CHECKS.get(kind, (None, ""))
+    if check_value is None or check_value(value):
+        return None
+    return f"{path}: {value!r} — ожидалось {label}"
+
+
+def type_errors(brief: dict, schema: dict) -> list[str]:
+    """Тип значения не тот, что в схеме: поля разделов, ключи объектов, элементы и ключи списков.
+
+    Пустое значение (`None`, `""`, `[]`, `{}`) не проверяется. Перечни — в `enum_errors`.
+    """
+    out = []
+    for sec_key, sec in schema["sections"].items():
+        for name, spec in sec["fields"].items():
+            value = get(brief, f"{sec_key}.{name}")
+            if is_empty(value):
+                continue
+            path = f"{sec_key}.{name}"
+            error = _type_error(path, value, spec.get("type", ""))
+            if error:
+                out.append(error)
+                continue
+            if spec.get("type") == "list" and isinstance(spec.get("item"), dict):
+                out += [
+                    e
+                    for i, el in enumerate(value)
+                    if not is_empty(el)
+                    for e in [_type_error(f"{path}[{i}]", el, "object")]
+                    if e
+                ]
+            for key_path, key_value, desc in _keyed(value, spec, path):
+                kind = str(desc).split(":")[0].split()[0]
+                error = _type_error(key_path, key_value, kind) if kind != "enum" else None
+                if error:
+                    out.append(error)
     return out
 
 
 def check(brief: dict, settings: dict, schema: dict) -> dict:
     conflicts: list[Finding] = []
-    errors: list[str] = enum_errors(brief, schema)
+    errors: list[str] = [*type_errors(brief, schema), *enum_errors(brief, schema)]
     for rule_id, fn in RULES.items():
         if rule_id in settings.get("disabled_rules", []):
             continue
@@ -787,9 +864,13 @@ def check(brief: dict, settings: dict, schema: dict) -> dict:
     missing = check_required(brief, schema)
     for m in missing:
         m["covered_by"] = next((c.rule for c in conflicts if m["path"] in c.paths), None)
+    try:
+        meters = running_meters(brief, settings["base_depth_mm"])
+    except (TypeError, ValueError):  # неверный тип длины — об этом уже сказано в errors
+        meters = None
     return {
         "summary": {
-            "running_meters": running_meters(brief, settings["base_depth_mm"]),
+            "running_meters": meters,
             "missing_required": len(missing),
             "conflicts": len(conflicts),
         },
