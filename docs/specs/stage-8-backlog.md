@@ -67,7 +67,7 @@ MVP закрыт (тикеты 01–59). В бэклоге `PROGRESS.md` леж�
 
 **Blocked by:** —
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Решения агента (2026-11-17, сверить после MVP):**
 - Пропуск — в цикле `leftover_brief` в `checks._pair` (`checks.py:243`): `if not b.built_in or b.wall == NOT_IN_KITCHEN: continue`, с той же нормализацией `wall`, что у `fridge_not_in_kitchen`.
@@ -76,10 +76,10 @@ MVP закрыт (тикеты 01–59). В бэклоге `PROGRESS.md` леж�
 **Вывод:** у этого сочетания находки нет; остальные тексты не меняются.
 
 **Проверки приёмки (каждая — тест):**
-- [ ] 1. Бриф `{"wall": "none", "built_in": true, "width_mm": 600}`, проект с одним `base_door` → находок по холодильнику нет.
-- [ ] 2. То же с `"wall": " none "` → находок нет (если `fridge_not_in_kitchen` нормализует пробелы; иначе как у неё).
-- [ ] 3. Бриф `{"wall": "A", "built_in": true}`, проект без холодильника → `appliance_no_template` осталась.
-- [ ] 4. Бриф `wall: none`, проект с холодильником в пустом месте → `fridge_not_in_kitchen` осталась (`tests/test_gap_appliances.py` зелёный).
+- [x] 1. Бриф `{"wall": "none", "built_in": true, "width_mm": 600}`, проект с одним `base_door` → находок по холодильнику нет.
+- [x] 2. То же с `"wall": " none "` → находок нет (если `fridge_not_in_kitchen` нормализует пробелы; иначе как у неё).
+- [x] 3. Бриф `{"wall": "A", "built_in": true}`, проект без холодильника → `appliance_no_template` осталась.
+- [x] 4. Бриф `wall: none`, проект с холодильником в пустом месте → `fridge_not_in_kitchen` осталась (`tests/test_gap_appliances.py` зелёный).
 
 ## Тикет 63 — Бриф: типы полей и сбой `status.md`
 

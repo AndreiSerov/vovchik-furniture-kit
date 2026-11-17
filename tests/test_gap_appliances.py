@@ -369,3 +369,23 @@ def test_no_pairing_warning_when_the_brief_has_none_of_that_kind(home):
     fridges = [{"type": "fridge", "width": 600, "module": "ПМ1"}] * 2
     found = [f.code for f in api.check_project(write(home, walls, appliances=fridges), home).findings]
     assert found.count("appliance_not_in_brief") == 2 and "appliance_pairing" not in found
+
+
+def brief_fridge_findings(home, fridge, appliances=None):
+    save_brief(home, fridge)
+    walls = [{"label": "A", "length": 600, "rows": [lower(base("Н1"))]}]
+    found = api.check_project(write(home, walls, appliances=appliances), home).findings
+    return [f for f in found if f.subject.startswith("холодильник")]
+
+
+def test_built_in_fridge_not_in_kitchen_without_project_fridge_gives_no_finding(home):
+    assert brief_fridge_findings(home, {"wall": "none", "built_in": True, "width_mm": 600}) == []
+
+
+def test_built_in_fridge_not_in_kitchen_with_padded_wall_gives_no_finding(home):
+    assert brief_fridge_findings(home, {"wall": " none ", "built_in": True, "width_mm": 600}) == []
+
+
+def test_built_in_fridge_on_a_wall_without_project_fridge_still_has_no_template(home):
+    found = brief_fridge_findings(home, {"wall": "A", "built_in": True, "width_mm": 600})
+    assert [f.code for f in found] == ["appliance_no_template"]

@@ -244,7 +244,7 @@ def _pair(project: Project, brief: list[BriefAppliance], ws: Workshop, found: li
             )
     for items in leftover_brief.values():
         for b in items:
-            if not b.built_in:
+            if not b.built_in or b.wall == NOT_IN_KITCHEN:  # холодильника на кухне нет
                 continue
             if any(accepts(name, b.type, ws) for name in TEMPLATES):
                 found.append(
