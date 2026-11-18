@@ -1,6 +1,11 @@
 import json
+import os
 import shutil
 from pathlib import Path
+
+# typer включает цвет rich в GitHub Actions (`GITHUB_ACTIONS`, `FORCE_COLOR`): справка CLI в тестах
+# приходит с ANSI-кодами и не совпадает с локальной. Флаг читается при импорте typer — ставим до него.
+os.environ["_TYPER_FORCE_DISABLE_TERMINAL"] = "1"
 
 import pytest
 
