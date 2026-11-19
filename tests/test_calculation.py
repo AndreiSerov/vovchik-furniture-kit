@@ -355,3 +355,28 @@ def test_cut_and_views_carry_the_newer_brief_warning(home):
     assert note.startswith("Бриф №2 новее")
     assert calc.cut().warnings[-1] == note
     assert calc.views().warnings[-1] == note
+
+
+# --- ревью 75: копии «экономии» ---------------------------------------------------------------------
+
+
+def test_economy_copies_share_the_workshop_and_do_not_read_the_brief(home, monkeypatch):
+    """Копии «экономии» берут мастерскую родителя и бриф не читают (цены копий — без брифа)."""
+    petrov_order(home)
+    path = petrov_file(home)
+    loads = counter(monkeypatch, "kitchen.calculation.load_workshop")
+    briefs = counter(monkeypatch, "kitchen.calculation._brief_of_project")
+    calc = api.calculation(project=path, home=home)
+    calc.estimate(economy=True)
+    calc.economy_parts()
+    assert (len(loads), len(briefs)) == (1, 1)
+
+
+def test_economy_parts_of_an_order_have_no_newer_brief_warning(home):
+    petrov_order(home)
+    api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
+    calc = api.calculation(order=ORDER, home=home)
+    note = calc.check().brief_note
+    assert note.startswith("Бриф №2 новее")
+    assert note in calc.parts().warnings
+    assert note not in calc.economy_parts().warnings

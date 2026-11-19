@@ -411,3 +411,15 @@
 - Старые имена в именах тестов (`test_petrov_parts_from_order`, `test_views_and_save_lays_pages_out_once`) и в докстринге `tests/test_formulas.py:4` (`api.parts_from_project`); страж 75.3 `tests/` не смотрит. — сделано в 75 (докстринг и имена тестов с именами старых функций)
 - `scripts/count-asserts`: счёт по строкам (подстрока в комментарии засчитывается, потерю перекрывает добавленная строка того же файла); неверный ref даёт traceback; README не называет скрипт (как и `claim`, `session-stats`). — traceback сделан в 75; счёт по строкам и README оставлены
 - `scripts/count-asserts` (ревью 73, повторные раунды): несуществующий ref и запуск вне репо — traceback и код 1 (тот же, что «число уменьшилось»); `.split()` по `ls-tree` падает на имени с пробелом, не-ASCII в кавычках (`-z`); файл без расширения не попадает под `ruff` в `scripts/check`. — сделано в 75 (код 2 и строка ошибки, `ls-tree -z`, `extend-include` в `pyproject.toml`)
+
+## Тикет 75 (удаление старой формы, уборка этапа 9)
+
+После этапа 9, по желанию.
+- Результат копии «экономии» (`Calculation._copy`) имеет источник родителя и прошёл бы `save` как смета заказа; снаружи недостижимо (`_copy` закрытый, `economy_parts` возвращает `PartsResult`). Отличить без смены источника нельзя, а смена источника меняет JSON `economy_parts`.
+- `_economy_parts`: цена «как в проекте» считается копией того же проекта (второй `compute_parts`); `self.estimate().price` эквивалентен, но AST-тест `test_one_parts_path.py:62` требует два `_copy`.
+- Блок `source.model_copy(update={"brief_id": …, "brief_saved_at": …})` повторяется в `calculation.py` четыре раза.
+- Страж 75.3 не видит голые старые имена без `api.` (сейчас это верная история с «раньше»), не смотрит `README.md`, `MOCKS.md`, `PROGRESS.md`, `.claude/`; `_is_api` не ловит `kitchen.api.X` после `import kitchen.api`.
+- `save -> tuple[Result, ...]`: вызывающие теряют конкретный тип (тайпчекера в `scripts/check` нет).
+- `api.py:1003`: заголовок «детали проекта» над одной `_data_hash` (помощник импорта) устарел.
+- Имена тестов `test_check_project_says_the_same_as_import`, `test_check_project_reports_duplicate_labels` в старой форме.
+- Спека «Модуль и интерфейс» говорит, что `parse_project_file`, `_canonical`, `_insert_log` есть в `api.__all__`; их там нет и до этапа (имена доступны как `api.X`) — поправить спеку или `__all__`.
