@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # tests/test_stage9_snapshot.py берёт движок коммита 086cf59
+          fetch-depth: 0 # полная история: её брал снимок этапа 9 (удалён в 75); оставлена — дёшево и безвредно
       - uses: astral-sh/setup-uv@v6
       - uses: actions/setup-python@v5
         with:

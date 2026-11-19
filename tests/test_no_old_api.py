@@ -65,10 +65,9 @@ REMOVED = {
     "VIEWS_HTML",
 }
 
-# Файлы `tests/`, которые ещё зовут старую форму (список тикета 71); тикеты 73–74 его опустошают.
-OLD_API_EXCEPTIONS = {
-    "stage9_snapshot.py",
-}
+# Файлы `tests/`, которые ещё зовут старую форму (список тикета 71). Тикеты 73–74 перевели тесты на расчёт,
+# тикет 75 удалил помощник снимка этапа 9 — исключений нет, и новых не появляется (храповик ниже).
+OLD_API_EXCEPTIONS: set[str] = set()
 
 
 def _is_api(node: ast.AST) -> bool:
@@ -176,6 +175,13 @@ def test_engine_neither_defines_nor_calls_the_old_api():
         if defined or used:
             problems.append(f"{path.name}: определяет {sorted(defined)}, зовёт {sorted(used)}")
     assert not problems, "\n".join(problems)
+
+
+def test_the_stage9_snapshot_is_gone_and_no_test_is_excepted():
+    """Тикет 75 (п. 6): снимок этапа 9 жил только на время этапа (решение мастера 2026-11-18)."""
+    assert not (TESTS / "stage9_snapshot.py").exists()
+    assert not (TESTS / "test_stage9_snapshot.py").exists()
+    assert OLD_API_EXCEPTIONS == set()
 
 
 def test_the_doc_guard_sees_an_old_name():
