@@ -302,7 +302,7 @@ def parts(
     try:
         if (order is None) == (project is None):
             raise InputError("Укажите либо заказ (kitchen parts petrov), либо файл: --project project.json.")
-        result = api.parts_from_order(order) if order is not None else api.parts_from_project(project)
+        result = api.calculation(order=order, project=project).parts()
     except KitchenError as e:
         fail(e)
     emit(result, _render_parts, json)
@@ -339,7 +339,8 @@ def edges(
     try:
         if (order is None) == (project is None):
             raise InputError("Укажите либо заказ (kitchen edges petrov), либо файл: --project project.json.")
-        result = api.edges_and_save(order) if order is not None else api.edges_from_project(project)
+        calc = api.calculation(order=order, project=project)
+        result = api.save(calc, calc.edging())[0] if order is not None else calc.edging()
     except KitchenError as e:
         fail(e)
     emit(result, _render_edges, json)
@@ -381,7 +382,8 @@ def drilling(
             raise InputError(
                 "Укажите либо заказ (kitchen drilling petrov), либо файл: --project project.json."
             )
-        result = api.drilling_and_save(order) if order is not None else api.drilling_from_project(project)
+        calc = api.calculation(order=order, project=project)
+        result = api.save(calc, calc.drilling())[0] if order is not None else calc.drilling()
     except KitchenError as e:
         fail(e)
     emit(result, _render_drilling, json)
@@ -421,7 +423,8 @@ def assembly(
             raise InputError(
                 "Укажите либо заказ (kitchen assembly petrov), либо файл: --project project.json."
             )
-        result = api.assembly_and_save(order) if order is not None else api.assembly_from_project(project)
+        calc = api.calculation(order=order, project=project)
+        result = api.save(calc, calc.assembly())[0] if order is not None else calc.assembly()
     except KitchenError as e:
         fail(e)
     emit(result, _render_assembly, json)
@@ -455,7 +458,8 @@ def trip(
     try:
         if (order is None) == (project is None):
             raise InputError("Укажите либо заказ (kitchen trip petrov), либо файл: --project project.json.")
-        result = api.trip_and_save(order) if order is not None else api.trip_from_project(project)
+        calc = api.calculation(order=order, project=project)
+        result = api.save(calc, calc.trip())[0] if order is not None else calc.trip()
     except KitchenError as e:
         fail(e)
     emit(result, _render_trip, json)
@@ -492,7 +496,8 @@ def three_d(
     try:
         if (order is None) == (project is None):
             raise InputError("Укажите либо заказ (kitchen 3d petrov), либо файл: --project project.json.")
-        result = api.views_and_save(order) if order is not None else api.views_from_project(project)
+        calc = api.calculation(order=order, project=project)
+        result = api.save(calc, calc.views())[0] if order is not None else calc.views()
     except KitchenError as e:
         fail(e)
     emit(result, _render_views, json)
@@ -549,7 +554,8 @@ def cut(
     try:
         if (order is None) == (project is None):
             raise InputError("Укажите либо заказ (kitchen cut petrov), либо файл: --project project.json.")
-        result = api.cut_and_save(order) if order is not None else api.cut_from_project(project)
+        calc = api.calculation(order=order, project=project)
+        result = api.save(calc, calc.cut())[0] if order is not None else calc.cut()
     except KitchenError as e:
         fail(e)
     emit(result, _render_cut, json)
@@ -587,7 +593,8 @@ def _render_purchase(r: api.PurchaseResult) -> str:
 def purchase(order: OrderArg, json: JsonOpt = False) -> None:
     """Список закупки по магазинам: Markdown и JSON для текущей версии заказа."""
     try:
-        result = api.purchase_and_save(order)
+        calc = api.calculation(order=order)
+        result = api.save(calc, calc.purchase())[0]
     except KitchenError as e:
         fail(e)
     emit(result, _render_purchase, json)
@@ -662,11 +669,8 @@ def estimate(
             raise InputError(
                 "Укажите либо заказ (kitchen estimate petrov), либо файл: --project project.json."
             )
-        result = (
-            api.estimate_and_save(order, economy=economy)
-            if order is not None
-            else api.estimate_from_project(project, economy=economy)
-        )
+        calc = api.calculation(order=order, project=project)
+        result = api.save(calc, calc.estimate(economy))[0] if order is not None else calc.estimate(economy)
     except KitchenError as e:
         fail(e)
     emit(result, _render_order_estimate, json)
@@ -735,10 +739,9 @@ def quote(
             raise InputError(
                 "Укажите либо заказ (kitchen quote petrov --days 35), либо файл: --project project.json."
             )
+        calc = api.calculation(order=order, project=project)
         result = (
-            api.quote_and_save(order, term, economy=economy)
-            if order is not None
-            else api.quote_from_project(project, term, economy=economy)
+            api.save(calc, calc.quote(term, economy))[0] if order is not None else calc.quote(term, economy)
         )
     except KitchenError as e:
         fail(e)
@@ -787,7 +790,7 @@ def _render_production(r: api.ProductionResult) -> str:
 def production(order: OrderArg, json: JsonOpt = False) -> None:
     """Пересчитать раскрой, кромление, закупку, сборочный лист и чек-лист выезда текущей версии заказа."""
     try:
-        result = api.production_and_save(order)
+        result = api.production(api.calculation(order=order))
     except KitchenError as e:
         fail(e)
     emit(result, _render_production, json)
@@ -898,7 +901,7 @@ def check(
     try:
         if (order is None) == (project is None):
             raise InputError("Укажите либо заказ (kitchen check petrov), либо файл: --project project.json.")
-        result = api.check_order(order) if order is not None else api.check_project(project)
+        result = api.calculation(order=order, project=project).check()
     except ProjectFileError as e:  # файл — JSON, но проект надо править: код 1
         fail(e)
     except KitchenError as e:

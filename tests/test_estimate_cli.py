@@ -22,7 +22,7 @@ def test_estimate_cli_json_matches_api_and_text_shows_numbers(home):
     petrov(home)
     result = runner.invoke(app, ["estimate", "petrov", "--json"])
     assert result.exit_code == 0, result.output
-    expected = api.estimate_and_save("petrov", home)
+    expected = api.save(calc := api.calculation(order="petrov", home=home), calc.estimate())[0]
     assert json.loads(result.output) == json.loads(expected.model_dump_json())
     text = runner.invoke(app, ["estimate", "petrov"])
     assert text.exit_code == 0, text.output

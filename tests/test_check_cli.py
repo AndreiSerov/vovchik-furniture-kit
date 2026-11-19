@@ -58,11 +58,11 @@ def test_petrov_order_exit_0_banner_and_json_codes(home):
     j = runner.invoke(app, ["check", "petrov", "--json"])
     assert j.exit_code == 0, j.output
     data = json.loads(j.output)
-    expected = [f.code for f in api.parts_from_order("petrov", home).findings]
+    expected = [f.code for f in api.calculation(order="petrov", home=home).parts().findings]
     assert [f["code"] for f in data["findings"]] == expected and expected
     assert data["source"]["kind"] == "order" and data["source"]["version"] == 1
     assert data["warning"] == MOCK_BANNER
-    assert data == json.loads(api.check_order("petrov", home).model_dump_json())
+    assert data == json.loads(api.calculation(order="petrov", home=home).check().model_dump_json())
 
 
 def test_project_row_sum_error_exit_1_errors_before_warnings(home):
@@ -75,7 +75,7 @@ def test_project_row_sum_error_exit_1_errors_before_warnings(home):
     err = [i for i, line in enumerate(lines) if line.startswith("  [ОШИБКА]")]
     warn = [i for i, line in enumerate(lines) if line.startswith("  [предупреждение]")]
     assert err and warn and max(err) < min(warn)
-    message = api.check_project(write(home, data), home).errors[0].message
+    message = api.calculation(project=write(home, data), home=home).check().errors[0].message
     assert f"  [ОШИБКА] {message}" in r.output
     assert "Проверки: 1 ошибка, 3 предупреждения" in r.output
     j = runner.invoke(app, ["check", "--project", str(write(home, data)), "--json"])

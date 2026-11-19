@@ -13,7 +13,7 @@ def test_parts_json_equals_api_and_text_has_banner(home, base_door_project):
     r = runner.invoke(app, ["parts", "--project", str(base_door_project), "--json"])
     assert r.exit_code == 0, r.output
     data = json.loads(r.output)
-    assert data == json.loads(api.parts_from_project(base_door_project, home).model_dump_json())
+    assert data == json.loads(api.calculation(project=base_door_project, home=home).parts().model_dump_json())
     assert data["mock"] is True and data["warning"] == MOCK_BANNER
 
     t = runner.invoke(app, ["parts", "--project", str(base_door_project)])
@@ -58,7 +58,9 @@ def test_parts_order_contract(home):
     api.import_project("2026-047-petrov", fixtures / "petrov_project.json", home=home)
     r = runner.invoke(app, ["parts", "petrov", "--json"])
     assert r.exit_code == 0, r.output
-    assert json.loads(r.output) == json.loads(api.parts_from_order("petrov", home).model_dump_json())
+    assert json.loads(r.output) == json.loads(
+        api.calculation(order="petrov", home=home).parts().model_dump_json()
+    )
     t = runner.invoke(app, ["parts", "2026-047-petrov"])
     assert t.exit_code == 0, t.output
     lines = t.output.strip().splitlines()
@@ -100,7 +102,7 @@ def test_parts_text_prints_the_gap_in_its_place_in_the_row():
     assert before[-1].startswith("  Модуль Н6 ")
     assert out[gap - 1].startswith("    Н6-") and out[gap + 1].startswith("  Модуль В5 ")
     data = json.loads(runner.invoke(app, ["parts", "--project", petrov, "--json"]).output)
-    assert data == json.loads(api.parts_from_project(petrov).model_dump_json())
+    assert data == json.loads(api.calculation(project=petrov).parts().model_dump_json())
     assert [g["label"] for g in data["gaps"]] == ["ПМ1"]
     assert "modules_before" not in data["gaps"][0]
 
