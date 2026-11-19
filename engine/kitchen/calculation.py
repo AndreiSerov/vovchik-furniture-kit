@@ -1064,7 +1064,13 @@ class Calculation:
         return self._cached(("drilling",), lambda: _drilling(self.parts(), self._ws()))
 
     def assembly(self) -> AssemblyResult:
-        return self._cached(("assembly",), lambda: _assembly(self.project, self.parts(), self._ws()))
+        return self._cached(("assembly",), self._assembly)
+
+    def _assembly(self) -> AssemblyResult:
+        workshop = (
+            self._ws()
+        )  # как в `assembly_from_project`: мастерская раньше брифа файла (решение мастера)
+        return _assembly(self.project, self.parts(), workshop)
 
     def trip(self) -> TripResult:
         """Чек-лист: шапка из брифа заказа. У файла детали без брифа, БД не открывается, шапка из «—»."""

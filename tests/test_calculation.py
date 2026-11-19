@@ -292,3 +292,66 @@ def test_glossary_names_the_calculation_and_the_new_estimate_definition():
         "| Смета | estimate | Внутренние цифры мастера: себестоимость, труд, наценка, цена | калькуляция |"
         in rows
     )
+
+
+# --- ревью 70: пробелы, которые переживали все тесты, кроме снимка ------------------------------------
+
+
+def test_estimate_with_and_without_economy_are_separate_entries(home):
+    petrov_order(home)
+    calc = api.calculation(order=ORDER, home=home)
+    plain = calc.estimate()
+    with_economy = calc.estimate(economy=True)
+    assert plain.economy is None
+    assert with_economy.economy is not None
+    assert calc.estimate() is plain
+
+
+def test_quote_with_economy_is_its_own_entry(home):
+    petrov_order(home)
+    calc = api.calculation(order=ORDER, home=home)
+    assert calc.quote(20).economy is None
+    assert calc.quote(20, economy=True).economy is not None
+
+
+def test_quote_with_economy_takes_the_cached_estimate(home, monkeypatch):
+    petrov_order(home)
+    calc = api.calculation(order=ORDER, home=home)
+    calc.estimate(economy=True)
+    computes = counter(monkeypatch, "kitchen.calculation.compute_parts")
+    calc.quote(20, economy=True)
+    assert computes == []
+
+
+def test_assembly_of_a_file_loads_the_workshop_before_the_brief(home):
+    """Как было в `assembly_from_project`: мастерская раньше брифа (решение мастера 2026-11-19, «ничего не меняется»)."""
+    break_workshop(home)
+    garbage_db(home)
+    with pytest.raises(WorkshopError):
+        api.calculation(project=petrov_file(home), home=home).assembly()
+
+
+def test_economy_parts_of_a_file_reads_the_brief_before_the_workshop(home):
+    """Допустимое изменение порядка по спеке (п. 8 «Когда что читается»)."""
+    break_workshop(home)
+    garbage_db(home)
+    with pytest.raises(OrderError) as e:
+        api.calculation(project=petrov_file(home), home=home).economy_parts()
+    assert e.value.problems[0].endswith("файл не является базой данных kitchen.")
+
+
+def test_views_and_economy_parts_of_a_file_take_the_order_brief(home):
+    petrov_order(home)
+    calc = api.calculation(project=petrov_file(home), home=home)
+    assert calc.views().source.brief_id == 1
+    assert calc.economy_parts().source.brief_id == 1
+
+
+def test_cut_and_views_carry_the_newer_brief_warning(home):
+    petrov_order(home)
+    api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)  # бриф №2 новее записанного у версии
+    calc = api.calculation(order=ORDER, home=home)
+    note = calc.check().brief_note
+    assert note.startswith("Бриф №2 новее")
+    assert calc.cut().warnings[-1] == note
+    assert calc.views().warnings[-1] == note
