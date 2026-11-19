@@ -37,15 +37,11 @@ from kitchen.calculation import (
     ValidationContext,
     ViewsResult,
     _assembly,
-    _brief_of_project,
     _build_cut,
     _build_parts,
     _canonical,
-    _check_result,
     _current_version,
     _draft_warnings,
-    _drilling,
-    _economy,
     _edging,
     _estimate,
     _estimate_markdown,
@@ -54,18 +50,15 @@ from kitchen.calculation import (
     _open_order,
     _order_project,
     _output_info,
-    _placement,
-    _priced,
-    _project_file,
     _project_hash,
     _purchase,
     _purchase_markdown,
     _read_json,
     _save_outputs,
     _trip,
-    _views,
     _with_economy,
     _write_reason,
+    calculation,
     parse_project_file,
 )
 from kitchen.checks import Finding
@@ -163,6 +156,7 @@ __all__ = [
     "assembly_layout",
     "brief_save",
     "brief_show",
+    "calculation",
     "check_order",
     "check_project",
     "check_workshop",
@@ -1065,16 +1059,12 @@ def _data_hash(data: dict) -> str:
 
 def parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
     """`kitchen parts --project <файл>`: детали проекта из файла (черновик до импорта)."""
-    home = home or resolve_home()
-    project, source = _project_file(path)
-    return _build_parts(project, home, source, _brief_of_project(home, project.order), [])
+    return calculation(project=path, home=home).parts()
 
 
 def parts_from_order(order: str, home: Path | None = None) -> PartsResult:
     """`kitchen parts <заказ>`: детали текущей версии проекта, проверки с последним брифом заказа."""
-    home = home or resolve_home()
-    project, source, latest, warnings = _order_project(order, home)
-    return _build_parts(project, home, source, latest, warnings)
+    return calculation(order=order, home=home).parts()
 
 
 # --- раскрой ------------------------------------------------------------------
@@ -1082,16 +1072,12 @@ def parts_from_order(order: str, home: Path | None = None) -> PartsResult:
 
 def cut_from_project(path: Path, home: Path | None = None) -> CutResult:
     """`kitchen cut --project <файл>`: раскрой деталей проекта из файла (черновик до импорта)."""
-    home = home or resolve_home()
-    project, source = _project_file(path)
-    return _build_cut(project, home, source, _brief_of_project(home, project.order), [])
+    return calculation(project=path, home=home).cut()
 
 
 def cut_from_order(order: str, home: Path | None = None) -> CutResult:
     """`kitchen cut <заказ>`: раскрой деталей текущей версии проекта."""
-    home = home or resolve_home()
-    project, source, latest, warnings = _order_project(order, home)
-    return _build_cut(project, home, source, latest, warnings)
+    return calculation(order=order, home=home).cut()
 
 
 CUTTING_PDF = "cutting-map.pdf"
@@ -1127,11 +1113,11 @@ def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -
 
 
 def edges_from_order(order: str, home: Path | None = None) -> EdgingResult:
-    return _edging(parts_from_order(order, home))
+    return calculation(order=order, home=home).edging()
 
 
 def edges_from_project(path: Path, home: Path | None = None) -> EdgingResult:
-    return _edging(parts_from_project(path, home))
+    return calculation(project=path, home=home).edging()
 
 
 def edges_and_save(order: str, home: Path | None = None, on: date | None = None) -> EdgingResult:
@@ -1162,16 +1148,12 @@ HOLE_PURPOSES = PURPOSE_RU  # назначение отверстия -> по-р
 
 def drilling_from_order(order: str, home: Path | None = None) -> DrillingResult:
     """Присадка текущей версии проекта заказа, без записи файлов."""
-    home = home or resolve_home()
-    project, source, latest, warnings = _order_project(order, home)
-    workshop = load_workshop(home)
-    return _drilling(_build_parts(project, home, source, latest, warnings, workshop), workshop)
+    return calculation(order=order, home=home).drilling()
 
 
 def drilling_from_project(path: Path, home: Path | None = None) -> DrillingResult:
     """`kitchen drilling --project <файл>`: присадка проекта из файла, файлов не пишет."""
-    home = home or resolve_home()
-    return _drilling(parts_from_project(path, home), load_workshop(home))
+    return calculation(project=path, home=home).drilling()
 
 
 DRILLING_PDF = "drilling-map.pdf"
@@ -1204,19 +1186,12 @@ def drilling_and_save(order: str, home: Path | None = None, on: date | None = No
 
 def assembly_from_order(order: str, home: Path | None = None) -> AssemblyResult:
     """Сборочный лист текущей версии проекта заказа, без записи файлов."""
-    home = home or resolve_home()
-    project, source, latest, warnings = _order_project(order, home)
-    workshop = load_workshop(home)
-    return _assembly(project, _build_parts(project, home, source, latest, warnings, workshop), workshop)
+    return calculation(order=order, home=home).assembly()
 
 
 def assembly_from_project(path: Path, home: Path | None = None) -> AssemblyResult:
     """`kitchen assembly --project <файл>`: сборочный лист проекта из файла, файлов не пишет."""
-    home = home or resolve_home()
-    project, source = _project_file(path)
-    workshop = load_workshop(home)
-    parts = _build_parts(project, home, source, _brief_of_project(home, project.order), [], workshop)
-    return _assembly(project, parts, workshop)
+    return calculation(project=path, home=home).assembly()
 
 
 ASSEMBLY_PDF = "assembly.pdf"
@@ -1248,20 +1223,12 @@ def _assembly_writer(result: AssemblyResult, on: date | None) -> Callable[[Path]
 
 def trip_from_order(order: str, home: Path | None = None) -> TripResult:
     """Чек-лист выезда текущей версии проекта заказа, без записи файлов."""
-    home = home or resolve_home()
-    project, source, latest, warnings = _order_project(order, home)
-    workshop = load_workshop(home)
-    parts = _build_parts(project, home, source, latest, warnings, workshop)
-    return _trip(project, parts, workshop, latest)
+    return calculation(order=order, home=home).trip()
 
 
 def trip_from_project(path: Path, home: Path | None = None) -> TripResult:
     """`kitchen trip --project <файл>`: чек-лист из файла, файлов не пишет; брифа у файла нет — шапка из «—»."""
-    home = home or resolve_home()
-    project, source = _project_file(path)
-    workshop = load_workshop(home)
-    parts = _build_parts(project, home, source, None, [], workshop)
-    return _trip(project, parts, workshop, None)
+    return calculation(project=path, home=home).trip()
 
 
 TRIP_PDF = "trip-checklist.pdf"
@@ -1290,15 +1257,7 @@ def _trip_writer(result: TripResult, on: date | None) -> Callable[[Path], None]:
 
 
 def purchase_from_order(order: str, home: Path | None = None) -> PurchaseResult:
-    home = home or resolve_home()
-    project, source, brief, warnings = _order_project(order, home)
-    workshop = load_workshop(home)
-    return _purchase(
-        project,
-        _build_parts(project, home, source, brief, warnings, workshop),
-        _build_cut(project, home, source, brief, warnings, workshop),
-        workshop,
-    )
+    return calculation(order=order, home=home).purchase()
 
 
 def _purchase_files(
@@ -1342,28 +1301,18 @@ def _estimate_run(
 
 def estimate_from_order(order: str, home: Path | None = None, economy: bool = False) -> EstimateResult:
     """Смета текущей версии проекта; `economy` добавляет вариант «экономия» (копия, версия не меняется)."""
-    home = home or resolve_home()
-    project, source, brief, warnings = _order_project(order, home)
-    return _estimate_run(project, home, source, brief, warnings, load_workshop(home), economy)[0]
+    return calculation(order=order, home=home).estimate(economy)
 
 
 def estimate_from_project(path: Path, home: Path | None = None, economy: bool = False) -> EstimateResult:
     """`kitchen estimate --project <файл>`: смета проекта из файла, без файлов выводов и записи в БД."""
-    home = home or resolve_home()
-    project, source = _project_file(path)
-    brief = _brief_of_project(home, project.order)
-    return _estimate_run(project, home, source, brief, [], load_workshop(home), economy)[0]
+    return calculation(project=path, home=home).estimate(economy)
 
 
 def economy_parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
     """Детали копии проекта из файла со всеми предложенными заменами «экономии»: то, из чего считана цена
     «экономии». Ничего не пишет."""
-    home = home or resolve_home()
-    project, source = _project_file(path)
-    workshop = load_workshop(home)
-    base = _priced(project, home, source, workshop).price  # без неё не известно, какие замены предлагаются
-    _, together = _economy(project, home, source, workshop, base, price_together=False)
-    return _build_parts(together, home, source, _brief_of_project(home, project.order), [], workshop)
+    return calculation(project=path, home=home).economy_parts()
 
 
 def _estimate_files(
@@ -1413,16 +1362,12 @@ def _quote(
 
 def quote_from_order(order: str, days: int, home: Path | None = None, economy: bool = False) -> QuoteResult:
     """КП текущей версии проекта заказа. `days` — срок изготовления и монтажа в рабочих днях, вписывает мастер."""
-    home = home or resolve_home()
-    project, source, brief, warnings = _order_project(order, home)
-    return _quote(project, home, source, brief, warnings, days, economy)
+    return calculation(order=order, home=home).quote(days, economy)
 
 
 def quote_from_project(path: Path, days: int, home: Path | None = None, economy: bool = False) -> QuoteResult:
     """`kitchen quote --project <файл>`: КП проекта из файла, без файлов выводов и записи в БД."""
-    home = home or resolve_home()
-    project, source = _project_file(path)
-    return _quote(project, home, source, _brief_of_project(home, project.order), [], days, economy)
+    return calculation(project=path, home=home).quote(days, economy)
 
 
 def quote_and_save(
@@ -1536,16 +1481,12 @@ def list_outputs(order: str, home: Path | None = None) -> list[OutputInfo]:
 
 def check_project(path: Path, home: Path | None = None) -> CheckResult:
     """`проверки проекта` из файла без БД: все находки сразу."""
-    home = home or resolve_home()
-    project, source = _project_file(path)
-    return _check_result(project, source, _brief_of_project(home, project.order), None, load_workshop(home))
+    return calculation(project=path, home=home).check()
 
 
 def check_order(order: str, home: Path | None = None) -> CheckResult:
     """`kitchen check <заказ>`: находки проверок текущей версии проекта с последним брифом заказа."""
-    home = home or resolve_home()
-    project, source, latest, warnings = _order_project(order, home)
-    return _check_result(project, source, latest, warnings[0] if warnings else None, load_workshop(home))
+    return calculation(order=order, home=home).check()
 
 
 # --- расстановка в комнате ----------------------------------------------------
@@ -1558,16 +1499,12 @@ def part_in_room(place: ModulePlace, part: Part) -> SceneObject:
 
 def placement_from_project(path: Path, home: Path | None = None) -> PlacementResult:
     """Расстановка проекта из файла (черновик до импорта)."""
-    home = home or resolve_home()
-    project, source = _project_file(path)
-    return _placement(project, source, load_workshop(home))
+    return calculation(project=path, home=home).placement()
 
 
 def placement_from_order(order: str, home: Path | None = None) -> PlacementResult:
     """Расстановка текущей версии проекта заказа."""
-    home = home or resolve_home()
-    project, source, _, _ = _order_project(order, home)
-    return _placement(project, source, load_workshop(home))
+    return calculation(order=order, home=home).placement()
 
 
 # --- виды кухни в PDF ---------------------------------------------------------
@@ -1579,16 +1516,12 @@ VIEWS_HTML = "kitchen-3d.html"
 
 def views_from_project(path: Path, home: Path | None = None) -> ViewsResult:
     """`kitchen 3d --project <файл>`: виды проекта из файла, файлов не пишет."""
-    home = home or resolve_home()
-    project, source = _project_file(path)
-    return _views(project, source, _brief_of_project(home, project.order), [], load_workshop(home))
+    return calculation(project=path, home=home).views()
 
 
 def views_from_order(order: str, home: Path | None = None) -> ViewsResult:
     """Виды текущей версии проекта заказа, без записи файлов."""
-    home = home or resolve_home()
-    project, source, latest, warnings = _order_project(order, home)
-    return _views(project, source, latest, warnings, load_workshop(home))
+    return calculation(order=order, home=home).views()
 
 
 def views_layout(result: ViewsResult) -> list[ViewPage]:

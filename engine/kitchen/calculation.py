@@ -35,6 +35,7 @@ from kitchen.parts import (
     EdgeTotals,
     ModuleParts,
     Part,
+    PartsComputation,
     PartsGap,
     buildable_module_parts,
     compute_parts,
@@ -42,7 +43,7 @@ from kitchen.parts import (
 from kitchen.placement import GapPlace, ModulePlace, SceneObject, WallPlace, place_project
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
-from kitchen.quote import QuoteBody
+from kitchen.quote import QuoteBody, build_quote, check_days
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.scene3d import Scene3D, build_scene3d
 from kitchen.trip import NO_BRIEF_WARNING, TripHeader, TripSection, build_header, build_trip
@@ -242,10 +243,12 @@ def _build_parts(
     brief: sqlite3.Row | None,
     extra_warnings: list[str],
     workshop: Workshop | None = None,
+    computed_parts: Callable[[], PartsComputation] | None = None,
 ) -> PartsResult:
+    """`computed_parts` — кэш `compute_parts` расчёта; без него детали считаются заново (копии «экономии»)."""
     workshop = workshop or load_workshop(home)
     _require_unique_labels(project)
-    computed = compute_parts(project, workshop)
+    computed = computed_parts() if computed_parts else compute_parts(project, workshop)
     source = source.model_copy(
         update={
             "brief_id": brief["id"] if brief else None,
@@ -343,10 +346,11 @@ def _build_cut(
     brief: sqlite3.Row | None,
     extra: list[str],
     workshop: Workshop | None = None,
+    computed_parts: Callable[[], PartsComputation] | None = None,
 ) -> CutResult:
     workshop = workshop or load_workshop(home)
     _require_unique_labels(project)
-    computed = compute_parts(project, workshop)
+    computed = computed_parts() if computed_parts else compute_parts(project, workshop)
     saw = workshop.equipment.saw
     return CutResult(
         order=project.order,
@@ -942,7 +946,12 @@ class ViewsResult(Result):
 
 
 def _views(
-    project: Project, source: PartsSource, brief: sqlite3.Row | None, warnings: list[str], workshop: Workshop
+    project: Project,
+    source: PartsSource,
+    brief: sqlite3.Row | None,
+    warnings: list[str],
+    workshop: Workshop,
+    computed_parts: Callable[[], PartsComputation] | None = None,
 ) -> ViewsResult:
     _require_unique_labels(project)
     placed = place_project(project, workshop)
@@ -954,7 +963,7 @@ def _views(
     if errors:  # проект с ошибками проверок рисуется: не построившийся модуль — голая коробка без фасадов
         module_parts, part_warnings = buildable_module_parts(project, workshop), []
     else:
-        computed = compute_parts(project, workshop)
+        computed = computed_parts() if computed_parts else compute_parts(project, workshop)
         module_parts, part_warnings = computed.modules, computed.warnings
     scene = build_scene(project, placed, module_parts, workshop)
     pages = views_page_layout(scene, errors)  # подписи, которым нет места, — ошибка уже здесь
@@ -978,3 +987,178 @@ def _views(
     )
     result._pages = pages
     return result
+
+
+# --- расчёт ---------------------------------------------------------------------------------------
+
+
+class Calculation:
+    """Расчёт: одна версия проекта (заказа или файла) вместе с мастерской и брифом; из него считаются выводы.
+
+    Проект читается при создании. Бриф заказа читается сразу, бриф файла — при первом обращении к `brief`,
+    и только у выводов, которым он нужен. Мастерская загружается при первом выводе, один раз. Выводы
+    кэшируются по аргументам: результат из расчёта не правят на месте, только через `model_copy`.
+    """
+
+    def __init__(
+        self,
+        home: Path,
+        project: Project,
+        source: PartsSource,
+        warnings: list[str],
+        brief: sqlite3.Row | None = None,
+        brief_read: bool = False,
+    ) -> None:
+        self.home = home
+        self.project = project
+        self.source = source  # без брифа: `brief_id` и `brief_saved_at` пусты
+        self._warnings = warnings  # «бриф новее» у заказа; у файла пусто
+        self._brief = brief
+        self._brief_read = brief_read
+        self._workshop: Workshop | None = None
+        self._cache: dict[tuple, Any] = {}
+
+    @property
+    def brief(self) -> sqlite3.Row | None:
+        """Последний бриф заказа. У файла — из БД при первом обращении (заказа или БД нет — `None`)."""
+        if not self._brief_read:
+            self._brief = _brief_of_project(self.home, self.project.order)
+            self._brief_read = True
+        return self._brief
+
+    def _ws(self) -> Workshop:
+        if self._workshop is None:
+            self._workshop = load_workshop(self.home)
+        return self._workshop
+
+    def _cached(self, key: tuple, build: Callable[[], Any]) -> Any:
+        if key not in self._cache:
+            self._cache[key] = build()
+        return self._cache[key]
+
+    def _computed(self) -> PartsComputation:
+        """Детали проекта (`compute_parts`) — общий кэш `parts`, `cut`, `views` и `trip` файла."""
+        return self._cached(("compute_parts",), lambda: compute_parts(self.project, self._ws()))
+
+    def _parts(self, brief: sqlite3.Row | None, warnings: list[str]) -> PartsResult:
+        return _build_parts(self.project, self.home, self.source, brief, warnings, self._ws(), self._computed)
+
+    def parts(self) -> PartsResult:
+        """Детали, общие позиции и проверки с брифом; предупреждения деталей, затем «бриф новее»."""
+        return self._cached(("parts",), lambda: self._parts(self.brief, self._warnings))
+
+    def cut(self) -> CutResult:
+        """Раскрой: только кэш `compute_parts`, без общих позиций; предупреждения деталей, «бриф новее», пропил."""
+        return self._cached(("cut",), self._cut)
+
+    def _cut(self) -> CutResult:
+        brief = self.brief
+        return _build_cut(
+            self.project, self.home, self.source, brief, self._warnings, self._ws(), self._computed
+        )
+
+    def edging(self) -> EdgingResult:
+        return self._cached(("edging",), lambda: _edging(self.parts()))
+
+    def drilling(self) -> DrillingResult:
+        return self._cached(("drilling",), lambda: _drilling(self.parts(), self._ws()))
+
+    def assembly(self) -> AssemblyResult:
+        return self._cached(("assembly",), lambda: _assembly(self.project, self.parts(), self._ws()))
+
+    def trip(self) -> TripResult:
+        """Чек-лист: шапка из брифа заказа. У файла детали без брифа, БД не открывается, шапка из «—»."""
+        return self._cached(("trip",), self._trip)
+
+    def _trip(self) -> TripResult:
+        if self.source.kind == "file":
+            return _trip(self.project, self._parts(None, []), self._ws(), None)
+        return _trip(self.project, self.parts(), self._ws(), self.brief)
+
+    def purchase(self) -> PurchaseResult:
+        """Закупка: предупреждения `parts()`, затем пропил. Работает и для файла."""
+        return self._cached(
+            ("purchase",), lambda: _purchase(self.project, self.parts(), self.cut(), self._ws())
+        )
+
+    def estimate(self, economy: bool = False) -> EstimateResult:
+        """Смета; `economy` добавляет вариант «экономия» поверх сметы без него (копии проекта — без брифа)."""
+        return self._cached(("estimate", bool(economy)), lambda: self._estimate(bool(economy)))
+
+    def _estimate(self, economy: bool) -> EstimateResult:
+        if economy:
+            return _with_economy(self.estimate(), self.project, self.home, self._ws(), economy=True)
+        parts = self.parts()
+        result = _estimate(self.project, parts, self.cut(), self._ws())
+        draft = _draft_warnings(self.source, parts)
+        return result.model_copy(update={"warnings": [*result.warnings, *draft]}) if draft else result
+
+    def quote(self, days: int, economy: bool = False) -> QuoteResult:
+        """КП: срок проверяется первым, раньше брифа и мастерской; цена — из `estimate(economy)`."""
+        check_days(days)
+        return self._cached(("quote", days, bool(economy)), lambda: self._quote(days, bool(economy)))
+
+    def _quote(self, days: int, economy: bool) -> QuoteResult:
+        estimate = self.estimate(economy)
+        body = build_quote(
+            self.project,
+            self.parts().modules,
+            self._ws(),
+            days=days,
+            price=estimate.price,
+            economy=estimate.economy,
+        )
+        return QuoteResult(
+            **body.model_dump(),
+            source=estimate.source,
+            warnings=estimate.warnings,
+            mock=estimate.mock,
+            mock_files=estimate.mock_files,
+        )
+
+    def views(self) -> ViewsResult:
+        """Виды: кэш `compute_parts` (при находках `error` — `buildable_module_parts`), `parts()` не зовёт."""
+        return self._cached(("views",), self._views)
+
+    def _views(self) -> ViewsResult:
+        brief = self.brief
+        return _views(self.project, self.source, brief, self._warnings, self._ws(), self._computed)
+
+    def placement(self) -> PlacementResult:
+        """Расстановка: `source` без брифа, БД у файла не открывается."""
+        return self._cached(("placement",), lambda: _placement(self.project, self.source, self._ws()))
+
+    def check(self) -> CheckResult:
+        """Находки проверок с брифом; `brief_note` — «бриф новее» у заказа, у файла `None`. `parts()` не зовёт."""
+        return self._cached(("check",), self._check)
+
+    def _check(self) -> CheckResult:
+        brief = self.brief
+        note = self._warnings[0] if self._warnings else None
+        return _check_result(self.project, self.source, brief, note, self._ws())
+
+    def economy_parts(self) -> PartsResult:
+        """Детали копии проекта со всеми предложенными заменами «экономии» — то, из чего считана её цена.
+        Детали копии — с брифом, цены копий — без; предупреждения только деталей копии."""
+        return self._cached(("economy_parts",), self._economy_parts)
+
+    def _economy_parts(self) -> PartsResult:
+        brief, workshop = self.brief, self._ws()
+        # от цены «как в проекте» зависит, какие замены предлагаются
+        base = _priced(self.project, self.home, self.source, workshop).price
+        _, together = _economy(self.project, self.home, self.source, workshop, base, price_together=False)
+        return _build_parts(together, self.home, self.source, brief, [], workshop)
+
+
+def calculation(
+    order: str | None = None, project: Path | None = None, home: Path | None = None
+) -> Calculation:
+    """Расчёт по заказу (текущая версия проекта) или по файлу проекта (черновик до импорта); ровно одно."""
+    if (order is None) == (project is None):
+        raise OrderError("Укажите либо заказ, либо файл проекта.")
+    home = home or resolve_home()
+    if order is not None:
+        parsed, source, brief, warnings = _order_project(order, home)
+        return Calculation(home, parsed, source, warnings, brief, brief_read=True)
+    parsed, source = _project_file(project)
+    return Calculation(home, parsed, source, [])

@@ -116,9 +116,12 @@ BEFORE_69 = {
 # Тесты и CLI берут их из `api` (`test_status_stale.py`, `cli.py`), а в `__all__` их не было.
 ADDED_IN_69 = {"OutputKind", "PartsGap", "working_days"}
 
+# Тикет 70: расчёт — новая форма интерфейса рядом со старой.
+ADDED_IN_70 = {"calculation"}
 
-def test_api_all_keeps_the_old_names_and_adds_three():
-    assert set(api.__all__) == BEFORE_69 | ADDED_IN_69
+
+def test_api_all_keeps_the_old_names_and_adds_the_new_ones():
+    assert set(api.__all__) == BEFORE_69 | ADDED_IN_69 | ADDED_IN_70
 
 
 def test_every_name_in_api_all_resolves():
