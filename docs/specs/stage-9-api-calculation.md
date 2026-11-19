@@ -214,6 +214,7 @@
 
 ## Testing Decisions
 
+- **Швы** (подтверждены мастером 2026-11-19, `/to-spec`): (1) снимок всех выводов, базовый коммит против текущего; (2) интерфейс `kitchen.api` — `calculation`, его методы, `save`, `production`; (3) контрактные тесты CLI; (4) контракты import-linter в `scripts/check`. Мимо интерфейса идут только счётчики загрузки мастерской и `compute_parts`, перенесённые точки подмены в тестах отката и гонки и `tests/test_stamp.py` (писатели напрямую, исключение стража с причиной в DECISIONS); мастер их принял.
 - Хороший тест проверяет только внешнее поведение: JSON результатов, тексты CLI, тексты записанных файлов и страниц PDF, записи БД. Внутренности расчёта не проверяются, кроме тестов-счётчиков загрузки мастерской и `compute_parts` (история 13): они подменяют `load_workshop` и `compute_parts` в `kitchen.calculation` через `monkeypatch`.
 - **Общие входы проверок.** Каждая проверка ниже называет один из этих входов:
   - **«заказ Петрова»** — tmp home (фикстура `home` из `tests/conftest.py`), затем `api.brief_save("2026-047-petrov", tests/fixtures/petrov_brief.json)` и `api.import_project("2026-047-petrov", tests/fixtures/petrov_project.json)`, как в фикстуре `petrov` (`tests/test_assembly.py:19`);
