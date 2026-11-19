@@ -12,7 +12,7 @@ from kitchen import api
 from kitchen.cutting import Cut, MaterialCut, Placement, SheetCut
 from kitchen.cutting_pdf import place_lines, scheme_labels, scheme_scale, write_cutting_map
 from kitchen.errors import OrderError
-from kitchen.pdf import FONT, FONT_BOLD, Area, page_area, register_fonts
+from kitchen.pdf import FONT, FONT_BOLD, Area, Stamp, page_area, register_fonts
 from pypdf import PdfReader
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
@@ -335,10 +335,7 @@ def test_huge_sheet_continues_on_extra_pages_with_all_text(tmp_path):
         [m],
         kerf=4,
         trim=10,
-        order=ORDER,
-        version=1,
-        mock=False,
-        on=date(2026, 11, 14),
+        stamp=Stamp(ORDER, 1, False, date(2026, 11, 14)),
     )
     pages = [p.extract_text() for p in PdfReader(path).pages]
     assert len(pages) >= 2

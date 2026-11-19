@@ -38,6 +38,7 @@ from kitchen.errors import InputError, KitchenError, OrderError, ProjectFileErro
 from kitchen.estimate import EstimateLabor, LaborLine, build_labor, build_pricing
 from kitchen.format import group_digits, num, plural, purchase_digits, working_days
 from kitchen.geometry import PURPOSE_RU
+from kitchen.metrics import Stamp
 from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
@@ -107,6 +108,7 @@ __all__ = [
     "QuickEstimate",
     "QuoteResult",
     "StaleOutput",
+    "Stamp",
     "StatusResult",
     "ValidationContext",
     "ValidationResult",
@@ -1467,10 +1469,7 @@ def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -
             kerf=result.kerf,
             kerf_declared=result.kerf_declared,
             trim=result.trim,
-            order=result.source.order,
-            version=result.source.version,
-            mock=result.mock,
-            on=on or store.today(),
+            stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
         ),
     )
     return result.model_copy(update={"output": output})
@@ -1523,10 +1522,7 @@ def edges_and_save(order: str, home: Path | None = None, on: date | None = None)
             result.parts,
             result.edges,
             purchase_digits=result.purchase_digits,
-            order=result.source.order,
-            version=result.source.version,
-            mock=result.mock,
-            on=on or store.today(),
+            stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
         ),
     )
     return result.model_copy(update={"output": output})
@@ -1587,10 +1583,7 @@ def _drilling_writer(result: DrillingResult, on: date | None) -> Callable[[Path]
         path,
         result.parts,
         result.checks,
-        order=result.source.order,
-        version=result.source.version,
-        mock=result.mock,
-        on=on or store.today(),
+        stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
     )
 
 
@@ -1661,10 +1654,7 @@ def _assembly_writer(result: AssemblyResult, on: date | None) -> Callable[[Path]
     return lambda path: write_assembly(
         path,
         result.modules,
-        order=result.source.order,
-        version=result.source.version,
-        mock=result.mock,
-        on=on or store.today(),
+        stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
     )
 
 
@@ -1733,10 +1723,7 @@ def _trip_writer(result: TripResult, on: date | None) -> Callable[[Path], None]:
         path,
         result.header,
         result.sections,
-        order=result.source.order,
-        version=result.source.version,
-        mock=result.mock,
-        on=on or store.today(),
+        stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
     )
 
 
@@ -2186,10 +2173,7 @@ def quote_and_save(
                 lambda path: write_quote(
                     path,
                     result,
-                    order=result.source.order,
-                    version=result.source.version,
-                    mock=result.mock,
-                    on=on or store.today(),
+                    stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
                 ),
             ),
             (
@@ -2250,10 +2234,7 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
                 kerf=cut.kerf,
                 kerf_declared=cut.kerf_declared,
                 trim=cut.trim,
-                order=source.order,
-                version=source.version,
-                mock=cut.mock,
-                on=day,
+                stamp=Stamp(source.order, source.version, cut.mock, day),
             ),
         ),
         (
@@ -2263,10 +2244,7 @@ def production_and_save(order: str, home: Path | None = None, on: date | None = 
                 edging.parts,
                 edging.edges,
                 purchase_digits=edging.purchase_digits,
-                order=source.order,
-                version=source.version,
-                mock=edging.mock,
-                on=day,
+                stamp=Stamp(source.order, source.version, edging.mock, day),
             ),
         ),
         *purchase_files,
@@ -2523,10 +2501,7 @@ def views_and_save(order: str, home: Path | None = None, on: date | None = None)
                 lambda path: write_views(
                     path,
                     pages,
-                    order=result.source.order,
-                    version=result.source.version,
-                    mock=result.mock,
-                    on=date_,
+                    stamp=Stamp(result.source.order, result.source.version, result.mock, date_),
                 ),
             ),
             (
@@ -2534,10 +2509,7 @@ def views_and_save(order: str, home: Path | None = None, on: date | None = None)
                 lambda path: write_html(
                     path,
                     result.scene3d,
-                    order=result.source.order,
-                    version=result.source.version,
-                    on=date_,
-                    mock=result.mock,
+                    stamp=Stamp(result.source.order, result.source.version, result.mock, date_),
                     errors=len(result.errors),
                 ),
             ),

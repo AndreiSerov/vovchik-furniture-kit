@@ -3,16 +3,14 @@
 from datetime import date
 
 import pytest
-from kitchen.pdf import FONT, FONT_BOLD, PdfDocument, register_fonts, wrap
+from kitchen.pdf import FONT, FONT_BOLD, PdfDocument, Stamp, register_fonts, wrap
 from kitchen.result import MOCK_BANNER
 from pypdf import PdfReader
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
 
 def make(path, *, mock, pages=2, version=3):
-    doc = PdfDocument(
-        path, order="2026-047-petrov", version=version, mock=mock, on=date(2026, 11, 14), title="Карта"
-    )
+    doc = PdfDocument(path, stamp=Stamp("2026-047-petrov", version, mock, date(2026, 11, 14)), title="Карта")
 
     def draw(c, area, i):
         c.setFont(FONT, 10)
@@ -54,7 +52,7 @@ def test_failing_page_leaves_no_files_and_keeps_previous_pdf(tmp_path):
     path = tmp_path / "a.pdf"
     make(path, mock=False)
     before = path.read_bytes()
-    doc = PdfDocument(path, order="2026-047-petrov", version=3, mock=False, on=date(2026, 11, 14))
+    doc = PdfDocument(path, stamp=Stamp("2026-047-petrov", 3, False, date(2026, 11, 14)))
 
     def boom(c, area):
         raise RuntimeError("draw failed")
@@ -67,9 +65,7 @@ def test_failing_page_leaves_no_files_and_keeps_previous_pdf(tmp_path):
 
 
 def test_continuation_note_in_footer(tmp_path):
-    doc = PdfDocument(
-        tmp_path / "a.pdf", order="2026-047-petrov", version=1, mock=False, on=date(2026, 11, 14)
-    )
+    doc = PdfDocument(tmp_path / "a.pdf", stamp=Stamp("2026-047-petrov", 1, False, date(2026, 11, 14)))
     doc.add_page(lambda c, a: None)
     doc.add_page(lambda c, a: None, note="лист 2, продолжение")
     doc.save()
@@ -93,10 +89,7 @@ def test_landscape_page_keeps_footer_and_watermark(tmp_path):
 
     doc = PdfDocument(
         tmp_path / "a.pdf",
-        order="2026-047-petrov",
-        version=1,
-        mock=True,
-        on=date(2026, 11, 14),
+        stamp=Stamp("2026-047-petrov", 1, True, date(2026, 11, 14)),
         landscape=True,
     )
     seen = []

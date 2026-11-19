@@ -4,7 +4,6 @@
 не помещается — следующая страница.
 """
 
-from datetime import date
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -12,7 +11,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph
 
 from kitchen.format import plural, working_days
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, Stamp, page_area
 from kitchen.quote import QuoteBody, money, percent
 
 __all__ = ["write_quote"]
@@ -84,16 +83,12 @@ def _blocks(quote: QuoteBody, order: str) -> list[tuple[ParagraphStyle, str]]:
     return blocks
 
 
-def write_quote(
-    path: Path, quote: QuoteBody, *, order: str, version: int | None, mock: bool, on: date
-) -> None:
-    doc = PdfDocument(
-        path, order=order, version=version, mock=mock, on=on, title=f"Коммерческое предложение {order}"
-    )
+def write_quote(path: Path, quote: QuoteBody, *, stamp: Stamp) -> None:
+    doc = PdfDocument(path, stamp=stamp, title=f"Коммерческое предложение {stamp.order}")
     area = page_area()
     pages: list[list[tuple[Paragraph, float]]] = [[]]
     left = area.h
-    for style, text in _blocks(quote, order):
+    for style, text in _blocks(quote, stamp.order):
         paragraph = Paragraph(escape(text), style)
         _, height = paragraph.wrap(area.w, area.h)
         height += style.spaceBefore + style.spaceAfter

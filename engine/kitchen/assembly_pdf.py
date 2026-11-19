@@ -5,7 +5,6 @@
 продолжается на следующей с заголовком «П1, продолжение». Колонтитул и водяной знак — общий слой `kitchen.pdf`.
 """
 
-from datetime import date
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -13,7 +12,7 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 
 from kitchen.assembly import AssemblyHardware, AssemblyModule
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, TextLine, page_area, register_fonts, wrap
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, Stamp, TextLine, page_area, register_fonts, wrap
 
 __all__ = ["AssemblyPageLayout", "layout", "write_assembly"]
 
@@ -147,13 +146,10 @@ def write_assembly(
     path: Path,
     modules: list[AssemblyModule],
     *,
-    order: str,
-    version: int | None,
-    mock: bool,
-    on: date,
+    stamp: Stamp,
 ) -> None:
     """PDF по раскладке `layout`."""
-    doc = PdfDocument(path, order=order, version=version, mock=mock, on=on, title=f"Сборочный лист {order}")
+    doc = PdfDocument(path, stamp=stamp, title=f"Сборочный лист {stamp.order}")
     for page in layout(modules):
 
         def draw(canvas: Canvas, a: Area, page=page) -> None:

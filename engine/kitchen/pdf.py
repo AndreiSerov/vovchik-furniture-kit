@@ -6,7 +6,6 @@
 """
 
 from collections.abc import Callable
-from datetime import date
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -19,6 +18,7 @@ from kitchen.metrics import (
     FOOTER_H,
     MARGIN,
     Area,
+    Stamp,
     page_area,
     page_size,
     register_fonts,
@@ -31,6 +31,7 @@ __all__ = [
     "FONT_BOLD",
     "Area",
     "PdfDocument",
+    "Stamp",
     "TextLine",
     "mm",
     "page_area",
@@ -59,19 +60,13 @@ class PdfDocument:
         self,
         path: Path,
         *,
-        order: str,
-        version: int | None,
-        mock: bool,
-        on: date,
+        stamp: Stamp,
         title: str = "",
         landscape: bool = False,
     ) -> None:
         register_fonts()
         self.path = Path(path)
-        self.order = order
-        self.version = version
-        self.mock = mock
-        self.on = on
+        self.stamp = stamp
         self.title = title
         self.landscape = landscape
         self._pages: list[tuple[Callable[[Canvas, Area], None], str]] = []
@@ -94,7 +89,7 @@ class PdfDocument:
                 canvas.setFillColorRGB(0, 0, 0)
                 canvas.setStrokeColorRGB(0, 0, 0)
                 draw(canvas, area)
-                if self.mock:  # поверх содержимого, чтобы заливка деталей его не закрывала
+                if self.stamp.mock:  # поверх содержимого, чтобы заливка деталей его не закрывала
                     self._watermark(canvas, width, height)
                 self._footer(canvas, width, number, total, note)
                 canvas.showPage()
@@ -116,7 +111,9 @@ class PdfDocument:
 
     def _footer(self, canvas: Canvas, width: float, number: int, total: int, note: str) -> None:
         version = (
-            f"версия проекта {self.version}" if self.version is not None else "версия проекта не записана"
+            f"версия проекта {self.stamp.version}"
+            if self.stamp.version is not None
+            else "версия проекта не записана"
         )
         canvas.setFont(FONT, 7)
         canvas.setFillColorRGB(0.2, 0.2, 0.2)
@@ -124,10 +121,10 @@ class PdfDocument:
         canvas.drawString(
             MARGIN,
             MARGIN + 3 * mm,
-            f"Заказ {self.order} · {version} · {self.on.strftime('%d.%m.%Y')} · стр. {number} из {total}"
+            f"Заказ {self.stamp.order} · {version} · {self.stamp.on.strftime('%d.%m.%Y')} · стр. {number} из {total}"
             + (f" · {note}" if note else ""),
         )
-        if self.mock:
+        if self.stamp.mock:
             canvas.setFont(FONT_BOLD, 7)
             canvas.setFillColorRGB(0.7, 0, 0)
             canvas.drawRightString(width - MARGIN, MARGIN + 3 * mm, MOCK_BANNER)

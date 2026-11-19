@@ -5,7 +5,6 @@
 подписей, отметки отверстий) считается отдельно от рисования; её же читают тесты через `api.drilling_map_layout`.
 """
 
-from datetime import date
 from decimal import Decimal
 from itertools import pairwise
 from pathlib import Path
@@ -19,7 +18,7 @@ from kitchen.drilling import DrillingCheck, part_extent
 from kitchen.errors import KitchenError
 from kitchen.geometry import PURPOSE_RU, Hole, Mm, ModuleFace, to_mm
 from kitchen.parts import Part
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, TextLine, mm, page_area, register_fonts
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, Stamp, TextLine, mm, page_area, register_fonts
 
 __all__ = ["PageLayout", "map_layout", "page_sizes", "write_drilling_map"]
 
@@ -556,13 +555,10 @@ def write_drilling_map(
     parts: list[Part],
     checks: list[DrillingCheck],
     *,
-    order: str,
-    version: int | None,
-    mock: bool,
-    on: date,
+    stamp: Stamp,
 ) -> None:
     """PDF по раскладке `map_layout`. Отверстие на схеме и в таблице — те же числа, что в `parts`."""
-    doc = PdfDocument(path, order=order, version=version, mock=mock, on=on, title=f"Карта присадки {order}")
+    doc = PdfDocument(path, stamp=stamp, title=f"Карта присадки {stamp.order}")
     for page in map_layout(parts, checks):
 
         def draw(canvas: Canvas, a: Area, page=page) -> None:

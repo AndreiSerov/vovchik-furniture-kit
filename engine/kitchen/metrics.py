@@ -4,6 +4,7 @@
 """
 
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from reportlab.lib.pagesizes import A4
@@ -19,6 +20,7 @@ __all__ = [
     "FOOTER_H",
     "MARGIN",
     "Area",
+    "Stamp",
     "page_area",
     "page_size",
     "register_fonts",
@@ -30,6 +32,16 @@ FONT_BOLD = "DejaVuSans-Bold"
 _FONTS_DIR = Path(__file__).parent / "fonts"
 MARGIN = 10 * mm
 FOOTER_H = 9 * mm
+
+
+@dataclass(frozen=True)
+class Stamp:
+    """Штамп вывода: заказ, версия проекта-источника (`None` — не записана), мок и дата; колонтитул и плашки."""
+
+    order: str
+    version: int | None
+    mock: bool
+    on: date
 
 
 @dataclass(frozen=True)

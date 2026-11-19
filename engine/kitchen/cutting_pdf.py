@@ -4,7 +4,6 @@ import heapq
 import itertools
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -12,7 +11,7 @@ from reportlab.pdfgen.canvas import Canvas
 
 from kitchen.cutting import Cut, MaterialCut, Placement, SheetCut
 from kitchen.errors import KitchenError
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, mm, page_area, register_fonts
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, Stamp, mm, page_area, register_fonts
 
 __all__ = ["PartLabel", "place_lines", "scheme_labels", "scheme_scale", "write_cutting_map"]
 
@@ -527,13 +526,10 @@ def write_cutting_map(
     kerf: int,
     kerf_declared: float | None = None,
     trim: int,
-    order: str,
-    version: int | None,
-    mock: bool,
-    on: date,
+    stamp: Stamp,
 ) -> None:
     """Пишет PDF: по странице на каждый лист всех материалов (порядок — как в раскрое)."""
-    doc = PdfDocument(path, order=order, version=version, mock=mock, on=on, title=f"Карта раскроя {order}")
+    doc = PdfDocument(path, stamp=stamp, title=f"Карта раскроя {stamp.order}")
     for m in materials:
         for s in m.sheets:
             for draw, note in _sheet_pages(m, s, kerf, trim, kerf_declared):
