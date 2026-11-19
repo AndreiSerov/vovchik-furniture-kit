@@ -246,43 +246,6 @@ def _require_unique_labels(project: Project) -> None:
         raise OrderError([f.message for f in repeated])
 
 
-def _build_parts(
-    project: Project,
-    home: Path,
-    source: PartsSource,
-    brief: sqlite3.Row | None,
-    extra_warnings: list[str],
-    workshop: Workshop | None = None,
-    computed_parts: Callable[[], PartsComputation] | None = None,
-) -> PartsResult:
-    """`computed_parts` — кэш `compute_parts` расчёта; без него детали считаются заново (копии «экономии»)."""
-    workshop = workshop or load_workshop(home)
-    _require_unique_labels(project)
-    computed = computed_parts() if computed_parts else compute_parts(project, workshop)
-    source = source.model_copy(
-        update={
-            "brief_id": brief["id"] if brief else None,
-            "brief_saved_at": brief["created_at"] if brief else None,
-        }
-    )
-    return PartsResult(
-        order=project.order,
-        source=source,
-        modules=computed.modules,
-        gaps=computed.gaps,
-        hardware=computed.hardware,
-        edges=computed.edges,
-        facade_area=computed.facade_area,
-        facade_area_by_color=computed.facade_by_color,
-        common=compute_common(project, workshop, computed.hardware),
-        findings=run_checks(project, workshop, json.loads(brief["data"]) if brief else None),
-        warnings=[*computed.warnings, *extra_warnings],
-        purchase_digits=purchase_digits(workshop.construction.edging.purchase_rounding.step_m),
-        mock=workshop.is_mock,
-        mock_files=workshop.mock_files,
-    )
-
-
 def _brief_of_project(home: Path, order: str) -> sqlite3.Row | None:
     """Последний бриф заказа из БД; заказа или БД ещё нет — `None` (проект проверяют как черновик)."""
     if not store.db_path(home).exists():
@@ -347,39 +310,6 @@ class CutResult(Result):
     countertop: CountertopSize | None  # общая длина и листы столешницы; нет столешницы в проекте — `None`
     warnings: list[str]
     output: OutputInfo | None = None  # PDF карты раскроя; только после `cut_and_save`
-
-
-def _build_cut(
-    project: Project,
-    home: Path,
-    source: PartsSource,
-    brief: sqlite3.Row | None,
-    extra: list[str],
-    workshop: Workshop | None = None,
-    computed_parts: Callable[[], PartsComputation] | None = None,
-) -> CutResult:
-    workshop = workshop or load_workshop(home)
-    _require_unique_labels(project)
-    computed = computed_parts() if computed_parts else compute_parts(project, workshop)
-    saw = workshop.equipment.saw
-    return CutResult(
-        order=project.order,
-        source=source.model_copy(
-            update={
-                "brief_id": brief["id"] if brief else None,
-                "brief_saved_at": brief["created_at"] if brief else None,
-            }
-        ),
-        kerf=saw.kerf_mm,
-        kerf_declared=saw.kerf,
-        trim=workshop.equipment.sheet.perimeter_trim,
-        max_cut_length=saw.max_cut_length,
-        materials=cut_parts(computed.modules, workshop),
-        countertop=size_countertop(project, workshop),
-        warnings=[*computed.warnings, *extra, *kerf_warnings(saw)],
-        mock=workshop.is_mock,
-        mock_files=workshop.mock_files,
-    )
 
 
 def _output_info(home: Path, source: PartsSource, kind: OutputKind, filename: str) -> OutputInfo:
@@ -650,79 +580,6 @@ def _estimate(project: Project, parts: PartsResult, cut: CutResult, workshop: Wo
     )
 
 
-def _priced(project: Project, home: Path, source: PartsSource, workshop: Workshop) -> EstimateResult:
-    """Смета копии проекта тем же путём, что и смета проекта: детали -> раскрой -> закупка -> смета."""
-    return _estimate(
-        project,
-        _build_parts(project, home, source, None, [], workshop),
-        _build_cut(project, home, source, None, [], workshop),
-        workshop,
-    )
-
-
-def _economy(
-    project: Project,
-    home: Path,
-    source: PartsSource,
-    workshop: Workshop,
-    price_as_is: int,
-    price_together: bool = True,
-) -> tuple[EconomyVariant, Project]:
-    """Вариант «экономия»: цена с каждой заменой отдельно (разница на правило) и со всеми предложенными сразу.
-    Замена с разницей не больше нуля не предлагается. Копия проекта нигде не сохраняется."""
-    offered: list[EconomyLine] = []
-    not_offered: list[EconomyLine] = []
-    problems: list[str] = []
-    for rule in workshop.economy.rules:
-        applied = apply_rule(project, rule, workshop)
-        problems += applied.problems
-        if not applied.modules:
-            continue
-        price = _priced(applied.project, home, source, workshop).price
-        line = EconomyLine(
-            id=rule.id,
-            name=rule.name,
-            client_text=rule.client_text,
-            modules=applied.modules,
-            price=price,
-            saving=price_as_is - price,
-        )
-        (offered if line.saving > 0 else not_offered).append(line)
-    chosen = {line.id for line in offered}
-    together = project
-    for rule in workshop.economy.rules:
-        if rule.id in chosen:
-            applied = apply_rule(together, rule, workshop)
-            together = applied.project
-            problems += [p for p in applied.problems if p not in problems]
-    if not offered:
-        price = price_as_is
-    elif len(offered) == 1:
-        price = offered[0].price  # одна замена: «со всеми» и «с одной» — один и тот же проект
-    elif price_together:
-        price = _priced(together, home, source, workshop).price
-    else:
-        price = 0  # цена нужна только вариантам с `price_together`; детали копии от неё не зависят
-    variant = EconomyVariant(
-        price_as_is=price_as_is,
-        price=price,
-        saving=price_as_is - price,
-        replacements=offered,
-        not_offered=not_offered,
-        problems=problems,
-    )
-    return variant, together
-
-
-def _with_economy(
-    result: EstimateResult, project: Project, home: Path, workshop: Workshop, economy: bool
-) -> EstimateResult:
-    if not economy:
-        return result
-    variant, _ = _economy(project, home, result.source, workshop, result.price)
-    return result.model_copy(update={"economy": variant})
-
-
 def _draft_warnings(source: PartsSource, parts: PartsResult) -> list[str]:
     """Проект из файла (черновик до импорта) с ошибками проверок: расчёт идёт, но импорт такой проект отклонит.
     Версия заказа таких ошибок не несёт."""
@@ -951,7 +808,7 @@ def _views(
     brief: sqlite3.Row | None,
     warnings: list[str],
     workshop: Workshop,
-    computed_parts: Callable[[], PartsComputation] | None = None,
+    computed_parts: Callable[[], PartsComputation],
 ) -> ViewsResult:
     _require_unique_labels(project)
     placed = place_project(project, workshop)
@@ -963,7 +820,7 @@ def _views(
     if errors:  # проект с ошибками проверок рисуется: не построившийся модуль — голая коробка без фасадов
         module_parts, part_warnings = buildable_module_parts(project, workshop), []
     else:
-        computed = computed_parts() if computed_parts else compute_parts(project, workshop)
+        computed = computed_parts()  # кэш `compute_parts` расчёта
         module_parts, part_warnings = computed.modules, computed.warnings
     scene = build_scene(project, placed, module_parts, workshop)
     pages = views_page_layout(scene, errors)  # подписи, которым нет места, — ошибка уже здесь
@@ -1040,8 +897,39 @@ class Calculation:
         """Детали проекта (`compute_parts`) — общий кэш `parts`, `cut`, `views` и `trip` файла."""
         return self._cached(("compute_parts",), lambda: compute_parts(self.project, self._ws()))
 
+    def _copy(self, project: Project, brief: sqlite3.Row | None = None) -> "Calculation":
+        """Расчёт копии проекта «экономии»: тот же home, источник и мастерская, детали считаются заново.
+        Бриф — только переданный (цены копий — без брифа), «бриф новее» у копии нет."""
+        copy = Calculation(self.home, project, self.source, [], brief, brief_read=True)
+        copy._workshop = self._ws()
+        return copy
+
     def _parts(self, brief: sqlite3.Row | None, warnings: list[str]) -> PartsResult:
-        return _build_parts(self.project, self.home, self.source, brief, warnings, self._ws(), self._computed)
+        """Детали поверх кэша `compute_parts`: общие позиции, проверки с `brief`; `warnings` — после деталей."""
+        workshop = self._ws()
+        _require_unique_labels(self.project)
+        computed = self._computed()
+        return PartsResult(
+            order=self.project.order,
+            source=self.source.model_copy(
+                update={
+                    "brief_id": brief["id"] if brief else None,
+                    "brief_saved_at": brief["created_at"] if brief else None,
+                }
+            ),
+            modules=computed.modules,
+            gaps=computed.gaps,
+            hardware=computed.hardware,
+            edges=computed.edges,
+            facade_area=computed.facade_area,
+            facade_area_by_color=computed.facade_by_color,
+            common=compute_common(self.project, workshop, computed.hardware),
+            findings=run_checks(self.project, workshop, json.loads(brief["data"]) if brief else None),
+            warnings=[*computed.warnings, *warnings],
+            purchase_digits=purchase_digits(workshop.construction.edging.purchase_rounding.step_m),
+            mock=workshop.is_mock,
+            mock_files=workshop.mock_files,
+        )
 
     def parts(self) -> PartsResult:
         """Детали, общие позиции и проверки с брифом; предупреждения деталей, затем «бриф новее»."""
@@ -1053,8 +941,27 @@ class Calculation:
 
     def _cut(self) -> CutResult:
         brief = self.brief
-        return _build_cut(
-            self.project, self.home, self.source, brief, self._warnings, self._ws(), self._computed
+        workshop = self._ws()
+        _require_unique_labels(self.project)
+        computed = self._computed()
+        saw = workshop.equipment.saw
+        return CutResult(
+            order=self.project.order,
+            source=self.source.model_copy(
+                update={
+                    "brief_id": brief["id"] if brief else None,
+                    "brief_saved_at": brief["created_at"] if brief else None,
+                }
+            ),
+            kerf=saw.kerf_mm,
+            kerf_declared=saw.kerf,
+            trim=workshop.equipment.sheet.perimeter_trim,
+            max_cut_length=saw.max_cut_length,
+            materials=cut_parts(computed.modules, workshop),
+            countertop=size_countertop(self.project, workshop),
+            warnings=[*computed.warnings, *self._warnings, *kerf_warnings(saw)],
+            mock=workshop.is_mock,
+            mock_files=workshop.mock_files,
         )
 
     def edging(self) -> EdgingResult:
@@ -1093,7 +1000,9 @@ class Calculation:
 
     def _estimate(self, economy: bool) -> EstimateResult:
         if economy:
-            return _with_economy(self.estimate(), self.project, self.home, self._ws(), economy=True)
+            result = self.estimate()
+            variant, _ = self._economy(result.price)
+            return result.model_copy(update={"economy": variant})
         parts = self.parts()
         result = _estimate(self.project, parts, self.cut(), self._ws())
         draft = _draft_warnings(self.source, parts)
@@ -1149,11 +1058,59 @@ class Calculation:
         return self._cached(("economy_parts",), self._economy_parts)
 
     def _economy_parts(self) -> PartsResult:
-        brief, workshop = self.brief, self._ws()
+        brief = self.brief
         # от цены «как в проекте» зависит, какие замены предлагаются
-        base = _priced(self.project, self.home, self.source, workshop).price
-        _, together = _economy(self.project, self.home, self.source, workshop, base, price_together=False)
-        return _build_parts(together, self.home, self.source, brief, [], workshop)
+        base = self._copy(self.project).estimate().price
+        _, together = self._economy(base, price_together=False)
+        return self._copy(together, brief).parts()
+
+    def _economy(self, price_as_is: int, price_together: bool = True) -> tuple[EconomyVariant, Project]:
+        """Вариант «экономия»: цена с каждой заменой отдельно (разница на правило) и со всеми предложенными
+        сразу. Замена с разницей не больше нуля не предлагается. Цену копии считает расчёт копии (`_copy`)
+        тем же путём, что смету проекта; копия проекта нигде не сохраняется."""
+        workshop = self._ws()
+        offered: list[EconomyLine] = []
+        not_offered: list[EconomyLine] = []
+        problems: list[str] = []
+        for rule in workshop.economy.rules:
+            applied = apply_rule(self.project, rule, workshop)
+            problems += applied.problems
+            if not applied.modules:
+                continue
+            price = self._copy(applied.project).estimate().price
+            line = EconomyLine(
+                id=rule.id,
+                name=rule.name,
+                client_text=rule.client_text,
+                modules=applied.modules,
+                price=price,
+                saving=price_as_is - price,
+            )
+            (offered if line.saving > 0 else not_offered).append(line)
+        chosen = {line.id for line in offered}
+        together = self.project
+        for rule in workshop.economy.rules:
+            if rule.id in chosen:
+                applied = apply_rule(together, rule, workshop)
+                together = applied.project
+                problems += [p for p in applied.problems if p not in problems]
+        if not offered:
+            price = price_as_is
+        elif len(offered) == 1:
+            price = offered[0].price  # одна замена: «со всеми» и «с одной» — один и тот же проект
+        elif price_together:
+            price = self._copy(together).estimate().price
+        else:
+            price = 0  # цена нужна только вариантам с `price_together`; детали копии от неё не зависят
+        variant = EconomyVariant(
+            price_as_is=price_as_is,
+            price=price,
+            saving=price_as_is - price,
+            replacements=offered,
+            not_offered=not_offered,
+            problems=problems,
+        )
+        return variant, together
 
 
 def calculation(
