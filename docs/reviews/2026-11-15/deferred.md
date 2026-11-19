@@ -383,3 +383,16 @@
 - Правило «`cut()` не зовёт `parts()`» снаружи не наблюдаемо (отказы `compute_common` совпадают с отказами раскроя); проверить можно только счётчиком `compute_common` — спека разрешает счётчики лишь у `load_workshop` и `compute_parts` (вопрос координатору).
 - `Calculation._cache: dict[tuple, Any]` — типы методов держатся только аннотациями.
 - `tests/test_calculation.py:93` фикстура `repeated` повторяет `tests/test_project_cleanup.py:113`; `test_quote_checks_the_term_before_the_workshop` проходит и на старом движке (регрессия, не проверка изменения).
+
+## Тикет 71 (`save`, таблица сохранения, `production`)
+
+Разбирает тикет 75.
+- Страж 71.8 (`tests/test_save.py`) обходится вызовом через псевдоним (`from kitchen.cutting_pdf import write_cutting_map as x`) и именем файла, собранным f-строкой; псевдоним закрывается подсчётом `ImportFrom` имён писателей вне их модулей.
+- Мёртвый код в `api`: `_save_output`, `_drilling_writer`, `_assembly_writer`, `_trip_writer`, `_quote`, `_estimate_run` (и импорты ради них) — удаляет 75; `_purchase_files` и `_estimate_files` удалены уже в 71 (страж 71.8).
+- `tests/test_views.py:485` берёт оригинал `views_page_layout` через `sys.modules` (обход `test_structure_guards`, строки нет в таблице спеки) — взять `counter` из `tests.test_calculation`, как `test_save.py`.
+- Страж `tests/test_no_old_api.py` не видит `from kitchen.api import X`, `from kitchen import api as k`, `getattr(api, name)` с переменной — всплывут в 75 как `ImportError`.
+- `save`: `*results: Any -> tuple[Any, ...]` вместо `tuple[Result, ...]` из наброска; закрытый `_done` у публичной функции.
+- `production` на расчёте из файла считает пять выводов и лишь потом отказывает «--project не сохраняется» (следствие формы `save(calc, cut(), …)`).
+- Тексты отказов `save` показывают имя класса Python («PartsResult») и английский id вида («cutting») — ПРОВЕРИТЬ МАСТЕРУ, видит только код.
+- Строки `views()` и `check()` таблицы в DECISIONS короче спеки (порядок предупреждений, «`parts()` не зовёт», `_pages`).
+- Имена `Saving`, `_filled`; `test_save.py` не закрывает `sqlite3.connect` в `done_texts`, `output_rows`, `log_rows`.

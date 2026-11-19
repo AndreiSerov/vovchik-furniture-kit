@@ -391,3 +391,78 @@ def test_save_stamps_the_given_date_on_every_file(home):
     cut, views = api.save(calc, calc.cut(), calc.views(), on=date(2026, 1, 2))
     assert "02.01.2026" in PdfReader(cut.output.file).pages[0].extract_text()
     assert "02.01.2026" in Path(views.output_html.file).read_text(encoding="utf-8")
+
+
+# --- ревью 71: сверка «тот же расчёт» по всем полям и порядок отказов production --------------------
+
+FOREIGN = ["Вывод посчитан другим расчётом: сохраняются только выводы этого расчёта."]
+
+
+def _project(**changes):
+    project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
+    project.update(changes)
+    return project
+
+
+def test_save_refuses_a_result_of_the_same_version_with_another_project(home, tmp_path):
+    petrov_order(home)
+    other_home = tmp_path / "other"
+    shutil.copytree(home / "workshop", other_home / "workshop")
+    path = other_home / "p.json"
+    path.write_text(json.dumps(_project(ceiling_height=2650), ensure_ascii=False), encoding="utf-8")
+    api.order_new(ORDER, home=other_home)
+    api.import_project(ORDER, path, home=other_home)
+    calc = api.calculation(order=ORDER, home=home)
+    other = api.calculation(order=ORDER, home=other_home)
+    assert calc.source.version == other.source.version == 1
+    assert refusal(lambda: api.save(calc, other.cut())) == FOREIGN
+    assert out_files(home) == []
+
+
+def test_save_refuses_a_result_of_another_order_with_the_same_project(home):
+    petrov_order(home)
+    ivanov = "2026-048-ivanov"
+    path = home / "ivanov.json"
+    path.write_text(json.dumps(_project(order=ivanov), ensure_ascii=False), encoding="utf-8")
+    api.order_new(ivanov, home=home)
+    api.import_project(ivanov, path, home=home)
+    calc = api.calculation(order=ORDER, home=home)
+    other = api.calculation(order=ivanov, home=home)
+    assert other.source.content_hash == calc.source.content_hash
+    assert refusal(lambda: api.save(calc, other.cut())) == FOREIGN
+    assert out_files(home) == []
+
+
+def test_save_refuses_a_file_result_of_the_same_version_and_project(home):
+    """Файл с `version: 1` и тем же проектом даёт тот же хеш, но источник у вывода заказа должен быть заказ (ADR 0001)."""
+    petrov_order(home)
+    path = home / "same.json"
+    path.write_text(json.dumps(_project(version=1), ensure_ascii=False), encoding="utf-8")
+    calc = api.calculation(order=ORDER, home=home)
+    from_file = api.calculation(project=path, home=home)
+    assert (from_file.source.version, from_file.source.content_hash) == (1, calc.source.content_hash)
+    assert refusal(lambda: api.save(calc, from_file.purchase())) == FOREIGN
+    assert out_files(home) == []
+
+
+def test_save_refuses_a_production_result_as_rowless(home):
+    petrov_order(home)
+    calc = api.calculation(order=ORDER, home=home)
+    produced = api.production(calc)
+    assert refusal(lambda: api.save(calc, produced)) == [
+        "Вывод ProductionResult не сохраняется: файлов у него нет."
+    ]
+
+
+def test_production_refuses_with_the_parts_error_before_the_cut_error(home):
+    api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
+    path = home / "nope.json"
+    materials = {**_project()["materials"], "countertop": "nope"}
+    path.write_text(json.dumps(_project(materials=materials), ensure_ascii=False), encoding="utf-8")
+    api.import_project(ORDER, path, home=home)
+    equipment = home / "workshop" / "equipment.yaml"
+    text = equipment.read_text(encoding="utf-8")
+    assert "макс_длина_реза: 3200" in text
+    equipment.write_text(text.replace("макс_длина_реза: 3200", "макс_длина_реза: 500"), encoding="utf-8")
+    with pytest.raises(OrderError, match="Столешница «nope»"):
+        api.production(api.calculation(order=ORDER, home=home))

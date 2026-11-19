@@ -1322,7 +1322,9 @@ SAVE_TABLE: dict[type[Result], Saving] = {
 
 
 def _same_calculation(source: PartsSource, calc_source: PartsSource) -> bool:
-    return (source.order, source.version, source.content_hash) == (
+    # `kind` тоже: вывод файла с той же версией и тем же проектом не должен лечь в заказ с источником «файл» (ADR 0001)
+    return (source.kind, source.order, source.version, source.content_hash) == (
+        calc_source.kind,
         calc_source.order,
         calc_source.version,
         calc_source.content_hash,
