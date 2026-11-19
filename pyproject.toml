@@ -35,6 +35,8 @@ module-root = "engine"
 [tool.ruff]
 line-length = 110
 target-version = "py311"
+# Скрипт проекта без расширения `.py`: иначе `ruff check` и `ruff format` в `scripts/check` его не видят.
+extend-include = ["scripts/count-asserts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,4 +1,5 @@
-"""Публичный API движка: интерфейс над `kitchen.calculation` (ADR 0002). CLI только печатает результат."""
+"""Публичный API — интерфейс движка; расчёт выводов — в `kitchen.calculation` (ADR 0002). CLI только печатает
+результат."""
 
 import hashlib
 import json

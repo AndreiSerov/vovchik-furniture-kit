@@ -144,7 +144,7 @@ def test_linter_bites_on_cli_importing_a_calculation(tmp_path: Path) -> None:
 def test_adr_has_layers_section() -> None:
     text = (ROOT / "docs" / "adr" / "0002-engine-layers.md").read_text(encoding="utf-8")
     assert "## Слои движка" in text
-    assert "дополнено 2026-11-19" in text
+    assert "Дополнено 2026-11-19" in text  # пометка спеки; абзац с заглавной буквы (уборка 75)
     for name in ("kitchen.metrics", "kitchen.cli", "kitchen.api"):
         assert name in text
     assert re.search(r"pyproject\.toml", text)

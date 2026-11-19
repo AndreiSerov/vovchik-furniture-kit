@@ -117,6 +117,51 @@ def test_count_asserts_wrong_argument_count_exits_two(tmp_path):
     assert "count-asserts <git-ref>" in result.stderr
 
 
+def test_count_asserts_reads_names_with_spaces_and_non_ascii(tmp_path):
+    """Тикет 75: `ls-tree -z` — имя с пробелом и не-ASCII не делится и не берётся в кавычки."""
+    repo = make_repo(
+        tmp_path, {"test a.py": TWO, "test_шкаф.py": TWO}, {"test a.py": ONE, "test_шкаф.py": ONE}
+    )
+    result = run_script(repo)
+    assert result.returncode == 1
+    assert "test a.py 2 1 <" in result.stdout
+    assert "test_шкаф.py 2 1 <" in result.stdout
+    assert "total 4 2" in result.stdout
+
+
+def test_count_asserts_unknown_ref_is_a_short_error_with_code_two(tmp_path):
+    result = run_script(make_repo(tmp_path, {"test_x.py": TWO}, {}), "no-such-ref")
+    assert result.returncode == 2
+    assert "Traceback" not in result.stderr
+    assert "count-asserts: no-such-ref" in result.stderr
+
+
+def test_count_asserts_outside_a_repo_is_a_short_error_with_code_two(tmp_path):
+    outside = tmp_path / "plain"
+    outside.mkdir()
+    env = {**clean_env(), "GIT_CEILING_DIRECTORIES": str(tmp_path)}
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "HEAD"],
+        check=False,
+        cwd=outside,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 2
+    assert "Traceback" not in result.stderr
+    assert result.stderr.startswith("count-asserts: ")
+
+
+def test_ruff_checks_count_asserts():
+    """Тикет 75: у скрипта нет расширения `.py`, но `ruff check` в `scripts/check` его видит."""
+    repo = SCRIPT.parents[1]
+    listed = subprocess.run(
+        ["uv", "run", "ruff", "check", "--show-files"], check=True, cwd=repo, capture_output=True, text=True
+    ).stdout
+    assert str(SCRIPT) in listed.splitlines()
+
+
 def test_count_asserts_no_arguments_exits_two(tmp_path):
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],

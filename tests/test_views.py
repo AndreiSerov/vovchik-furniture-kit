@@ -4,7 +4,6 @@
 PDF читается `pypdf`."""
 
 import json
-import sys
 from pathlib import Path
 
 from kitchen import api
@@ -12,6 +11,8 @@ from kitchen.cli import app
 from kitchen.result import MOCK_BANNER
 from pypdf import PdfReader
 from typer.testing import CliRunner
+
+from tests.test_calculation import counter
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 PETROV = FIXTURES / "petrov_project.json"
@@ -494,14 +495,10 @@ def test_order_views_draw_a_module_that_stopped_building_after_a_workshop_edit(h
     assert next(m for m in result.scene.modules if m.label == "Н3").facades == []
 
 
-def test_views_and_save_lays_pages_out_once(home, monkeypatch):
+def test_saving_views_lays_pages_out_once(home, monkeypatch):
     """Тикет 47: раскладка страниц считается в `_views` один раз; запись PDF берёт её же."""
     petrov_order(home)
-    calls = []
-    real = sys.modules["kitchen.calculation"].views_page_layout
-    monkeypatch.setattr(
-        "kitchen.calculation.views_page_layout", lambda *a, **k: calls.append(1) or real(*a, **k)
-    )
+    calls = counter(monkeypatch, "kitchen.calculation.views_page_layout")
     api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0]
     assert len(calls) == 1
 

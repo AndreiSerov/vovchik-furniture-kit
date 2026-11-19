@@ -309,7 +309,7 @@ class CutResult(Result):
     materials: list[MaterialCut]
     countertop: CountertopSize | None  # общая длина и листы столешницы; нет столешницы в проекте — `None`
     warnings: list[str]
-    output: OutputInfo | None = None  # PDF карты раскроя; только после `cut_and_save`
+    output: OutputInfo | None = None  # PDF карты раскроя; только после `save`
 
 
 def _output_info(home: Path, source: PartsSource, kind: OutputKind, filename: str) -> OutputInfo:
@@ -974,9 +974,7 @@ class Calculation:
         return self._cached(("assembly",), self._assembly)
 
     def _assembly(self) -> AssemblyResult:
-        workshop = (
-            self._ws()
-        )  # как в `assembly_from_project`: мастерская раньше брифа файла (решение мастера)
+        workshop = self._ws()  # мастерская раньше брифа файла, как было до расчёта (решение мастера)
         return _assembly(self.project, self.parts(), workshop)
 
     def trip(self) -> TripResult:
@@ -1302,8 +1300,8 @@ def _filled(home: Path, result: Any, saving: Saving) -> tuple[Any, list[OutputIn
 
 
 def save(
-    calc: Calculation, *results: Any, on: date | None = None, _done: str | None = None
-) -> tuple[Any, ...]:
+    calc: Calculation, *results: Result, on: date | None = None, _done: str | None = None
+) -> tuple[Result, ...]:
     """Сохраняет выводы расчёта заказа одной транзакцией: файлы в `out/`, записи `outputs` и «сделано»
     в порядке аргументов. Возвращает копии результатов с заполненными полями файлов, тоже по порядку.
 

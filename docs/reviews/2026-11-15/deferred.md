@@ -356,7 +356,7 @@
 
 Разбирает тикет 75 (уборка этапа 9).
 - `GLOSSARY.md:57`: «рендер» стоит в «Avoid» у «ИИ-визуализации», а ADR 0002 и спека так зовут слой писателей — завести термин «слой рендера» или переименовать слой (вопрос мастеру).
-- ADR 0002: заголовок «три слоя API → CLI → скиллы» и таблица пяти слоёв движка — одна фраза, что первое — внешний стек, второе — слои внутри пакета; абзац «дополнено 2026-11-19» со строчной буквы.
+- ADR 0002: заголовок «три слоя API → CLI → скиллы» и таблица пяти слоёв движка — одна фраза, что первое — внешний стек, второе — слои внутри пакета; абзац «дополнено 2026-11-19» со строчной буквы. — сделано в 75
 - `tests/test_engine_layers.py`: `_modules()` без рекурсии (подпакет выпадет молча); регулярка `^{name} =` не видит определения с аннотацией, реэкспорт из `kitchen.pdf` не проверяется прямо; подпроцесс линтера наследует всё окружение.
 - `test_structure_guards.py:171-173` (`test_cli_reaches_logic_only_through_the_api`) дублирует контракт «CLI ходит только в api» — оставить быстрым AST-стражем или убрать.
 - `kitchen.metrics.register_fonts` без докстринга (не было и до переноса).
@@ -365,21 +365,21 @@
 
 Разбирает тикет 71 (таблица сохранения) или 75.
 - `tests/test_stamp.py:79`: проверка плашки на каждой странице проходит за счёт водяного знака (тот же `MOCK_BANNER`), пропажу красной строки колонтитула ловят `test_pdf.py` и снимок, не этот тест.
-- `api.py`: шесть одинаковых `Stamp(result.source.order, result.source.version, result.mock, on or store.today())` с позиционными полями (`bool` — подкласс `int`, перестановку `version`/`mock` типы не заметят) — свести в одну фабрику штампа из результата в таблице сохранения (71), поля по именам.
-- Описания `kitchen.metrics` (ADR 0002 «Слои движка», DECISIONS «Метрики страницы», докстринг модуля) не называют `Stamp`.
+- `api.py`: шесть одинаковых `Stamp(result.source.order, result.source.version, result.mock, on or store.today())` с позиционными полями (`bool` — подкласс `int`, перестановку `version`/`mock` типы не заметят) — свести в одну фабрику штампа из результата в таблице сохранения (71), поля по именам. — сделано в 75 (фабрика `_stamp` — с 71, последние копии ушли вместе с `_*_writer`)
+- Описания `kitchen.metrics` (ADR 0002 «Слои движка», DECISIONS «Метрики страницы», докстринг модуля) не называют `Stamp`. — сделано в 75
 - `tests/test_stamp.py:26` читает `tests/fixtures/petrov_project.json` на месте, а общий вход спеки «файл Петрова» — копия в tmp home (только чтение, вреда нет).
 
 ## Тикет 69 (перенос в `kitchen.calculation`)
 
 Разбирает тикет 75.
-- Докстринг `api.py:1` («интерфейс над `kitchen.calculation`»): в `api` остаётся своя логика (бриф, импорт и `diff`, `status`, журнал); точнее «интерфейс движка; расчёт выводов — в `kitchen.calculation`».
+- Докстринг `api.py:1` («интерфейс над `kitchen.calculation`»): в `api` остаётся своя логика (бриф, импорт и `diff`, `status`, журнал); точнее «интерфейс движка; расчёт выводов — в `kitchen.calculation`». — сделано в 75
 - Слой `kitchen.api : kitchen.calculation` можно объявить через `|` (независимые соседи) или контрактом `independence`, тогда запрет `calculation → api` держал бы и линтер, а не только AST-страж (вопрос координатору; после 75, когда `api` станет тоньше).
 
 ## Тикет 70 (расчёт и методы-выводы)
 
 Разбирает тикет 71 или 75.
 - Тема DECISIONS «Расчёт и сохранение выводов» пока без таблиц спеки: таблицу «Выводы расчёта» и таблицу сохранения переносит тикет 71 (п. 71.14).
-- `api.py`: `_estimate_run` и `_quote` никто не зовёт (второй путь сметы и КП до удаления в 75).
+- `api.py`: `_estimate_run` и `_quote` никто не зовёт (второй путь сметы и КП до удаления в 75). — сделано в 75
 - Правило «`cut()` не зовёт `parts()`» снаружи не наблюдаемо (отказы `compute_common` совпадают с отказами раскроя); проверить можно только счётчиком `compute_common` — спека разрешает счётчики лишь у `load_workshop` и `compute_parts` (вопрос координатору).
 - `Calculation._cache: dict[tuple, Any]` — типы методов держатся только аннотациями.
 - `tests/test_calculation.py:93` фикстура `repeated` повторяет `tests/test_project_cleanup.py:113`; `test_quote_checks_the_term_before_the_workshop` проходит и на старом движке (регрессия, не проверка изменения).
@@ -388,13 +388,13 @@
 
 Разбирает тикет 75.
 - Страж 71.8 (`tests/test_save.py`) обходится вызовом через псевдоним (`from kitchen.cutting_pdf import write_cutting_map as x`) и именем файла, собранным f-строкой; псевдоним закрывается подсчётом `ImportFrom` имён писателей вне их модулей.
-- Мёртвый код в `api`: `_save_output`, `_drilling_writer`, `_assembly_writer`, `_trip_writer`, `_quote`, `_estimate_run` (и импорты ради них) — удаляет 75; `_purchase_files` и `_estimate_files` удалены уже в 71 (страж 71.8).
-- `tests/test_views.py:485` берёт оригинал `views_page_layout` через `sys.modules` (обход `test_structure_guards`, строки нет в таблице спеки) — взять `counter` из `tests.test_calculation`, как `test_save.py`.
+- Мёртвый код в `api`: `_save_output`, `_drilling_writer`, `_assembly_writer`, `_trip_writer`, `_quote`, `_estimate_run` (и импорты ради них) — удаляет 75; `_purchase_files` и `_estimate_files` удалены уже в 71 (страж 71.8). — сделано в 75
+- `tests/test_views.py:485` берёт оригинал `views_page_layout` через `sys.modules` (обход `test_structure_guards`, строки нет в таблице спеки) — взять `counter` из `tests.test_calculation`, как `test_save.py`. — сделано в 75
 - Страж `tests/test_no_old_api.py` не видит `from kitchen.api import X`, `from kitchen import api as k`, `getattr(api, name)` с переменной — всплывут в 75 как `ImportError`.
-- `save`: `*results: Any -> tuple[Any, ...]` вместо `tuple[Result, ...]` из наброска; закрытый `_done` у публичной функции.
+- `save`: `*results: Any -> tuple[Any, ...]` вместо `tuple[Result, ...]` из наброска; закрытый `_done` у публичной функции. — типы сделаны в 75 (`*results: Result -> tuple[Result, ...]`), `_done` оставлен
 - `production` на расчёте из файла считает пять выводов и лишь потом отказывает «--project не сохраняется» (следствие формы `save(calc, cut(), …)`).
 - Тексты отказов `save` показывают имя класса Python («PartsResult») и английский id вида («cutting») — ПРОВЕРИТЬ МАСТЕРУ, видит только код.
-- Строки `views()` и `check()` таблицы в DECISIONS короче спеки (порядок предупреждений, «`parts()` не зовёт», `_pages`).
+- Строки `views()` и `check()` таблицы в DECISIONS короче спеки (порядок предупреждений, «`parts()` не зовёт», `_pages`). — сделано в 75
 - Имена `Saving`, `_filled`; `test_save.py` не закрывает `sqlite3.connect` в `done_texts`, `output_rows`, `log_rows`.
 
 ## Тикет 72 (CLI на расчёте)
@@ -408,6 +408,6 @@
 - Форма `api.save(calc := api.calculation(order=ORDER, home=home), calc.X())[0]` повторяется десятки раз в тестах (спека требовала механической замены); помощник — по желанию.
 - `tests/test_countertop.py:84-88`: один `calc` на три `save` (не механически, числа те же).
 - `tests/test_workshop_number_grid.py:72,120`: в сообщении `assert` теперь «parts/cut/estimate» вместо имени старой функции; `tests/test_views_html.py:60` `html_of(home, **kw)` — `**kw` никто не передаёт (мёртвый параметр с базы).
-- Старые имена в именах тестов (`test_petrov_parts_from_order`, `test_views_and_save_lays_pages_out_once`) и в докстринге `tests/test_formulas.py:4` (`api.parts_from_project`); страж 75.3 `tests/` не смотрит.
-- `scripts/count-asserts`: счёт по строкам (подстрока в комментарии засчитывается, потерю перекрывает добавленная строка того же файла); неверный ref даёт traceback; README не называет скрипт (как и `claim`, `session-stats`).
-- `scripts/count-asserts` (ревью 73, повторные раунды): несуществующий ref и запуск вне репо — traceback и код 1 (тот же, что «число уменьшилось»); `.split()` по `ls-tree` падает на имени с пробелом, не-ASCII в кавычках (`-z`); файл без расширения не попадает под `ruff` в `scripts/check`.
+- Старые имена в именах тестов (`test_petrov_parts_from_order`, `test_views_and_save_lays_pages_out_once`) и в докстринге `tests/test_formulas.py:4` (`api.parts_from_project`); страж 75.3 `tests/` не смотрит. — сделано в 75 (докстринг и имена тестов с именами старых функций)
+- `scripts/count-asserts`: счёт по строкам (подстрока в комментарии засчитывается, потерю перекрывает добавленная строка того же файла); неверный ref даёт traceback; README не называет скрипт (как и `claim`, `session-stats`). — traceback сделан в 75; счёт по строкам и README оставлены
+- `scripts/count-asserts` (ревью 73, повторные раунды): несуществующий ref и запуск вне репо — traceback и код 1 (тот же, что «число уменьшилось»); `.split()` по `ls-tree` падает на имени с пробелом, не-ASCII в кавычках (`-z`); файл без расширения не попадает под `ruff` в `scripts/check`. — сделано в 75 (код 2 и строка ошибки, `ls-tree -z`, `extend-include` в `pyproject.toml`)

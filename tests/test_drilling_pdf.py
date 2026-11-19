@@ -77,7 +77,7 @@ def test_output_is_registered_and_becomes_stale_after_new_version(home):
     assert not [s for s in api.status(ORDER, home).stale if s.kind == "drilling"]
 
 
-def test_drilling_from_order_writes_nothing(home):
+def test_drilling_of_an_order_writes_nothing(home):
     petrov(home)
     r = api.calculation(order=ORDER, home=home).drilling()
     assert r.output is None and r.source.version == 1

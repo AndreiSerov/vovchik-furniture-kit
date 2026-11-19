@@ -357,7 +357,7 @@ def test_estimate_without_project_version_is_a_clear_error(home):
         api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
 
 
-def test_estimate_from_project_file_matches_order_and_writes_nothing(small):
+def test_estimate_of_a_project_file_matches_order_and_writes_nothing(small):
     result = api.calculation(project=small / "small.json", home=small).estimate()
     from_order = api.calculation(order=ORDER, home=small).estimate()
     assert result.source.kind == "file"

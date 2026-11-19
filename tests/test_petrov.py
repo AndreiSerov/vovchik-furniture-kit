@@ -31,7 +31,7 @@ def all_parts(result):
     return [p for m in result.modules for p in m.parts]
 
 
-def test_petrov_parts_from_order(petrov):
+def test_petrov_parts_of_the_order(petrov):
     result = api.calculation(order="petrov", home=petrov).parts()
     assert [m.module for m in result.modules] == [
         "П1", "Н1", "Н2", "Н3", "Н4", "В1", "В2", "В3", "В4", "Н5", "Н6", "В5", "В6",

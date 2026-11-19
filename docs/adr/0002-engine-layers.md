@@ -21,7 +21,7 @@
 
 ## Слои движка
 
-дополнено 2026-11-19 (тикет 67 этапа 9). Слои проверяет import-linter в `scripts/check`, контракты лежат в `pyproject.toml` (`[tool.importlinter]`). Модуль импортирует только слои ниже себя; модули одного слоя друг от друга не обязаны быть независимы.
+Дополнено 2026-11-19 (тикет 67 этапа 9). Три слоя из заголовка (API → CLI → скиллы) — внешний стек; таблица ниже — слои движка внутри пакета `kitchen`. Слои проверяет import-linter в `scripts/check`, контракты лежат в `pyproject.toml` (`[tool.importlinter]`). Модуль импортирует только слои ниже себя; модули одного слоя друг от друга не обязаны быть независимы.
 
 | Слой (сверху вниз) | Модули |
 |---|---|
@@ -31,7 +31,7 @@
 | Домен | `assembly`, `brief`, `checks`, `common`, `cutting`, `drilling`, `economy`, `estimate`, `geometry`, `models`, `parts`, `placement`, `project`, `purchase`, `quote`, `store`, `tall`, `trip`, `views`, `workshop` |
 | Основа | `errors`, `format`, `formulas`, `metrics`, `ral`, `result` |
 
-`kitchen.skill_lint` импортирует `kitchen.cli` и в слои не входит. `kitchen.metrics` — основа без отрисовки: шрифты, размер и область страницы, перенос строк; `kitchen.pdf` реэкспортирует эти имена.
+`kitchen.skill_lint` импортирует `kitchen.cli` и в слои не входит. `kitchen.metrics` — основа без отрисовки: шрифты, размер и область страницы, перенос строк и штамп вывода `Stamp`; `kitchen.pdf` реэкспортирует эти имена.
 
 Остальные контракты:
 

@@ -230,7 +230,7 @@ def test_old_calculation_cannot_replace_newer_output(home, monkeypatch):
     assert list(path.parent.iterdir()) == [path]
 
 
-def test_cut_from_order_writes_nothing(home):
+def test_cut_of_an_order_writes_nothing(home):
     petrov(home)
     r = api.calculation(order="petrov", home=home).cut()
     assert r.output is None and not (home / "orders" / ORDER / "out").exists()

@@ -1,7 +1,7 @@
 """Формулы construction.yaml: поведение через публичный API (`kitchen.api`).
 
 Синтаксис и переменные проверяются при загрузке мастерской (`api.load_workshop`),
-значения — при расчёте деталей (`api.parts_from_project`)."""
+значения — при расчёте деталей (`api.calculation(project=…).parts()`)."""
 
 import pytest
 from kitchen import api
