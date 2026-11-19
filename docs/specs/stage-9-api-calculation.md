@@ -1,6 +1,6 @@
 # Этап 9. Расчёт одним модулем, штамп PDF, слои под линтером
 
-Статус: `needs-triage`. Спеку и тикеты написал 2026-11-18 по разбору скилла `codebase-design` и прогону import-linter. Проверки готовности прошли 2026-11-18 (две) и 2026-11-19 (третья). Ответы мастер дал по рекомендациям, замечания всех трёх проверок внесены. Спека ждёт четвёртой проверки.
+Статус: `ready-for-agent`. Спеку и тикеты написал 2026-11-18 по разбору скилла `codebase-design` и прогону import-linter. Проверки готовности прошли 2026-11-18 (две) и 2026-11-19 (третья и четвёртая). Ответы мастер дал по рекомендациям, замечания всех четырёх проверок внесены. По решению мастера 2026-11-19 пятой проверки нет: сборка начинается с тикета 66, остальное ловит ревью тикетов.
 
 ## Problem Statement
 
@@ -53,6 +53,7 @@
 - **Где живёт.** Новый модуль пакета `kitchen.calculation`. Всё, что нужно расчёту и сохранению, переезжает в него, а `api` импортирует это оттуда. `calculation` не импортирует `api`, поэтому цикла нет. Переезжают:
   - все типы результатов выводов (`PartsSource`, `PartsResult`, `CutResult`, `EdgingResult`, `DrillingResult`, `AssemblyResult`, `TripResult`, `PurchaseResult`, `EstimateResult`, `QuoteResult`, `ViewsResult`, `PlacementResult`, `CheckResult`, `ProductionResult`, `OutputInfo`), `OutputKind`, `PRODUCTION_KINDS` и `LogEntry`;
   - чтение проекта и брифа: `_open_order`, `OpenOrder`, `_current_version`, `_latest_brief`, `_order_project`, `_project_file`, `_brief_of_project`, `_read_json`, `_reject_constant`, `parse_project_file`, `ValidationContext`, `_same_order`, `_project_hash`, `_canonical`, `_require_unique_labels`;
+  - построение деталей и раскроя: `_build_parts`, `_build_cut` (их зовёт `_priced`); тикет 75 вливает их в методы расчёта, чтобы детали проекта и копий «экономии» считались одним путём (решение мастера 2026-11-19);
   - сборщики выводов: `_edging`, `_drilling`, `_assembly`, `_trip`, `_purchase`, `_estimate`, `_priced`, `_economy`, `_with_economy`, `_draft_warnings`, `_check_result`, `_placement`, `_views`, `NO_SINK_WARNING`;
   - тексты файлов: `_purchase_markdown`, `_estimate_markdown`, `_economy_markdown`;
   - сохранение: `_save_outputs`, `_output_info`, `_insert_log`, `_write_reason`, `_WRITE_REASONS`.
@@ -63,7 +64,8 @@
   ```python
   calc = api.calculation(order="Петров", home=None)   # или project=Path(...); ровно одно
   calc.source      # PartsSource без брифа (brief_id и brief_saved_at пусты), как у расстановки сейчас
-  calc.brief       # строка брифа или None; у файла читается лениво (правило ниже); calc.project — разобранный проект
+  calc.brief       # sqlite3.Row брифа или None; у файла читается лениво (правило ниже). Внутреннее: тесты и CLI его не читают
+  calc.project     # разобранный проект
   calc.parts()  calc.cut()  calc.edging()  calc.drilling()  calc.assembly()  calc.trip()
   calc.purchase()  calc.estimate(economy=False)  calc.quote(days, economy=False)
   calc.views()  calc.placement()  calc.check()  calc.economy_parts()
@@ -77,12 +79,13 @@
   3. **Файл:** `calculation()` сразу читает JSON и разбирает проект (`_project_file`). Бриф заказа (`_brief_of_project`, открывает БД) читается **лениво**, при первом обращении к `calc.brief`. Его читают только методы, у которых в таблице «Выводы расчёта» бриф есть. `trip()` и `placement()` из файла бриф не читают, поэтому БД не открывается. Бриф читается раньше мастерской, как сейчас в `parts_from_project`.
   4. Ошибки шагов 2–3 (нет заказа, нет проекта, битый JSON, схема, битая БД) выбрасывает тот, кто читает: `calculation()` или метод. Битый JSON в `kitchen check --project` даёт код 2, файл, отклонённый схемой, — код 1 (DECISIONS «`kitchen check`»).
   5. Мастерская загружается при первом вызове метода-вывода, один раз на расчёт, и **раньше** проверки повтора меток. Сейчас `_build_parts`, `_placement` и `_views` получают уже загруженную мастерскую, поэтому при повторе меток и сломанной мастерской выдаётся ошибка мастерской. Так и остаётся.
-  6. `quote(days, …)` проверяет срок (`check_days`, `InputError`) до загрузки мастерской.
+  6. `quote(days, …)` проверяет срок (`check_days`, `InputError`) первым: раньше брифа и мастерской. **Это изменение** (решение мастера 2026-11-19). Сейчас `quote_from_project` читает бриф до срока, и при битой БД и неверном сроке одновременно мастер видит ошибку БД; станет видеть ошибку срока. Запись — в теме DECISIONS «Расчёт и сохранение выводов».
   7. Повтор меток проверяют методы из таблицы ниже, каждый при своём вызове. `check()` повтор меток не отвергает и возвращает находку `duplicate_label`.
+  8. **Допустимое изменение порядка:** `economy_parts()` из файла сейчас читает бриф после мастерской и «экономии» (`api.py:2016-2019`). По общему правилу бриф будет читаться раньше мастерской. Видно это только при одновременно битой БД и сломанной мастерской.
 - **Кэш.**
   - У каждого метода кэш по набору аргументов: второй вызов с теми же аргументами отдаёт тот же объект. `quote(days, economy)` берёт `estimate(economy)` из кэша.
   - Общий кэш деталей — это результат `compute_parts(calc.project, workshop)`, а **не** `parts()`. `parts()` поверх него считает ещё общие позиции (`compute_common`, где есть отказ «Столешница … не найдена») и проверки. `cut()` и `views()` берут только `compute_parts` и `parts()` не зовут: сейчас `_build_cut` и `_views` общих позиций не считают, и `kitchen 3d` на проекте с ошибкой столешницы рисует виды.
-  - `compute_parts` по `calc.project` в расчёте выполняется один раз. Свои расчёты деталей, как сейчас, остаются у копий проекта «экономии» (`_priced`, `_economy`), у `trip()` из файла (детали без брифа) и у `economy_parts()` (детали копии со всеми заменами).
+  - `compute_parts` по `calc.project` в расчёте выполняется один раз. Свои расчёты деталей, как сейчас, остаются у копий проекта «экономии» (`_priced`, `_economy`) и у `economy_parts()` (детали копии со всеми заменами). `trip()` из файла строит `PartsResult` без брифа, но берёт `compute_parts` из кэша: от брифа зависит только `source` и проверки, а не детали.
   - Результаты — pydantic-модели **без** `frozen` (как сейчас). Правило: результат из расчёта не правят на месте, только через `model_copy`, потому что кэш отдаёт тот же объект.
 
 ### Выводы расчёта: бриф и особые правила
@@ -95,10 +98,10 @@
 | `cut()` | `calc.brief` | только кэш `compute_parts`, без общих позиций; предупреждения: деталей, «бриф новее», пропил |
 | `edging()`, `drilling()`, `assembly()` | из `parts()` | — |
 | `trip()` | заказ — из `parts()`; **файл — детали без брифа**, у `source` пусты `brief_id` и `brief_saved_at`, БД не открывается | шапка из брифа заказа; у файла и у заказа без брифа — шапка из «—» и `NO_BRIEF_WARNING` после предупреждений деталей |
-| `purchase()` | из `parts()` | предупреждения: деталей, пропил; `mock_notice`. **Новое:** работает и для файла (сейчас закупка только по заказу); CLI `purchase` остаётся только для заказа |
-| `estimate(economy)` | из `parts()` | предупреждения: деталей, `NO_SINK_WARNING`, пропил, у файла затем `_draft_warnings`; «экономия» считается после добавления черновика; копии «экономии» без брифа (`_priced`) |
-| `quote(days, economy)` | из `estimate(economy)` | срок проверяется первым; `quote.json` пишется без `warnings` |
-| `views()` | `calc.brief` | порядок: повтор меток (отказ), ошибки расстановки (отказ), проверки. Если есть находки `error`, берутся `buildable_module_parts`, иначе кэш `compute_parts`; `parts()` не зовёт. Предупреждения: деталей, затем «бриф новее», без пропила и черновика |
+| `purchase()` | из `parts()` | предупреждения: `parts()` (деталей, «бриф новее»), затем пропил; `mock_notice`. **Новое:** работает и для файла (сейчас закупка только по заказу); CLI `purchase` остаётся только для заказа |
+| `estimate(economy)` | из `parts()` | предупреждения: `parts()` (деталей, «бриф новее»), `NO_SINK_WARNING`, пропил, у файла затем `_draft_warnings`; «экономия» считается после добавления черновика; копии «экономии» без брифа (`_priced`) |
+| `quote(days, economy)` | из `estimate(economy)` | срок проверяется первым, раньше брифа и мастерской (решение мастера 2026-11-19, см. «Порядок ошибок»); `quote.json` пишется без `warnings` |
+| `views()` | `calc.brief` | порядок: повтор меток (отказ), ошибки расстановки (отказ), проверки. Если есть находки `error`, берутся `buildable_module_parts`, иначе кэш `compute_parts`; `parts()` не зовёт. Предупреждения: деталей (при находках `error` их нет), затем «бриф новее», без пропила и черновика. Раскладку страниц кладёт в `result._pages` (как сейчас), писатель таблицы сохранения берёт её оттуда и `api.views_layout` не зовёт |
 | `placement()` | `source` без брифа, БД у файла не открывается | повтор меток — отказ |
 | `check()` | `calc.brief` | `brief_note` у заказа — первое предупреждение заказа, у файла `None`; `parts()` не зовёт |
 | `economy_parts()` | детали копии со всеми заменами — с `calc.brief`; цены копий — без брифа | `warnings` — только предупреждения деталей копии, без «бриф новее» (как у файла сейчас). **Новое:** работает и для заказа (сейчас только для файла) |
@@ -142,7 +145,7 @@
 - **ADR 0002 дополняется** (тикет 67) разделом «Слои движка» с таблицей слоёв ниже, пометкой «дополнено 2026-11-19» и ссылкой на контракты в `pyproject.toml`. Таблица «Где что лежит» в `AGENTS.md` называет `kitchen.api` и `kitchen.calculation` (с тикета 69).
 - `TextLine` переезжает в `kitchen.pdf`.
 - Новый модуль основы — `kitchen.metrics`: регистрация шрифтов, `FONT`, `FONT_BOLD`, `page_size`, `page_area`, `Area`, перенос строк по ширине `wrap` и `Stamp`, без отрисовки. `kitchen.pdf` импортирует его и реэкспортирует эти имена. Раскладка видов импортирует `kitchen.metrics`, а не `kitchen.pdf`.
-- **Контракты import-linter.** Настройка в `pyproject.toml`, модули записаны полными именами `kitchen.X`, без `containers`. В `scripts/check` после `ruff` идёт `uv run lint-imports`, `.import_linter_cache/` добавлен в `.gitignore`. Имена контрактов — ровно такие:
+- **Контракты import-linter.** Настройка в `pyproject.toml` (`[tool.importlinter]` с `root_package = "kitchen"`), модули записаны полными именами `kitchen.X`, без `containers`. В `scripts/check` после `ruff` идёт `uv run lint-imports`, `.import_linter_cache/` добавлен в `.gitignore`. Имена контрактов — ровно такие:
   1. «Слои ADR 0002». Тип `layers`; модули одного слоя не обязаны быть независимы, разделитель `:`. Сверху вниз:
      - `kitchen.cli`;
      - `kitchen.api`, `kitchen.calculation`;
@@ -166,8 +169,10 @@
 
 Тикет 75 удаляет из `kitchen.api` ровно эти имена:
 - публичные: `parts_from_order`, `parts_from_project`, `cut_from_order`, `cut_from_project`, `cut_and_save`, `edges_from_order`, `edges_from_project`, `edges_and_save`, `drilling_from_order`, `drilling_from_project`, `drilling_and_save`, `assembly_from_order`, `assembly_from_project`, `assembly_and_save`, `trip_from_order`, `trip_from_project`, `trip_and_save`, `purchase_from_order`, `purchase_and_save`, `estimate_from_order`, `estimate_from_project`, `estimate_and_save`, `quote_from_order`, `quote_from_project`, `quote_and_save`, `views_from_order`, `views_from_project`, `views_and_save`, `placement_from_order`, `placement_from_project`, `check_order`, `check_project`, `economy_parts_from_project`, `production_and_save`;
-- закрытые: `_build_parts`, `_build_cut`, `_drilling_writer`, `_assembly_writer`, `_trip_writer`, `_save_output`, `_purchase_files`, `_estimate_files`, `_estimate_run`, `_quote`;
-- константы: `CUTTING_PDF`, `DRILLING_PDF`, `ASSEMBLY_PDF`, `TRIP_PDF`, `VIEWS_PDF`, `VIEWS_HTML`. Имена файлов живут в таблице сохранения, а вид вывода `store.VIEWS_HTML` остаётся.
+- закрытые: `_drilling_writer`, `_assembly_writer`, `_trip_writer`, `_save_output`, `_purchase_files`, `_estimate_files`, `_estimate_run`, `_quote`;
+- `_build_parts` и `_build_cut` к этому моменту лежат в `kitchen.calculation` (69). Тикет 75 вливает их в методы расчёта, и функций с этими именами в движке не остаётся.
+
+Константы `CUTTING_PDF`, `DRILLING_PDF`, `ASSEMBLY_PDF`, `TRIP_PDF`, `VIEWS_PDF`, `VIEWS_HTML` удаляет уже **тикет 71**: имена файлов переезжают в таблицу сохранения, а тесты, скиллы и документы этих констант не используют (grep 2026-11-19). Вид вывода `store.VIEWS_HTML` остаётся.
 
 Остаются: `list_outputs`, функции раскладки (`drilling_map_layout`, `assembly_layout`, `trip_layout`, `views_layout`), `part_in_room`, `PRODUCTION_KINDS` и всё, что не относится к выводам (`status`, `import_project`, `diff_project`, бриф, журнал, `check_workshop`, быстрая вилка). Доменная `kitchen.checks.check_project` (в `api` её импортируют как `run_checks`) тоже остаётся.
 
@@ -177,13 +182,14 @@
 
 | Тест | Сейчас | Тикет | После |
 |---|---|---|---|
-| `test_cut_pdf.py:144`, `:158` | `api.shutil.copy2`; ruff (F401) уберёт `import shutil` из `api`, когда `_save_outputs` уедет | 69 | `import shutil` в тесте, `monkeypatch.setattr(shutil, "copy2", …)` |
+| `test_cut_pdf.py:138`, `:158` | `api.shutil.copy2`; когда `_save_outputs` уедет, `ruff check` (F401) уронит неиспользуемый `import shutil` в `api`, и исполнитель его удалит | 69 | `import shutil` в тесте, `monkeypatch.setattr(shutil, "copy2", …)` |
 | `test_status_cleanup_57.py:300` | `api._insert_log` | 69 | `monkeypatch.setattr("kitchen.calculation._insert_log", …)` |
 | `test_views.py:485` | `api.views_page_layout` | 69 | `"kitchen.calculation.views_page_layout"` |
 | `test_project_cleanup.py:128-130` | считает `duplicate_labels(` в `api.py` | 69 | считает в `calculation.py` |
 | `test_status_cleanup_57.py:158` | `api.quote_from_order` (версия меняется после расчёта) | 71 | построить `calc`, импортировать v2, вызвать `save(calc, calc.quote(20))` (как 71.9) |
 | `test_status_cleanup_57.py:285` | `api.estimate_from_order`, `api._order_project` (параметр production) | 71 | `calc`, импорт v2, затем `save(calc, calc.estimate())` или `api.production(calc)` |
-| `test_cut_pdf.py:200` | `api.write_cutting_map` | 71 | `"kitchen.calculation.write_cutting_map"` |
+| `test_cut_pdf.py:192`, `:200` | `write = api.write_cutting_map` (оригинал) и подмена `api.write_cutting_map` | 71 | оригинал — `from kitchen.cutting_pdf import write_cutting_map` (модуль уже в `LEGACY_INTERNAL_IMPORTS` файла), подмена — `"kitchen.calculation.write_cutting_map"` |
+| `test_cut_pdf.py:333` | прямой вызов `write_cutting_map(..., order=…, version=…, mock=…, on=…)` | 68 | механическая замена на `stamp=Stamp(…)`, `Stamp` из `kitchen.pdf` |
 
 Подмена строкой `"kitchen.calculation.X"` не создаёт импорта, поэтому страж `test_structure_guards.py` её не видит.
 
@@ -200,7 +206,7 @@
   - `:156`, тема «Выводы и закупка» — `cut_from_order`/`cut_and_save`;
   - `:180` — `api._priced`, `api.economy_parts_from_project`;
   - `:189` — `api._estimate_run`;
-  - `:220` — `drilling_and_save`/`drilling_from_order`;
+  - `:219`, `:220` — `drilling_from_order`/`drilling_from_project`/`drilling_and_save`;
   - `:287` — `api.placement_from_project`/`placement_from_order`;
   - `:334` — `api.parts_from_project`.
 
@@ -214,12 +220,19 @@
   - **«v2»** — тот же проект с `ceiling_height: 2650`, импортированный в тот же заказ (`tests/test_purchase.py:85-100`);
   - **«файл Петрова»** — `tests/fixtures/petrov_project.json`, скопированный в tmp home.
 - **Снимок до рефакторинга** (тикет 66, первый тикет этапа; пишется и коммитится на старом коде). Снимок лежит в `tests/fixtures/stage9_before/`, а не в `tests/golden/`, где действуют другие правила (`test_golden_marks.py`). Помощник снимка — `tests/stage9_snapshot.py` (имя не `test_*`, pytest его не собирает), тест — `tests/test_stage9_snapshot.py`. Снимок нужен только на время этапа: тикет 75 удаляет его последним коммитом (решение мастера 2026-11-18).
-  - **Детерминизм.** `store.today` и `store.now` подменяются строкой: `monkeypatch.setattr("kitchen.store.today", …)` даёт `date(2026, 11, 18)`, а `now` — `"2026-11-18T12:00:00"`. Импорта `kitchen.store` в тестах не появляется. У каждого случая свой tmp home. Абсолютный префикс home заменяется на `<HOME>` везде: в `source.path`, в `OutputInfo.file` и в текстах записанных файлов (`outputs[].file` в `purchase.json`, `estimate.json`, `quote.json`). Входные файлы копируются в home. В `kitchen-3d.html` содержимое встроенных `<script id="three">` и `<script id="orbit">` заменяется на их sha256, а остальной HTML хранится целиком.
+  - **Детерминизм.** `store.today` и `store.now` подменяются строкой: `monkeypatch.setattr("kitchen.store.today", …)` даёт `date(2026, 11, 18)`, а `now` — `"2026-11-18T12:00:00+00:00"` (с поясом, как в остальных тестах). Импорта `kitchen.store` в тестах не появляется. У каждого случая свой tmp home. Абсолютный префикс home в обоих написаниях (`str(home)` и `str(home.resolve())`; на macOS это `/var/…` и `/private/var/…`) заменяется на `<HOME>` везде: в `source.path`, в `OutputInfo.file` и в текстах записанных файлов (`outputs[].file` в `purchase.json`, `estimate.json`, `quote.json`). Входные файлы копируются в home. В `kitchen-3d.html` содержимое встроенных `<script id="three">` и `<script id="orbit">` заменяется на их sha256, а остальной HTML хранится целиком.
   - **Шесть случаев:**
     1. заказ Петрова;
     2. файл Петрова при существующем заказе с брифом (заказ Петрова в том же home);
     3. заказ без брифа: `api.order_new("2026-047-petrov", …)`, затем импорт `petrov_project.json`, в отдельном home;
-    4. бриф новее, пропил, без мойки. `order_new`; бриф 1 — копия `petrov_brief.json`, из `appliances.items.value` которой убран элемент `sink`; импорт `petrov_project.json` без модуля мойки; бриф 2 (та же копия); `пропил: 4.2` в `workshop/equipment.yaml` tmp home. Третья проверка готовности подтвердила, что у сметы есть «Бриф №2 новее … (№1)», `NO_SINK_WARNING` и предупреждение пропила (решение мастера 2026-11-19);
+    4. бриф новее, пропил, без мойки. Шаги:
+       - `order_new`;
+       - бриф 1 — копия `petrov_brief.json`, из `appliances.items.value` которой убран элемент `sink`;
+       - импорт копии `petrov_project.json`, из `appliances` которой убран прибор типа `sink`; модуль Н5 (`base_sink`) **остаётся**, иначе импорт отклоняет ряд по сумме ширин;
+       - бриф 2 — та же копия;
+       - в `workshop/equipment.yaml` tmp home (flow-словарь на строке 2) `пропил: 4}` заменить на `пропил: 4.2}`.
+
+       Четвёртая проверка готовности подтвердила пробой: у сметы ровно четыре предупреждения в таком порядке — «Н5: без задней стенки», «Бриф №2 новее брифа, с которым проверена версия 1 (№1)…», `NO_SINK_WARNING`, «пропил 4.2 мм учтён как 5 мм…» (решение мастера 2026-11-19);
     5. файл, где модуль не строится: проект `tests/test_views.py:457-460` (Н3 шириной 100, Н4 шириной 1100, находка `module_build` у субъекта Н3). Детали, раскрой и смета на нём падают;
     6. файл с ошибкой проверки, где детали строятся: фикстура `broken_draft` (`tests/test_quote.py:862`, стена 1000 мм при рядах 1350 мм). Ловит `_draft_warnings` у сметы и КП.
   - **Что снимается для каждого случая:** `model_dump(mode="json")` выводов `parts`, `cut`, `edging`, `drilling`, `assembly`, `trip`, `purchase` (только заказ), `estimate` (с экономией и без), `quote` (20 дней, с экономией и без), `views`, `placement`, `check`, `economy_parts` (только файл), а также всех функций раскладки. Если вывод бросает ошибку, записываются тип и текст ошибки; в случае 5 так будет у `parts`, `cut`, `estimate` и всего, что строится из деталей.
@@ -269,7 +282,7 @@
 
 **Blocked by:** —
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Вывод:** —
 
@@ -290,7 +303,7 @@
 
 **Blocked by:** 66
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Вывод:** тексты, JSON, PDF и HTML не меняются.
 
@@ -318,7 +331,7 @@
 
 **Blocked by:** 67
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Вывод:** колонтитул PDF «Заказ <order> · версия проекта <N | не записана> · дд.мм.гггг · стр. N из M», шапка HTML «Заказ <order> · версия проекта … · дд.мм.гггг» и плашки мока — прежние.
 
@@ -332,7 +345,8 @@
 
   Файл ходит во внутренние модули писателей, поэтому добавляется в `LEGACY_INTERNAL_IMPORTS` (`test_structure_guards.py`), а в DECISIONS записывается причина: «писатель со штампом нельзя вызвать через `api` без записи заказа».
 - [ ] 3. В том же файле `render_html`: шапка «Заказ 2026-047-petrov · версия проекта не записана · 18.11.2026»; `id="mock-banner"` есть при `mock=True` и отсутствует при `mock=False`.
-- [ ] 4. Тест снимка 66 и тесты из 67.7 зелёные. Разрешена только механическая замена четырёх аргументов на `stamp=` в вызовах писателей и `PdfDocument` (`test_pdf.py:13, 57, 70, 94`); `test_pdf.py` берёт `Stamp` из `kitchen.pdf`.
+- [ ] 4. Тест снимка 66 и тесты из 67.7 зелёные. Разрешена только механическая замена четырёх аргументов на `stamp=` в прямых вызовах писателей и `PdfDocument` в тестах: `test_pdf.py:13, 57, 70, 94` и `test_cut_pdf.py:333` (других прямых вызовов нет, grep 2026-11-19). `Stamp` оба файла берут из `kitchen.pdf`: он уже в их `LEGACY_INTERNAL_IMPORTS`.
+- [ ] 5. Тест-страж по тексту: в `GLOSSARY.md` есть строка термина «Штамп».
 
 ## Тикет 69 — Перенос в `kitchen.calculation` (10, 16)
 
@@ -340,7 +354,7 @@
 
 **Blocked by:** 68
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Вывод:** тексты, JSON, файлы и записи БД не меняются.
 
@@ -349,8 +363,8 @@
 - [ ] 2. `kitchen.calculation` есть в слое `api` контракта «Слои ADR 0002» и в запретах контрактов «CLI ходит только в api» и «Расчёты не ходят в БД». Тест полноты 67.2 и `lint-imports` зелёные.
 - [ ] 3. `kitchen.calculation` не импортирует `kitchen.api` (контракт «Слои ADR 0002»: модули одного слоя, плюс тест-страж AST на прямой импорт).
 - [ ] 4. Тесты из таблицы «Тесты, которые ходят во внутренности `api`» с тикетом 69 переведены и зелёные.
-- [ ] 5. `api.__all__` содержит прежние имена плюс `PartsGap` и `working_days`. `test_*_cli.py` зелёные без правки.
-- [ ] 6. В таблице «Где что лежит» в `AGENTS.md` есть `kitchen.calculation`.
+- [ ] 5. `api.__all__` содержит прежние имена плюс `OutputKind`, `PartsGap` и `working_days` (тесты и CLI берут их из `api`: `test_status_stale.py:142`, `cli.py:247`, `cli.py:682`). `test_*_cli.py` зелёные без правки.
+- [ ] 6. Тест-страж по тексту: в таблице «Где что лежит» в `AGENTS.md` есть `kitchen.calculation`.
 
 ## Тикет 70 — Расчёт и методы-выводы (expand) (3, 4, 9, 10, 11, 13)
 
@@ -358,7 +372,7 @@
 
 **Blocked by:** 69
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Вывод:** тексты, JSON, файлы и записи БД не меняются.
 
@@ -372,13 +386,14 @@
   - `calc.check().brief_note is None`.
 - [ ] 4. Ленивый бриф: в tmp home лежит `orders/kitchen.db` с содержимым `garbage`, вход — файл Петрова. `calc = api.calculation(project=…)`, затем `calc.trip()` и `calc.placement()` проходят без ошибки, а `calc.parts()` даёт прежнюю ошибку «… файл не является базой данных kitchen.».
 - [ ] 5. Порядок ошибок (в tmp home `workshop/construction.yaml` с синтаксической ошибкой):
-  - битый JSON — `OrderError` «<файл>: не JSON (строка 1, столбец 2).», а `kitchen check --project` возвращает код 2;
+  - файл `bad.json` с содержимым `{`: `api.calculation(project=…)` бросает `OrderError` с `problems == ["bad.json: не JSON (строка 1, столбец 2)."]`; `kitchen check --project bad.json` возвращает код 2;
   - `calc.quote(0)` на файле Петрова — `InputError` срока;
+  - `calc.quote(0)` на файле Петрова при `orders/kitchen.db` с содержимым `garbage` — тоже `InputError` срока (срок раньше брифа, решение мастера 2026-11-19);
   - проект `repeated` (`tests/test_project_cleanup.py:113`): `parts()`, `cut()`, `views()`, `placement()` дают ошибку мастерской, а не повтора меток.
 - [ ] 6. Счётчики (`monkeypatch` `kitchen.calculation.load_workshop` и `compute_parts`), вход — заказ Петрова:
-  - последовательные `parts()`, `cut()`, `edging()`, `drilling()`, `assembly()`, `trip()`, `purchase()`, `estimate()`, `views()` дают по одному вызову каждого;
+  - последовательные `parts()`, `cut()`, `edging()`, `drilling()`, `assembly()`, `trip()`, `purchase()`, `estimate()`, `views()`, `check()`, `placement()` дают по одному вызову каждого;
   - после `calc.estimate()` вызов `calc.quote(20)` не увеличивает ни один счётчик.
-- [ ] 7. Кэш на заказе Петрова: `calc.estimate() is calc.estimate()` и `calc.estimate(economy=True) is not calc.estimate()`.
+- [ ] 7. Кэш по аргументам на заказе Петрова: `calc.estimate() is calc.estimate()`, `calc.quote(20) is calc.quote(20)`, `calc.quote(20) is not calc.quote(21)`, причём `calc.quote(21).days == 21`.
 - [ ] 8. Проект `tests/test_views.py:457-460` из файла:
   - `calc.views()` рисуется, `[(f.code, f.subject) for f in calc.views().errors] == [("module_build", "Н3")]`;
   - `calc.parts()` бросает `OrderError` «Модуль Н3: отверстие «конфирмат» Ø5 на детали Н3-дно (x=16, y=510, z=8) пересекается с отверстием «конфирмат».».
@@ -387,22 +402,23 @@
   - `calc.purchase()` из файла Петрова совпадает с `purchase()` заказа Петрова по `shops` и `total`;
   - `calc.economy_parts()` заказа Петрова совпадает с `economy_parts()` файла Петрова (в том же home) по `modules`, `hardware`, `warnings`.
 - [ ] 11. Повтор меток (проект `repeated`): `placement()`, `parts()`, `views()` отказывают прежним текстом, а `check()` возвращает находку `duplicate_label`.
-- [ ] 12. Термин «Расчёт» и новое определение «Сметы» — в `GLOSSARY.md`.
+- [ ] 12. `--project` ничего не пишет. В tmp home без заказа все методы расчёта файла Петрова не создают `orders/`. В home заказа Петрова те же методы на файле не меняют `api.list_outputs` и число строк журнала.
+- [ ] 13. Тест-страж по тексту: в `GLOSSARY.md` есть термин «Расчёт» и новое определение «Сметы».
 
 ## Тикет 71 — `save`, таблица сохранения, `production` (expand) (5, 6, 8, 12)
 
-**What to build:** `api.save`, `api.production` и таблица сохранения из спеки; `done` в `_save_outputs` становится списком. `*_and_save` и `production_and_save` — однострочные обёртки. Появляется страж старых вызовов в тестах со списком исключений и храповиком.
+**What to build:** `api.save`, `api.production` и таблица сохранения из спеки; `done` в `_save_outputs` становится списком. `*_and_save` и `production_and_save` — однострочные обёртки. Константы имён файлов удаляются из `api`. Появляется страж старых вызовов в тестах со списком исключений и храповиком.
 
 **Blocked by:** 70
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Вывод:** файлы, записи `outputs` и записи журнала «сделано» не меняются.
 
 **Проверки приёмки (каждая — тест; вход — заказ Петрова, если не сказано иное):**
 - [ ] 1. Тест снимка 66 зелёный без правки снимка, включая результаты `*_and_save`, тексты файлов, страницы PDF, строки `outputs` и записи `done`.
 - [ ] 2. `api.save(calc, calc.cut())` для расчёта из файла Петрова — `OrderError` «Расчёт из файла (--project) не сохраняется: файлы пишет только заказ.». Ни файлов, ни записей `outputs` не появляется.
-- [ ] 3. `api.save(calc, calc.cut())` возвращает кортеж из одного результата с заполненным `output`. Каждый из вызовов `api.save(calc)`, `api.save(calc, other.cut())` (здесь `other` — второй расчёт того же заказа после импорта v2), `api.save(calc, calc.parts())` и `api.save(calc, calc.cut(), calc.cut())` даёт `OrderError`, файлов нет. Если ошибок несколько, срабатывает первая по порядку из спеки.
+- [ ] 3. `api.save(calc, calc.cut())` возвращает кортеж из одного результата с заполненным `output`. Каждый из вызовов `api.save(calc)`, `api.save(calc, other.cut())` (здесь `other` — второй расчёт того же заказа после импорта v2), `api.save(calc, calc.parts())` и `api.save(calc, calc.cut(), calc.cut())` даёт `OrderError`, файлов нет. Если ошибок несколько, срабатывает первая по порядку из спеки: `api.save(calc_файла)` (файл и нет результатов) даёт текст про `--project`, а `api.save(calc, calc.parts(), calc.parts())` (нет строки и повтор) — ошибку об отсутствии строки в таблице.
 - [ ] 4. Откат `save` (образец `tests/test_purchase.py:85-100`). Шаги: сохранить раскрой и чек-лист на v1, импортировать v2, поставить триггер `AFTER INSERT ON outputs`, роняющий commit, вызвать `api.save(calc_v2, calc_v2.cut(), calc_v2.trip())`. Ожидается ошибка; оба файла v1 байт-в-байт на месте, число строк `outputs` и записей журнала не изменилось.
 - [ ] 5. Откат `production` по той же схеме: `production` на v1, импорт v2, триггер, `api.production(calc_v2)`. Ожидается ошибка; все шесть файлов v1 на месте, записи «документы цеха посчитаны из версии 2» нет, число записей `done` прежнее. Без триггера виды в `list_outputs` идут в порядке `PRODUCTION_KINDS`, запись «сделано» одна.
 - [ ] 6. Записи «сделано»:
@@ -416,7 +432,8 @@
 - [ ] 11. `PRODUCTION_KINDS == ("cutting", "edging", "purchase_md", "purchase_json", "assembly", "trip")`.
 - [ ] 12. Страж `tests/test_no_old_api.py`: в файлах `tests/` нет обращений `api.<имя>` для имён из списка удаляемых в спеке. Исключения — `OLD_API_EXCEPTIONS`: все файлы, где такие обращения есть сейчас (список строится в этом тикете), плюс `tests/stage9_snapshot.py`. Храповик в том же файле: исключение, у которого в файле больше нет таких обращений, роняет тест (как `test_legacy_list_only_shrinks`).
 - [ ] 13. Тесты из таблицы «Тесты, которые ходят во внутренности `api`» с тикетом 71 переведены и зелёные.
-- [ ] 14. Тема «Расчёт и сохранение выводов» с таблицами спеки и термин «Штамп» в `DECISIONS.md` и `GLOSSARY.md` соответственно (если 68 термин уже записал — только тема).
+- [ ] 14. Тест-страж по тексту: в `DECISIONS.md` есть тема «Расчёт и сохранение выводов» с таблицами спеки и записью о сроке КП раньше брифа.
+- [ ] 15. Константы `CUTTING_PDF`, `DRILLING_PDF`, `ASSEMBLY_PDF`, `TRIP_PDF`, `VIEWS_PDF`, `VIEWS_HTML` удалены из `api`: `hasattr(api, name)` ложно для каждой. Без этого страж п. 8 не пройдёт.
 
 ## Тикет 72 — CLI на расчёте (14)
 
@@ -424,7 +441,7 @@
 
 **Blocked by:** 71
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Вывод:** тексты и коды выхода CLI не меняются.
 
@@ -435,11 +452,11 @@
 
 ## Тикет 73 — Тесты на расчёте, часть 1 (`tests/test_[a-k]*.py`) (15)
 
-**What to build:** тесты в файлах `tests/test_a*`–`test_k*` (кроме `test_*_cli.py`, их переводит тикет 72) вызывают `api.calculation`, `api.save`, `api.production` вместо удаляемых имён. Проверки тестов не меняются, меняется только способ получить результат. Около 400 вызовов.
+**What to build:** тесты в файлах `tests/test_a*`–`test_k*` (кроме `test_*_cli.py`, их переводит тикет 72) вызывают `api.calculation`, `api.save`, `api.production` вместо удаляемых имён. Проверки тестов не меняются, меняется только способ получить результат. Около 404 вызовов. Тикет можно сдавать несколькими коммитами `73:` по группам файлов, каждый с зелёным `scripts/check`.
 
 **Blocked by:** 71
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Вывод:** —
 
@@ -454,7 +471,7 @@
 
 **Blocked by:** 71, 73 (скрипт `scripts/count-asserts`)
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Вывод:** —
 
@@ -465,17 +482,18 @@
 
 ## Тикет 75 — Удаление старой формы и снимка (contract), уборка этапа (15, 18)
 
-**What to build:** из `kitchen.api` удалены имена из списка спеки. Помощник снимка 66 переходит на новый интерфейс, и снимок доказывает равенство на новом коде. Последним коммитом тикета снимок, его помощник и тест удаляются (решение мастера 2026-11-18: иначе каждый будущий тикет с правкой текста перегенерировал бы снимок). `OLD_API_EXCEPTIONS` остаётся пустым. Записи DECISIONS из спеки переписаны на месте.
+**What to build:** из `kitchen.api` удалены имена из списка спеки. `_build_parts` и `_build_cut` влиты в методы расчёта: детали проекта и копий «экономии» считаются одним путём (решение мастера 2026-11-19). Помощник снимка 66 переходит на новый интерфейс, и снимок доказывает равенство на новом коде. Последним коммитом тикета снимок, его помощник и тест удаляются (решение мастера 2026-11-18: иначе каждый будущий тикет с правкой текста перегенерировал бы снимок). Записи DECISIONS из спеки переписаны на месте.
 
 **Blocked by:** 72, 73, 74
 
-**Status:** needs-triage
+**Status:** ready-for-agent
 
 **Вывод:** тексты, JSON, файлы и PDF не меняются.
 
 **Проверки приёмки (каждая — тест):**
 - [ ] 1. Параметризованный тест по списку спеки: `hasattr(api, name)` ложно для каждого удалённого имени.
-- [ ] 2. Тест снимка 66 зелёный без правки снимка, при этом помощник зовёт `calculation`/`save`/`production`. Это отдельный коммит `75:`, его хеш — в отчёте сборщика, ревьюер прогоняет тест на нём. `scripts/check` зелёный.
+- [ ] 2. **Один коммит `75:`** делает сразу три вещи: удаляет имена (п. 1), переводит помощник снимка на `calculation`/`save`/`production` и убирает `tests/stage9_snapshot.py` из `OLD_API_EXCEPTIONS`, так что список становится пустым. Раздельно эти шаги ломают либо помощник, либо храповик. На этом коммите тест снимка 66 зелёный без правки снимка и `scripts/check` зелёный. Хеш коммита — в отчёте сборщика, ревьюер прогоняет тест на нём.
 - [ ] 3. Тест-страж: в `DECISIONS.md`, `GLOSSARY.md`, `docs/agents/`, `docs/adr/`, `AGENTS.md`, `skills/` нет `api.<имя>` для удалённых имён, а в `engine/kitchen/` нет определений и обращений к атрибутам `api` с этими именами (AST). Записи из раздела «Глоссарий и DECISIONS» спеки переписаны. `docs/specs/` и `docs/reviews/` — история, страж их не проверяет. Доменная `kitchen.checks.check_project` и вид `store.VIEWS_HTML` совпадениями не считаются.
 - [ ] 4. В `api.__all__` нет удалённых имён, а `calculation`, `save`, `production`, `Stamp` в нём есть.
-- [ ] 5. Последний коммит `75:` удаляет `tests/fixtures/stage9_before/`, `tests/stage9_snapshot.py` и `tests/test_stage9_snapshot.py`, `OLD_API_EXCEPTIONS` становится пустым. `scripts/check` зелёный.
+- [ ] 5. Тест-страж (AST): в `engine/kitchen/` нет функций `_build_parts` и `_build_cut`; детали копий «экономии» строятся тем же методом расчёта, что детали проекта. Тест снимка (п. 2) подтверждает, что цены «экономии» не изменились.
+- [ ] 6. Последний коммит `75:` удаляет `tests/fixtures/stage9_before/`, `tests/stage9_snapshot.py` и `tests/test_stage9_snapshot.py`. `scripts/check` зелёный.
