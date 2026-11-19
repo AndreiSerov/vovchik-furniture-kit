@@ -396,3 +396,8 @@
 - Тексты отказов `save` показывают имя класса Python («PartsResult») и английский id вида («cutting») — ПРОВЕРИТЬ МАСТЕРУ, видит только код.
 - Строки `views()` и `check()` таблицы в DECISIONS короче спеки (порядок предупреждений, «`parts()` не зовёт», `_pages`).
 - Имена `Saving`, `_filled`; `test_save.py` не закрывает `sqlite3.connect` в `done_texts`, `output_rows`, `log_rows`.
+
+## Тикет 72 (CLI на расчёте)
+
+Разбирает тикет 75.
+- `engine/kitchen/cli.py` (8 команд): повторяется `result = api.save(calc, calc.X())[0] if order is not None else calc.X()` — `calc.X()` дважды; можно помощник, который зовёт `save` у расчёта заказа.

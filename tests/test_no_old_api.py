@@ -130,9 +130,12 @@ def _is_api(node: ast.AST) -> bool:
 
 
 def old_api_uses(path: Path) -> set[str]:
-    """Имена старой формы, к которым файл обращается: `api.<имя>` и `getattr`/`setattr(api, "<имя>")`."""
+    """Имена старой формы, к которым файл обращается: `api.<имя>`, `getattr`/`setattr(api, "<имя>")`,
+    строка `"kitchen.api.<имя>"` и `from kitchen.api import <имя>`."""
     used = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.ImportFrom) and node.module == "kitchen.api":
+            used |= {alias.name for alias in node.names if alias.name in REMOVED}
         if isinstance(node, ast.Attribute) and _is_api(node.value) and node.attr in REMOVED:
             used.add(node.attr)
         if isinstance(node, ast.Call) and len(node.args) >= 2 and _is_api(node.args[0]):
