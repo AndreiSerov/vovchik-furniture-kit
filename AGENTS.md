@@ -41,6 +41,7 @@ Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents
 |---|---|
 | Данные мастерской (YAML, пока моки) | `workshop/`, замены — `MOCKS.md` |
 | Движок: логика в `kitchen.api`, CLI `kitchen` — тонкая обёртка (ADR 0002) | `engine/kitchen/` |
+| Типы результатов, чтение проекта, сохранение выводов; `kitchen.api` — интерфейс над ними (ADR 0002) | `kitchen.calculation` (`engine/kitchen/calculation.py`) |
 | Тесты: логика через API, CLI — контрактные | `tests/` |
 | Скиллы под git (ADR 0003) | `skills/kitchen-*/` |
 | Заказы, БД, выводы; не в git | `orders/` |

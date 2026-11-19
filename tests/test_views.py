@@ -482,7 +482,9 @@ def test_views_and_save_lays_pages_out_once(home, monkeypatch):
     petrov_order(home)
     calls = []
     real = api.views_page_layout
-    monkeypatch.setattr(api, "views_page_layout", lambda *a, **k: calls.append(1) or real(*a, **k))
+    monkeypatch.setattr(
+        "kitchen.calculation.views_page_layout", lambda *a, **k: calls.append(1) or real(*a, **k)
+    )
     api.views_and_save(ORDER, home)
     assert len(calls) == 1
 

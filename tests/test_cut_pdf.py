@@ -1,6 +1,7 @@
 """Карта раскроя PDF (2.2) и учёт выводов: через `kitchen.api`, PDF читаем обратно `pypdf`."""
 
 import json
+import shutil
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -135,7 +136,7 @@ def test_concurrent_failed_saves_restore_the_original_pdf(home, monkeypatch):
     second_ready = threading.Event()
     copied = threading.Event()
     replace = Path.replace
-    copy2 = api.shutil.copy2
+    copy2 = shutil.copy2
 
     def controlled_replace(source, target):
         if threading.current_thread().name == "first" and source.name == "previous.pdf":
@@ -155,7 +156,7 @@ def test_concurrent_failed_saves_restore_the_original_pdf(home, monkeypatch):
         return copy2(source, target, *args, **kwargs)
 
     monkeypatch.setattr(Path, "replace", controlled_replace)
-    monkeypatch.setattr(api.shutil, "copy2", observed_copy)
+    monkeypatch.setattr(shutil, "copy2", observed_copy)
 
     def save(name, day):
         threading.current_thread().name = name

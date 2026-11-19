@@ -49,7 +49,7 @@ name = "Слои ADR 0002"
 type = "layers"
 layers = [
     "kitchen.cli",
-    "kitchen.api",
+    "kitchen.api : kitchen.calculation",
     "kitchen.cutting_pdf : kitchen.edging_pdf : kitchen.drilling_pdf : kitchen.assembly_pdf : kitchen.trip_pdf : kitchen.quote_pdf : kitchen.views_pdf : kitchen.views_html : kitchen.scene3d : kitchen.pdf",
     "kitchen.assembly : kitchen.brief : kitchen.checks : kitchen.common : kitchen.cutting : kitchen.drilling : kitchen.economy : kitchen.estimate : kitchen.geometry : kitchen.models : kitchen.parts : kitchen.placement : kitchen.project : kitchen.purchase : kitchen.quote : kitchen.store : kitchen.tall : kitchen.trip : kitchen.views : kitchen.workshop",
     "kitchen.errors : kitchen.format : kitchen.formulas : kitchen.metrics : kitchen.ral : kitchen.result",
@@ -63,6 +63,7 @@ forbidden_modules = [
     "kitchen.assembly",
     "kitchen.assembly_pdf",
     "kitchen.brief",
+    "kitchen.calculation",
     "kitchen.checks",
     "kitchen.common",
     "kitchen.cutting",
@@ -130,5 +131,5 @@ source_modules = [
     "kitchen.tall",
     "kitchen.common",
 ]
-forbidden_modules = ["kitchen.store", "kitchen.api"]
+forbidden_modules = ["kitchen.store", "kitchen.api", "kitchen.calculation"]
 allow_indirect_imports = true

@@ -127,7 +127,7 @@ def test_parts_and_cut_raise_the_same_order_error_as_the_finding(home, repeated)
 
 
 def test_api_builds_the_duplicate_error_in_one_place():
-    source = (Path(api.__file__)).read_text(encoding="utf-8")
+    source = (Path(api.__file__).parent / "calculation.py").read_text(encoding="utf-8")
     assert source.count("duplicate_labels(") == 1
 
 

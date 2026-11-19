@@ -297,7 +297,7 @@ def test_failed_done_entry_rolls_back_the_outputs(home, monkeypatch):
             raise sqlite3.OperationalError("disk I/O error")
         return original(conn, pk, kind, text, version, auto)
 
-    monkeypatch.setattr(api, "_insert_log", failing)
+    monkeypatch.setattr("kitchen.calculation._insert_log", failing)
     with pytest.raises(sqlite3.OperationalError):
         api.quote_and_save(ORDER, 20, home)
     conn = sqlite3.connect(home / "orders" / "kitchen.db")

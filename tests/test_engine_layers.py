@@ -1,5 +1,6 @@
 """Тикет 67: слои движка (ADR 0002) закреплены контрактами import-linter в `pyproject.toml`."""
 
+import ast
 import os
 import re
 import shutil
@@ -39,6 +40,7 @@ def test_cli_forbidden_list_covers_all_other_modules() -> None:
     forbidden = set(_contracts()["CLI ходит только в api"]["forbidden_modules"])
     allowed = {"cli", "api", "errors", "result", "skill_lint"}
     assert forbidden == _modules() - {f"kitchen.{name}" for name in allowed}
+    assert "kitchen.calculation" in forbidden  # тикет 69: CLI ходит в api, а не в расчёт за ним
 
 
 def _kitchen(*names: str) -> set[str]:
@@ -47,7 +49,7 @@ def _kitchen(*names: str) -> set[str]:
 
 def test_contracts_match_the_spec() -> None:
     """Состав каждого слоя, писателей и источников контракта 4 — ровно по спеке: перенос модуля между слоями
-    или выпавший писатель линтер не заметит, а этот тест — да. Тикет 69 добавит `kitchen.calculation`."""
+    или выпавший писатель линтер не заметит, а этот тест — да. `kitchen.calculation` — в слое `api` (тикет 69)."""
     contracts = _contracts()
     layers = [{m.strip() for m in line.split(":")} for line in contracts["Слои ADR 0002"]["layers"]]
     writers = (
@@ -61,7 +63,7 @@ def test_contracts_match_the_spec() -> None:
     )
     assert layers == [
         _kitchen("cli"),
-        _kitchen("api"),
+        _kitchen("api", "calculation"),
         _kitchen(*writers, "views_html", "scene3d", "pdf"),
         _kitchen(
             "assembly",
@@ -105,7 +107,7 @@ def test_contracts_match_the_spec() -> None:
         "tall",
         "common",
     )
-    assert set(db["forbidden_modules"]) == _kitchen("store", "api")
+    assert set(db["forbidden_modules"]) == _kitchen("store", "api", "calculation")
     assert contracts["CLI ходит только в api"]["allow_indirect_imports"] is True
     assert db["allow_indirect_imports"] is True
 
@@ -158,3 +160,24 @@ def test_text_line_and_metrics_live_where_the_spec_says() -> None:
     for name in ("FONT", "FONT_BOLD", "register_fonts", "page_size", "page_area", "Area", "wrap"):
         assert defined(name, "metrics"), name
         assert not defined(name, "pdf"), name
+
+
+def test_calculation_does_not_import_api() -> None:
+    """Тикет 69: `api` берёт расчёт из `kitchen.calculation`, обратного импорта нет — цикла нет."""
+    tree = ast.parse((ENGINE / "calculation.py").read_text(encoding="utf-8"))
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "kitchen":
+            found += [f"from kitchen import {a.name}" for a in node.names if a.name == "api"]
+        elif isinstance(node, ast.ImportFrom) and node.module == "kitchen.api":
+            found.append("from kitchen.api import …")
+        elif isinstance(node, ast.Import):
+            found += [f"import {a.name}" for a in node.names if a.name == "kitchen.api"]
+    assert not found, found
+
+
+def test_agents_names_calculation_where_things_live() -> None:
+    text = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    table = text.split("## Где что лежит", 1)[1].split("\n## ", 1)[0]
+    assert "kitchen.calculation" in table
+    assert "kitchen.api" in table
