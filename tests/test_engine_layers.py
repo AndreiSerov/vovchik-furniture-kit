@@ -164,15 +164,17 @@ def test_text_line_and_metrics_live_where_the_spec_says() -> None:
 
 def test_calculation_does_not_import_api() -> None:
     """Тикет 69: `api` берёт расчёт из `kitchen.calculation`, обратного импорта нет — цикла нет."""
+    # Линтер этого не ловит: `kitchen.api : kitchen.calculation` — соседи одного слоя без запрета импорта.
     tree = ast.parse((ENGINE / "calculation.py").read_text(encoding="utf-8"))
     found = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "kitchen":
-            found += [f"from kitchen import {a.name}" for a in node.names if a.name == "api"]
-        elif isinstance(node, ast.ImportFrom) and node.module == "kitchen.api":
-            found.append("from kitchen.api import …")
+        if isinstance(node, ast.ImportFrom):
+            # относительный импорт (`from . import api`, `from .api import x`) приводим к абсолютному имени
+            module = ("kitchen" + (f".{node.module}" if node.module else "")) if node.level else node.module
+            if module == "kitchen.api" or (module == "kitchen" and any(a.name == "api" for a in node.names)):
+                found.append(ast.unparse(node))
         elif isinstance(node, ast.Import):
-            found += [f"import {a.name}" for a in node.names if a.name == "kitchen.api"]
+            found += [ast.unparse(node) for a in node.names if a.name == "kitchen.api"]
     assert not found, found
 
 

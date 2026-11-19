@@ -368,3 +368,9 @@
 - `api.py`: шесть одинаковых `Stamp(result.source.order, result.source.version, result.mock, on or store.today())` с позиционными полями (`bool` — подкласс `int`, перестановку `version`/`mock` типы не заметят) — свести в одну фабрику штампа из результата в таблице сохранения (71), поля по именам.
 - Описания `kitchen.metrics` (ADR 0002 «Слои движка», DECISIONS «Метрики страницы», докстринг модуля) не называют `Stamp`.
 - `tests/test_stamp.py:26` читает `tests/fixtures/petrov_project.json` на месте, а общий вход спеки «файл Петрова» — копия в tmp home (только чтение, вреда нет).
+
+## Тикет 69 (перенос в `kitchen.calculation`)
+
+Разбирает тикет 75.
+- Докстринг `api.py:1` («интерфейс над `kitchen.calculation`»): в `api` остаётся своя логика (бриф, импорт и `diff`, `status`, журнал); точнее «интерфейс движка; расчёт выводов — в `kitchen.calculation`».
+- Слой `kitchen.api : kitchen.calculation` можно объявить через `|` (независимые соседи) или контрактом `independence`, тогда запрет `calculation → api` держал бы и линтер, а не только AST-страж (вопрос координатору; после 75, когда `api` станет тоньше).
