@@ -401,3 +401,12 @@
 
 Разбирает тикет 75.
 - `engine/kitchen/cli.py` (8 команд): повторяется `result = api.save(calc, calc.X())[0] if order is not None else calc.X()` — `calc.X()` дважды; можно помощник, который зовёт `save` у расчёта заказа.
+
+## Тикеты 73–74 (тесты на расчёте)
+
+Разбирает тикет 75 или позже.
+- Форма `api.save(calc := api.calculation(order=ORDER, home=home), calc.X())[0]` повторяется десятки раз в тестах (спека требовала механической замены); помощник — по желанию.
+- `tests/test_countertop.py:84-88`: один `calc` на три `save` (не механически, числа те же).
+- `tests/test_workshop_number_grid.py:72,120`: в сообщении `assert` теперь «parts/cut/estimate» вместо имени старой функции; `tests/test_views_html.py:60` `html_of(home, **kw)` — `**kw` никто не передаёт (мёртвый параметр с базы).
+- Старые имена в именах тестов (`test_petrov_parts_from_order`, `test_views_and_save_lays_pages_out_once`) и в докстринге `tests/test_formulas.py:4` (`api.parts_from_project`); страж 75.3 `tests/` не смотрит.
+- `scripts/count-asserts`: счёт по строкам (подстрока в комментарии засчитывается, потерю перекрывает добавленная строка того же файла); неверный ref даёт traceback; README не называет скрипт (как и `claim`, `session-stats`).
