@@ -21,7 +21,7 @@ def upper_project(path, template, width=600, contents=None):
 def test_wall_door_roof_and_hangers(home, base_door_project):
     # ПРОВЕРИТЬ МАСТЕРУ: крыша и дно между боковинами, два навеса, без опор.
     upper_project(base_door_project, "wall_door")
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     parts = result.modules[0].parts
     assert len([p for p in parts if p.name == "крыша"]) == 1
     assert len([p for p in parts if p.name == "дно"]) == 1
@@ -33,7 +33,7 @@ def test_wall_door_roof_and_hangers(home, base_door_project):
 def test_wall_lift_one_facade_and_lift(home, base_door_project):
     # ПРОВЕРИТЬ МАСТЕРУ: цельный фасад, один подъёмник, петли отсутствуют.
     upper_project(base_door_project, "wall_lift", contents={"lift": "aventos_hks"})
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     assert len([p for p in result.modules[0].parts if p.name == "фасад"]) == 1
     assert result.hardware["aventos_hks"] == 1
     assert "hinge_71B3550" not in result.hardware
@@ -42,7 +42,7 @@ def test_wall_lift_one_facade_and_lift(home, base_door_project):
 def test_wall_dryer_has_dryer_and_no_bottom_or_shelf(home, base_door_project):
     # ПРОВЕРИТЬ МАСТЕРУ: сушка заменяет полку, днище отсутствует.
     upper_project(base_door_project, "wall_dryer", width=750, contents={"inserts": ["dryer_750"]})
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     assert not any(p.name in ("дно", "полка") for p in result.modules[0].parts)
     assert result.hardware["dryer_750"] == 1
 
@@ -50,7 +50,7 @@ def test_wall_dryer_has_dryer_and_no_bottom_or_shelf(home, base_door_project):
 def test_wall_hood_opening_uses_workshop_niche(home, base_door_project):
     # ПРОВЕРИТЬ МАСТЕРУ: открытый проём 568×280, передняя планка 568×40.
     upper_project(base_door_project, "wall_hood")
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     parts = result.modules[0].parts
     assert len([p for p in parts if p.name == "передняя планка дна вытяжки"]) == 1
     assert not any(p.name in ("дно", "полка") for p in parts)
@@ -62,12 +62,12 @@ def test_dryer_rejects_wrong_width(home, base_door_project):
 
     upper_project(base_door_project, "wall_dryer", width=600)
     with pytest.raises(OrderError, match="ширин"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_hood_has_fasteners_for_bottom_frame(home, base_door_project):
     upper_project(base_door_project, "wall_hood")
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     # Крыша: 4 конфирмата; передняя планка: ещё 2.
     assert result.hardware["confirmat_7x50"] == 6
 
@@ -88,7 +88,7 @@ def test_upper_manual_golden(home, base_door_project, template, width, contents)
     # Вытяжка: кромка 2×720+568+568=2576 мм; 4 стороны, 2696 мм с припуском.
     # Крепёж вытяжки: крыша 4, передняя планка 2 конфирмата.
     upper_project(base_door_project, template, width, contents)
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     expected = load_golden(f"{template}_{width}")
     assert golden_dump(result) == expected
 
@@ -100,7 +100,7 @@ def test_hood_rejects_too_narrow_front_rail(home, base_door_project):
     path.write_text(path.read_text().replace("ниша_глубина: 280", "ниша_глубина: 319"), encoding="utf-8")
     upper_project(base_door_project, "wall_hood")
     with pytest.raises(OrderError, match="планк"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_invalid_upper_hardware_reference_reported_at_workshop_load(home):
@@ -121,7 +121,7 @@ def test_invalid_upper_hardware_reference_reported_at_workshop_load(home):
 )
 def test_hood_and_dryer_can_have_lift(home, base_door_project, template, width, contents):
     upper_project(base_door_project, template, width, contents)
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     assert len([part for part in result.modules[0].parts if part.name == "фасад"]) == 1
     assert result.hardware["aventos_hks"] == 1
     assert "hinge_71B3550" not in result.hardware
@@ -135,7 +135,7 @@ def test_upper_rejects_impossible_geometry(home, base_door_project):
     project["walls"][0]["rows"][0]["modules"][0].update(height=200, depth=10)
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
     with pytest.raises(OrderError, match="В1.*габарит"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_hood_uses_project_appliance_dimensions(home, base_door_project):
@@ -145,7 +145,7 @@ def test_hood_uses_project_appliance_dimensions(home, base_door_project):
         {"type": "hood", "width": 500, "niche_height": 150, "niche_depth": 240, "module": "В1"}
     ]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     rail = next(p for p in result.modules[0].parts if p.name == "передняя планка дна вытяжки")
     assert rail.width == 80
     assert rail.position.y == 240
@@ -161,7 +161,7 @@ def test_hood_rejects_nonpositive_project_appliance_dimensions(home, base_door_p
     ]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
     with pytest.raises(OrderError, match="niche_depth.*больше 0"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_hood_nominal_width_uses_niche_from_workshop(home, base_door_project):
@@ -169,6 +169,6 @@ def test_hood_nominal_width_uses_niche_from_workshop(home, base_door_project):
     project = json.loads(base_door_project.read_text())
     project["appliances"] = [{"type": "hood", "width": 600, "module": "В1"}]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     rail = next(p for p in result.modules[0].parts if p.name == "передняя планка дна вытяжки")
     assert rail.width == 40

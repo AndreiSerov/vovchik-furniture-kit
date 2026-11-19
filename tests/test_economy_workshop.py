@@ -56,11 +56,11 @@ def test_check_workshop_lists_economy_file(home):
 def test_banner_follows_economy_file_alone(home):
     for name in OTHER_FILES:
         edit(home, f"{name}.yaml", "mock: true", "mock: false")
-    only_economy = api.estimate_from_project(PETROV, home)
+    only_economy = api.calculation(project=PETROV, home=home).estimate()
     assert only_economy.mock_files == ["economy.yaml"]
     assert only_economy.warning == MOCK_BANNER
     edit(home, "economy.yaml", "mock: true", "mock: false")
-    clean = api.estimate_from_project(PETROV, home)
+    clean = api.calculation(project=PETROV, home=home).estimate()
     assert clean.mock is False and clean.warning is None and clean.mock_files == []
 
 

@@ -30,7 +30,7 @@ def write(tmp_path, project, name="variant.json"):
 
 
 def price_of(home, project, name="variant.json"):
-    return api.estimate_from_project(write(home, project, name), home).price
+    return api.calculation(project=write(home, project, name), home=home).estimate().price
 
 
 # Те же замены, что в economy.yaml, но выписанные вручную в JSON проекта: цену такого проекта считает
@@ -71,12 +71,12 @@ def petrov_economy(tmp_path_factory):
     """Один расчёт экономии Петрова на модуль, в своей мастерской: не зависит от orders/ репозитория."""
     home = tmp_path_factory.mktemp("economy-home")
     shutil.copytree(REPO / "workshop", home / "workshop")
-    return api.estimate_from_project(PETROV, home, economy=True)
+    return api.calculation(project=PETROV, home=home).estimate(economy=True)
 
 
 def test_all_five_rules_apply_to_petrov_and_differences_match_hand_variants(home, petrov_economy):
     economy = petrov_economy.economy
-    as_is = api.estimate_from_project(PETROV, home).price
+    as_is = api.calculation(project=PETROV, home=home).estimate().price
     assert economy.price_as_is == as_is == petrov_economy.price
     assert not economy.not_offered and not economy.problems
     assert [line.id for line in economy.replacements] == list(RULES)
@@ -92,7 +92,7 @@ def test_all_five_rules_apply_to_petrov_and_differences_match_hand_variants(home
 
 
 def test_copy_of_petrov_has_no_carousel_tandembox_aventos_bucket_or_dryer(home):
-    result = api.economy_parts_from_project(PETROV, home)
+    result = api.calculation(project=PETROV, home=home).economy_parts()
     templates = {m.module: m.template for m in result.modules}
     assert "base_drawers" not in templates.values() and "wall_dryer" not in templates.values()
     for banned in ("corner_carousel", "aventos_hks", "bin_2sec", "dryer_750"):
@@ -104,13 +104,13 @@ def test_copy_of_petrov_has_no_carousel_tandembox_aventos_bucket_or_dryer(home):
         p for m in result.modules for p in m.parts if p.name in ("дно ящика", "задняя стенка ящика")
     ]
     assert drawer_parts and {p.module for p in drawer_parts} == {tall.module}
-    original = api.parts_from_project(PETROV, home)
+    original = api.calculation(project=PETROV, home=home).parts()
     assert original.hardware["corner_carousel"] == 1  # исходный проект не тронут
 
 
 def test_project_without_suitable_modules_has_no_replacements(home):
     path = write(home, BASE_DOOR_PROJECT, "plain.json")
-    result = api.estimate_from_project(path, home, economy=True)
+    result = api.calculation(project=path, home=home).estimate(economy=True)
     assert result.economy.replacements == [] and result.economy.not_offered == []
     assert result.economy.price == result.economy.price_as_is == result.price
     assert result.economy.saving == 0
@@ -128,7 +128,7 @@ def three_drawers_project(widths):
 def test_module_that_does_not_build_is_reported_and_others_are_replaced(home):
     # ширина 601 — две двери (601 - 6) не делятся нацело: замена на этом модуле не строится
     path = write(home, three_drawers_project([600, 450, 601]), "drawers.json")
-    result = api.estimate_from_project(path, home, economy=True)
+    result = api.calculation(project=path, home=home).estimate(economy=True)
     (line,) = result.economy.replacements
     assert line.id == "drawers_to_doors" and line.modules == ["Н1", "Н2"]
     assert len(result.economy.problems) == 1
@@ -142,7 +142,7 @@ def test_module_that_does_not_build_is_reported_and_others_are_replaced(home):
 
 def test_rule_that_builds_on_no_module_gives_only_a_problem(home):
     path = write(home, three_drawers_project([601]), "single.json")
-    result = api.estimate_from_project(path, home, economy=True)
+    result = api.calculation(project=path, home=home).estimate(economy=True)
     assert result.economy.replacements == [] and len(result.economy.problems) == 1
     assert result.economy.price == result.economy.price_as_is
 
@@ -155,7 +155,7 @@ def test_negative_saving_is_excluded_from_total(home):
     path.write_text(text.replace("цена_за_м: 12,", "цена_за_м: 12000,"), encoding="utf-8")
     api.brief_save(ORDER, BRIEF, home)
     api.import_project(ORDER, PETROV, home=home)
-    result = api.estimate_and_save("petrov", home, economy=True)
+    result = api.save(calc := api.calculation(order="petrov", home=home), calc.estimate(economy=True))[0]
     economy = result.economy
     assert {line.id for line in economy.not_offered} == {"carousel_to_shelf", "no_dryer"}
     assert all(line.saving < 0 for line in economy.not_offered)
@@ -182,7 +182,7 @@ def test_when_every_replacement_is_not_offered_markdown_says_so(home):
     project["appliances"] = [{"type": "sink", "width": 600, "module": "Н1"}]
     api.order_new(ORDER, home=home)
     api.import_project(ORDER, write(home, project, "sink.json"), home=home)
-    result = api.estimate_and_save("petrov", home, economy=True)
+    result = api.save(calc := api.calculation(order="petrov", home=home), calc.estimate(economy=True))[0]
     assert result.economy.replacements == [] and result.economy.price == result.economy.price_as_is
     (line,) = result.economy.not_offered
     assert line.id == "no_bucket" and line.saving == 0
@@ -204,7 +204,7 @@ def corner_project(contents):
 def test_module_the_rule_does_not_change_is_not_listed_anywhere(home):
     # угловой уже с полкой вместо карусели: замена его не меняет
     path = write(home, corner_project({"shelves": 1, "inserts": []}), "shelf.json")
-    economy = api.estimate_from_project(path, home, economy=True).economy
+    economy = api.calculation(project=path, home=home).estimate(economy=True).economy
     assert economy.replacements == [] and economy.not_offered == [] and economy.problems == []
     assert economy.price == economy.price_as_is
 
@@ -222,7 +222,7 @@ def test_first_matching_case_of_a_rule_is_applied(home):
         encoding="utf-8",
     )
     path = write(home, dryer_project(lift=False), "first.json")
-    copy_parts = api.economy_parts_from_project(path, home)
+    copy_parts = api.calculation(project=path, home=home).economy_parts()
     assert [p.name for p in copy_parts.modules[0].parts].count("полка") == 1
 
 
@@ -233,8 +233,8 @@ def test_lift_to_door_uses_the_door_width_rule(home):
         {"kind": "upper", "modules": [{"label": "В1", "template": "wall_lift", "width": 600}]}
     ]
     path = write(home, project, "lift600.json")
-    before = api.parts_from_project(path, home)
-    after = api.economy_parts_from_project(path, home)
+    before = api.calculation(project=path, home=home).parts()
+    after = api.calculation(project=path, home=home).economy_parts()
     doors = [p for p in after.modules[0].parts if p.name == "фасад"]
     assert len(doors) == 2 and len([p for p in before.modules[0].parts if p.name == "фасад"]) == 1
     assert before.hardware.get("hinge_71B3550", 0) == 0 and after.hardware["hinge_71B3550"] == 4
@@ -246,13 +246,13 @@ def test_lift_to_door_on_wall_lift_module(home):
     project["walls"][0]["rows"] = [
         {"kind": "upper", "modules": [{"label": "В1", "template": "wall_lift", "width": 600}]}
     ]
-    result = api.estimate_from_project(write(home, project, "lift.json"), home, economy=True)
+    result = api.calculation(project=write(home, project, "lift.json"), home=home).estimate(economy=True)
     (line,) = result.economy.replacements
     assert line.id == "lift_to_door" and line.modules == ["В1"]
     expected = copy.deepcopy(project)
     expected["walls"][0]["rows"][0]["modules"][0]["template"] = "wall_door"
     assert line.price == price_of(home, expected, "door.json")
-    parts = api.economy_parts_from_project(write(home, project, "lift.json"), home)
+    parts = api.calculation(project=write(home, project, "lift.json"), home=home).economy_parts()
     assert [m.template for m in parts.modules] == ["wall_door"] and "aventos_hks" not in parts.hardware
 
 
@@ -269,7 +269,7 @@ def test_dryer_with_lift_lift_rule_and_no_dryer_rule_alone_and_together(home):
     # В5 как у Петрова: сушка с подъёмником. Каждое правило само по себе считается как проект, где
     # изменено только оно; вместе — без ошибки, сушки и подъёмника в копии нет.
     project = dryer_project(lift=True)
-    result = api.estimate_from_project(write(home, project, "dryer.json"), home, economy=True)
+    result = api.calculation(project=write(home, project, "dryer.json"), home=home).estimate(economy=True)
     economy = result.economy
     lines = {line.id: line for line in economy.replacements}
     assert set(lines) == {"lift_to_door", "no_dryer"} and not economy.problems
@@ -278,13 +278,13 @@ def test_dryer_with_lift_lift_rule_and_no_dryer_rule_alone_and_together(home):
     no_dryer = copy.deepcopy(project)
     no_dryer["walls"][0]["rows"][0]["modules"][0].update(template="wall_door", contents={"shelves": 1})
     assert lines["no_dryer"].price == economy.price == price_of(home, no_dryer, "no_dryer.json")
-    copy_parts = api.economy_parts_from_project(write(home, project, "dryer.json"), home)
+    copy_parts = api.calculation(project=write(home, project, "dryer.json"), home=home).economy_parts()
     assert [m.template for m in copy_parts.modules] == ["wall_door"]
     assert "dryer_750" not in copy_parts.hardware and "aventos_hks" not in copy_parts.hardware
 
 
 def test_economy_unaffected_estimate_is_the_same_with_and_without_flag(home, petrov_economy):
-    plain = api.estimate_from_project(PETROV, home)
+    plain = api.calculation(project=PETROV, home=home).estimate()
     assert plain.economy is None
     assert "economy" not in json.loads(plain.model_dump_json())
     data = json.loads(petrov_economy.model_dump_json())
@@ -293,7 +293,7 @@ def test_economy_unaffected_estimate_is_the_same_with_and_without_flag(home, pet
 
 def test_carousel_rule_applies_when_carousel_is_explicit(home):
     path = write(home, corner_project({"inserts": ["corner_carousel"]}), "explicit.json")
-    economy = api.estimate_from_project(path, home, economy=True).economy
+    economy = api.calculation(project=path, home=home).estimate(economy=True).economy
     assert not economy.problems
     (line,) = economy.replacements
     assert line.id == "carousel_to_shelf" and line.modules == ["Н1"]

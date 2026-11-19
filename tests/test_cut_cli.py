@@ -16,7 +16,9 @@ def test_cut_order_contract(home):
     api.import_project("2026-047-petrov", FIXTURES / "petrov_project.json", home=home)
     r = runner.invoke(app, ["cut", "petrov", "--json"])
     assert r.exit_code == 0, r.output
-    assert json.loads(r.output) == json.loads(api.cut_and_save("petrov", home).model_dump_json())
+    assert json.loads(r.output) == json.loads(
+        api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0].model_dump_json()
+    )
     t = runner.invoke(app, ["cut", "2026-047-petrov"])
     assert t.exit_code == 0, t.output
     lines = t.output.strip().splitlines()

@@ -47,7 +47,7 @@ ALL_KINDS = {"cutting", "edging", "purchase_md", "purchase_json", "assembly", "t
 
 def test_v2_marks_every_v1_output_with_version_and_command(home):
     _petrov_v1(home)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     _import_v2(home)
     r = api.status(ORDER, home)
     section = _stale_section(r.text)
@@ -65,21 +65,21 @@ def test_v2_marks_every_v1_output_with_version_and_command(home):
 
 def test_recompute_removes_only_that_output(home):
     _petrov_v1(home)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     _import_v2(home)
-    api.cut_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.cut())[0]
     assert _stale_kinds(home) == ALL_KINDS - {"cutting"}
     assert "cutting-map.pdf" not in _stale_section(api.status(ORDER, home).text)
 
 
 def test_production_and_estimate_leave_section_empty(home):
     _petrov_v1(home)
-    api.production_and_save(ORDER, home)
-    api.estimate_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
     _import_v2(home)
     assert len(api.status(ORDER, home).stale) == len(ALL_KINDS) + 2  # документы цеха и смета (md, json)
-    api.production_and_save(ORDER, home)
-    api.estimate_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
     r = api.status(ORDER, home)
     assert r.stale == []
     assert _stale_section(r.text).strip() == "Пока ничего."
@@ -98,13 +98,13 @@ def test_no_project_section_follows_empty_rule(home):
 
 def test_fresh_outputs_are_not_marked(home):
     _petrov_v1(home)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     assert api.status(ORDER, home).stale == []
 
 
 def test_reimport_without_changes_marks_nothing(home):
     _petrov_v1(home)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     again = api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
     assert not again.changed and again.version == 1
     assert api.status(ORDER, home).stale == []
@@ -112,7 +112,7 @@ def test_reimport_without_changes_marks_nothing(home):
 
 def test_json_stale_matches_text(home):
     _petrov_v1(home)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     _import_v2(home)
     result = runner.invoke(app, ["status", "petrov", "--json"])
     assert result.exit_code == 0, result.output
@@ -128,7 +128,7 @@ def test_json_stale_matches_text(home):
 
 def test_status_md_file_has_section_and_mock_banner(home):
     _petrov_v1(home)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     _import_v2(home)
     r = api.status(ORDER, home)
     written = Path(r.path).read_text(encoding="utf-8")
@@ -153,8 +153,8 @@ def test_registry_entry_has_russian_label(kind):
 
 def test_command_from_each_line_recomputes_that_output(home):
     _petrov_v1(home)
-    api.production_and_save(ORDER, home)
-    api.estimate_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
     _import_v2(home)
     while stale := api.status(ORDER, home).stale:
         first = stale[0]
@@ -165,9 +165,9 @@ def test_command_from_each_line_recomputes_that_output(home):
 
 def test_three_versions_show_own_source_version(home):
     _petrov_v1(home)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     _import_v2(home)
-    api.cut_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.cut())[0]
     project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
     project["ceiling_height"] = 2600
     path = home / "project-v3.json"
@@ -190,7 +190,7 @@ def test_other_orders_outputs_are_not_listed(home):
         path = home / f"{order}.json"
         path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
         api.import_project(order, path, home=home)
-        api.production_and_save(order, home)
+        api.production(api.calculation(order=order, home=home))
     _import_v2(home)
     assert len(api.status(ORDER, home).stale) == len(ALL_KINDS)
     assert all(ORDER in s.path for s in api.status(ORDER, home).stale)
@@ -199,7 +199,7 @@ def test_other_orders_outputs_are_not_listed(home):
 
 def test_unknown_output_kind_in_db_is_russian_error(home):
     _petrov_v1(home)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     _import_v2(home)
     with sqlite3.connect(home / "orders" / "kitchen.db") as conn:
         conn.execute(

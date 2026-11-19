@@ -29,13 +29,13 @@ def pages_of(result):
 
 def test_map_has_each_drilled_part_once_and_no_part_without_holes(home):
     petrov(home)
-    r = api.drilling_and_save(ORDER, home)
+    r = api.save(calc := api.calculation(order=ORDER, home=home), calc.drilling())[0]
     assert r.output.file == str(home / "orders" / ORDER / "out" / "drilling-map.pdf")
     pages = pages_of(r)
     titles = [t for text in pages for t in TITLE.findall(text)]
     drilled = [p.id for p in r.parts]
     assert sorted(titles) == sorted(drilled) and len(titles) == len(set(titles))
-    everything = {p.id for m in api.parts_from_order(ORDER, home).modules for p in m.parts}
+    everything = {p.id for m in api.calculation(order=ORDER, home=home).parts().modules for p in m.parts}
     assert not set(titles) & (everything - set(drilled))  # детали без отверстий страниц не занимают
     assert "Н6-фасад" not in drilled and "В1-фасад" not in drilled  # ПММ и подъёмник без чашек
     for text in pages:
@@ -48,7 +48,7 @@ def test_map_without_mock_has_no_watermark_and_shows_hole_numbers(home):
     petrov(home)
     for p in (home / "workshop").glob("*.yaml"):
         p.write_text(p.read_text(encoding="utf-8").replace("mock: true", "mock: false"), encoding="utf-8")
-    r = api.drilling_and_save(ORDER, home)
+    r = api.save(calc := api.calculation(order=ORDER, home=home), calc.drilling())[0]
     assert not r.mock
     pages = pages_of(r)
     assert all("МОК" not in text for text in pages)
@@ -61,7 +61,7 @@ def test_map_without_mock_has_no_watermark_and_shows_hole_numbers(home):
 
 def test_output_is_registered_and_becomes_stale_after_new_version(home):
     petrov(home)
-    r = api.drilling_and_save(ORDER, home)
+    r = api.save(calc := api.calculation(order=ORDER, home=home), calc.drilling())[0]
     outputs = [o for o in api.list_outputs(ORDER, home) if o.kind == "drilling"]
     assert [(o.path, o.source_version) for o in outputs] == [(f"orders/{ORDER}/out/drilling-map.pdf", 1)]
     assert r.output.source_version == 1
@@ -73,13 +73,13 @@ def test_output_is_registered_and_becomes_stale_after_new_version(home):
     stale = [s for s in api.status(ORDER, home).stale if s.kind == "drilling"]
     assert [s.command for s in stale] == [f"kitchen drilling {ORDER}"]
     assert "карта присадки" in api.status(ORDER, home).text
-    api.drilling_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.drilling())[0]
     assert not [s for s in api.status(ORDER, home).stale if s.kind == "drilling"]
 
 
-def test_drilling_from_order_writes_nothing(home):
+def test_drilling_of_an_order_writes_nothing(home):
     petrov(home)
-    r = api.drilling_from_order(ORDER, home)
+    r = api.calculation(order=ORDER, home=home).drilling()
     assert r.output is None and r.source.version == 1
     assert not (home / "orders" / ORDER / "out" / "drilling-map.pdf").exists()
 
@@ -89,7 +89,7 @@ def test_cli_order_json_matches_api_and_text_names_pdf(home):
     result = runner.invoke(app, ["drilling", "petrov", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    expected = json.loads(api.drilling_from_order(ORDER, home).model_dump_json())
+    expected = json.loads(api.calculation(order=ORDER, home=home).drilling().model_dump_json())
     assert data["parts"] == expected["parts"] and data["checks"] == expected["checks"]
     assert data["output"]["kind"] == "drilling" and data["mock"] is True
     text = runner.invoke(app, ["drilling", "petrov"])
@@ -127,14 +127,14 @@ def test_order_without_drilled_parts_gets_one_page_saying_so(home):
     path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     api.order_new(ORDER, home=home)
     api.import_project(ORDER, path, home=home)
-    r = api.drilling_and_save(ORDER, home)
+    r = api.save(calc := api.calculation(order=ORDER, home=home), calc.drilling())[0]
     assert r.parts == [] and {(c.holes, c.expected) for c in r.checks} == {(0, 0)}
     pages = pages_of(r)
     assert len(pages) == 1 and "Деталей с отверстиями нет." in pages[0]
 
 
 def petrov_layout(home):
-    result = api.drilling_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).drilling()
     return result, api.drilling_map_layout(result)
 
 
@@ -234,7 +234,7 @@ def test_chain_labels_do_not_overlap(home):
 
 
 def test_part_with_too_many_holes_is_an_error_not_a_cut_table(home):
-    result = api.drilling_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).drilling()
     side = next(p for p in result.parts if p.id == "П1-бок-Л")
     crowded = side.model_copy(update={"holes": side.holes * 6})  # 84 строки таблицы
     with pytest.raises(KitchenError, match="П1-бок-Л.*не помещается"):
@@ -273,7 +273,7 @@ def test_end_hole_segment_runs_from_its_mouth_into_the_part(home):
 
 
 def test_long_part_name_and_material_fall_back_to_short_lines(home):
-    result = api.drilling_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).drilling()
     side = next(p for p in result.parts if p.id == "П1-бок-Л")
     long_name = "очень длинное название детали " * 6
     long_part = side.model_copy(update={"name": long_name, "material": "материал с длинным названием " * 6})
@@ -287,7 +287,7 @@ def test_long_part_name_and_material_fall_back_to_short_lines(home):
 def test_chain_reserve_never_shrinks_when_another_axis_grows(home, monkeypatch):
     """Строк цепочек при подборе масштаба: ось, где запас был больше, запас не теряет, пока растёт другая ось.
     Число строк подставляем по порядку вызовов: сначала запас (вправо, вверх), затем каждый новый масштаб."""
-    result = api.drilling_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).drilling()
     bottom = next(p for p in result.parts if p.id == "П1-дно")
 
     def scale(plan):
@@ -311,7 +311,7 @@ def test_chain_reserve_never_shrinks_when_another_axis_grows(home, monkeypatch):
 
 def test_end_hole_segment_into_front_and_back_edge_is_vertical_and_inward(home):
     """У детали в плоскости x–y отверстие в передний и задний торец рисуется отрезком вдоль вертикали схемы."""
-    result = api.drilling_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).drilling()
     bottom = next(p for p in result.parts if p.id == "П1-дно")
     base = next(h for h in bottom.holes if h.surface == "end")
     back = base.model_copy(

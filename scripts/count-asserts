@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+"""Count assertion lines in tests, at a git ref and in the working tree (ticket 73.2).
+
+  scripts/count-asserts <git-ref>
+
+Prints one line per `tests/*.py` file: name, count at the ref, count in the working tree, and `<` when the
+working-tree count is lower. A line counts if it contains `assert` or `pytest.raises`. The exit code is 1 when
+any count dropped, so a conversion that loses a check is visible. A file absent on one side counts 0. An unknown
+ref or a run outside a git repository is a one-line error with exit code 2.
+"""
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+PATTERN = re.compile(r"assert|pytest\.raises")
+
+
+class GitError(Exception):
+    pass
+
+
+def count(text: str) -> int:
+    return sum(1 for line in text.splitlines() if PATTERN.search(line))
+
+
+def git(*args: str, cwd: Path | None = None) -> str:
+    done = subprocess.run(["git", *args], capture_output=True, text=True, check=False, cwd=cwd)
+    if done.returncode != 0:
+        raise GitError(done.stderr.strip())
+    return done.stdout
+
+
+def at_ref(root: Path, ref: str) -> dict[str, int]:
+    # `--full-tree` и `cwd=root`: результат не зависит от папки, из которой запущен скрипт;
+    # `-z`: имена с пробелом и не-ASCII приходят как есть, без кавычек
+    names = git("ls-tree", "-z", "--full-tree", "--name-only", ref, "tests/", cwd=root).split("\0")
+    return {Path(n).name: count(git("show", f"{ref}:{n}", cwd=root)) for n in names if n.endswith(".py")}
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(__doc__, file=sys.stderr)
+        return 2
+    ref = sys.argv[1]
+    try:
+        root = Path(git("rev-parse", "--show-toplevel").strip())
+    except GitError:
+        print("count-asserts: not inside a git repository", file=sys.stderr)
+        return 2
+    try:
+        git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}", cwd=root)
+    except GitError:
+        print(f"count-asserts: {ref}: unknown git ref", file=sys.stderr)
+        return 2
+    before = at_ref(root, ref)
+    after = {p.name: count(p.read_text(encoding="utf-8")) for p in sorted((root / "tests").glob("*.py"))}
+    dropped = 0
+    for name in sorted(before | after):
+        b, a = before.get(name, 0), after.get(name, 0)
+        dropped += a < b
+        print(f"{name} {b} {a}" + (" <" if a < b else ""))
+    print(f"total {sum(before.values())} {sum(after.values())}")
+    return 1 if dropped else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

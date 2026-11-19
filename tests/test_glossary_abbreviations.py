@@ -29,7 +29,7 @@ def used_abbreviations(result) -> set[str]:
 
 
 def test_every_abbreviation_of_petrov_templates_is_in_glossary(home):
-    result = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     assert {m.template for m in result.modules} >= {"base_drawers", "base_corner", "wall_hood", "tall_oven"}
     assert used_abbreviations(result) - glossary_abbreviations() == set()
 
@@ -42,12 +42,12 @@ def test_every_abbreviation_of_wall_lift_is_in_glossary(home, base_door_project)
         {"label": "В1", "template": "wall_lift", "width": 600, "contents": {"lift": "aventos_hks"}}
     ]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     assert used_abbreviations(result) - glossary_abbreviations() == set()
 
 
 def test_glossary_has_no_unused_abbreviation(home):
     """Таблица не обещает сокращений, которых нет в деталях заказа Петрова (он покрывает все шаблоны, кроме подъёмника)."""
-    result = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     unused = glossary_abbreviations() - used_abbreviations(result)
     assert unused == set()

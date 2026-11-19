@@ -19,7 +19,7 @@ def petrov(home):
 
 def test_purchase_order_items_packaging_and_shops(home):
     petrov(home)
-    result = api.purchase_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).purchase()
     assert result.source.version == 1 and result.mock
     shops = {shop.name: shop for shop in result.shops}
     items = {item.id: item for shop in result.shops for item in shop.items if item.kind != "facade"}
@@ -41,7 +41,7 @@ def test_purchase_order_items_packaging_and_shops(home):
 
 def test_purchase_writes_matching_json_and_markdown(home):
     petrov(home)
-    result = api.purchase_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.purchase())[0]
     outputs = {output.kind: output for output in result.outputs}
     assert set(outputs) == {"purchase_md", "purchase_json"}
     data = json.loads(Path(outputs["purchase_json"].file).read_text())
@@ -60,7 +60,7 @@ def test_purchase_writes_matching_json_and_markdown(home):
 
 def test_production_writes_all_outputs_of_same_version(home):
     petrov(home)
-    result = api.production_and_save(ORDER, home)
+    result = api.production(api.calculation(order=ORDER, home=home))
     outputs = api.list_outputs(ORDER, home)
     assert {(o.kind, o.source_version) for o in outputs} == {
         ("cutting", 1),
@@ -78,7 +78,7 @@ def test_production_writes_all_outputs_of_same_version(home):
 
 def test_failed_production_commit_restores_all_files_and_records(home):
     petrov(home)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     before = api.list_outputs(ORDER, home)
     content = {o.path: Path(o.file).read_bytes() for o in before}
     project = json.loads((FIXTURES / "petrov_project.json").read_text())
@@ -97,7 +97,7 @@ def test_failed_production_commit_restores_all_files_and_records(home):
             END;
         """)
     with pytest.raises(sqlite3.IntegrityError):
-        api.production_and_save(ORDER, home)
+        api.production(api.calculation(order=ORDER, home=home))
     assert api.list_outputs(ORDER, home) == before
     assert {o.path: Path(o.file).read_bytes() for o in before} == content
     assert sorted(p.name for p in Path(before[0].file).parent.iterdir()) == [
@@ -118,7 +118,7 @@ def test_edge_minimum_is_rounded_up_to_the_workshop_step(home, base_door_project
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
     api.order_new(ORDER, home=home)
     api.import_project(ORDER, base_door_project, home=home)
-    result = api.purchase_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).purchase()
     edge = next(item for shop in result.shops for item in shop.items if item.id == "edge_08_white")
     assert edge.needed == 4.3 and edge.quantity == 4.4
 
@@ -127,7 +127,7 @@ def test_markdown_preserves_the_price_precision_in_json(home):
     petrov(home)
     materials = home / "workshop" / "materials.yaml"
     materials.write_text(materials.read_text().replace("цена_за_м: 12,", "цена_за_м: 12.345,"))
-    result = api.purchase_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.purchase())[0]
     md = Path(next(o.file for o in result.outputs if o.kind == "purchase_md")).read_text()
     edge = next(item for shop in result.shops for item in shop.items if item.id == "edge_08_white")
     assert edge.unit_price == 12.345
@@ -142,7 +142,7 @@ def test_markdown_preserves_quantity_precision(home):
     )
     construction = home / "workshop" / "construction.yaml"
     construction.write_text(construction.read_text().replace("вверх до 0.1 м", "вверх до 0.0001 м"))
-    result = api.purchase_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.purchase())[0]
     md = Path(next(o.file for o in result.outputs if o.kind == "purchase_md")).read_text()
     edge = next(item for shop in result.shops for item in shop.items if item.id == "edge_08_white")
     assert edge.quantity == 123.4567
@@ -152,7 +152,7 @@ def test_markdown_preserves_quantity_precision(home):
 def test_purchase_markdown_includes_newer_brief_warning(home):
     petrov(home)
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
-    result = api.purchase_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.purchase())[0]
     md = Path(next(o.file for o in result.outputs if o.kind == "purchase_md")).read_text()
     assert result.warnings and all(warning in md for warning in result.warnings)
 
@@ -160,7 +160,7 @@ def test_purchase_markdown_includes_newer_brief_warning(home):
 @pytest.mark.parametrize("restore_error", [OSError("сбой"), KeyboardInterrupt("прерывание")])
 def test_failed_restore_attempts_remaining_backups_and_reports_location(home, monkeypatch, restore_error):
     petrov(home)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     before = api.list_outputs(ORDER, home)
     content = {o.path: Path(o.file).read_bytes() for o in before}
     project = json.loads((FIXTURES / "petrov_project.json").read_text())
@@ -187,7 +187,7 @@ def test_failed_restore_attempts_remaining_backups_and_reports_location(home, mo
 
     monkeypatch.setattr(Path, "replace", fail_restore)
     with pytest.raises(KitchenError, match="Резервные копии") as failure:
-        api.production_and_save(ORDER, home)
+        api.production(api.calculation(order=ORDER, home=home))
     assert api.list_outputs(ORDER, home) == before
     for output in before:
         if output.kind != "edging":
@@ -213,7 +213,7 @@ def test_facades_with_same_color_but_different_materials_are_separate(home):
     path.write_text(json.dumps(project, ensure_ascii=False))
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
     api.import_project(ORDER, path, home=home)
-    result = api.purchase_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).purchase()
     facades = [item for shop in result.shops for item in shop.items if item.kind == "facade"]
     assert {(i.id, i.color, i.lead_days) for i in facades} == {
         ("mdf_enamel_matt", "RAL 7044", 10),
@@ -228,7 +228,7 @@ def test_common_and_module_hardware_combine_before_pack_rounding(home):
         construction.read_text().replace("позиция: rail_2000", "позиция: hanger_camar807")
     )
     petrov(home)
-    result = api.purchase_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).purchase()
     hangers = [item for shop in result.shops for item in shop.items if item.id == "hanger_camar807"]
     assert len(hangers) == 1 and hangers[0].needed == 14 and hangers[0].quantity == 14
 
@@ -238,4 +238,4 @@ def test_unrecognized_edge_sale_rule_is_reported(home):
     materials.write_text(materials.read_text().replace("продажа: метраж от 1 м", "продажа: отрез по звонку"))
     petrov(home)
     with pytest.raises(KitchenError, match="непонятное условие продажи"):
-        api.purchase_from_order(ORDER, home)
+        api.calculation(order=ORDER, home=home).purchase()

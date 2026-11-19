@@ -26,7 +26,7 @@ def make_project(path, walls):
 
 
 def findings(path, home, code):
-    return [f for f in api.check_project(path, home).findings if f.code == code]
+    return [f for f in api.calculation(project=path, home=home).check().findings if f.code == code]
 
 
 def lower_wall(*widths, length=2800):
@@ -204,7 +204,10 @@ def test_all_findings_come_at_once(home):
             [("lower", [module("Н1", "base_door", 601), module("Н2", "base_drawers", 600, depth=400)])],
         )
     ]
-    codes = {f.code for f in api.check_project(make_project(home / "p.json", walls), home).findings}
+    codes = {
+        f.code
+        for f in api.calculation(project=make_project(home / "p.json", walls), home=home).check().findings
+    }
     assert codes == {"row_sum", "module_build", "drawer_depth", "brief_missing"}
 
 
@@ -245,7 +248,7 @@ def test_corner_offset_is_a_workshop_key_not_a_module_field(home):
     corner = module("Н1", "base_corner", 1050, corner={"adjacent_wall": "Б", "offset": 650})
     path = make_project(home / "p.json", [("A", 1050, [("lower", [corner])])])
     with pytest.raises(OrderError):
-        api.check_project(path, home)
+        api.calculation(project=path, home=home).check()
 
 
 def test_import_rejects_when_workshop_did_not_load(home):

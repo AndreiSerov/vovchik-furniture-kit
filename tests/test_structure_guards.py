@@ -35,6 +35,16 @@ LEGACY_INTERNAL_IMPORTS = {
     "test_project_cleanup.py": {"kitchen.common"},
     "test_project_import_diff.py": {"kitchen.project"},
     "test_row_sum_registry.py": {"kitchen.parts"},
+    "test_stamp.py": {
+        "kitchen.assembly_pdf",
+        "kitchen.cutting_pdf",
+        "kitchen.drilling_pdf",
+        "kitchen.edging_pdf",
+        "kitchen.quote_pdf",
+        "kitchen.trip_pdf",
+        "kitchen.views_html",
+        "kitchen.views_pdf",
+    },
     "test_structure_guards.py": {"kitchen.models", "kitchen.parts"},
     "test_template_registry.py": {"kitchen.parts", "kitchen.project", "kitchen.workshop"},
 }

@@ -4,15 +4,13 @@
 последней строкой страницы. Колонтитул и водяной знак — общий слой `kitchen.pdf`.
 """
 
-from datetime import date
 from pathlib import Path
 
 from pydantic import BaseModel
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 
-from kitchen.drilling_pdf import TextLine
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area, register_fonts, wrap
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, Stamp, TextLine, page_area, register_fonts, wrap
 from kitchen.trip import DASH, TripHeader, TripSection
 
 __all__ = ["BOX", "TripPageLayout", "layout", "write_trip"]
@@ -101,13 +99,10 @@ def write_trip(
     header: TripHeader,
     sections: list[TripSection],
     *,
-    order: str,
-    version: int | None,
-    mock: bool,
-    on: date,
+    stamp: Stamp,
 ) -> None:
     """PDF по раскладке `layout`."""
-    doc = PdfDocument(path, order=order, version=version, mock=mock, on=on, title=f"Чек-лист выезда {order}")
+    doc = PdfDocument(path, stamp=stamp, title=f"Чек-лист выезда {stamp.order}")
     for page in layout(header, sections):
 
         def draw(canvas: Canvas, a: Area, page=page) -> None:

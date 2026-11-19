@@ -1,6 +1,6 @@
 """Тикет 41: виды кухни в PDF — план сверху и вид на каждую стену спереди (`kitchen 3d`).
 
-Логика — через API (`api.views_from_project`, `api.views_from_order`, `api.views_layout`, `api.views_and_save`),
+Логика — через API (`api.calculation(...).views()`, `api.views_layout`, `api.save`),
 PDF читается `pypdf`."""
 
 import json
@@ -11,6 +11,8 @@ from kitchen.cli import app
 from kitchen.result import MOCK_BANNER
 from pypdf import PdfReader
 from typer.testing import CliRunner
+
+from tests.test_calculation import counter
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 PETROV = FIXTURES / "petrov_project.json"
@@ -35,7 +37,7 @@ def petrov_labels():
 
 def test_petrov_views_have_plan_and_a_page_per_wall_with_its_labels(home):
     petrov_order(home)
-    result = api.views_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0]
     assert result.output.file == str(home / "orders" / ORDER / "out" / "kitchen-views.pdf")
     pages = pages_of(result)
     labels = petrov_labels()
@@ -58,13 +60,13 @@ def test_cli_order_prints_source_checks_and_views_line_and_json_is_the_api_resul
     assert lines[0] == MOCK_BANNER and lines[-1] == MOCK_BANNER
     body = [line for line in lines if line and line != MOCK_BANNER]
     assert body[0].startswith(f"Источник: заказ {ORDER}, версия 1 проекта")
-    warnings = len(api.views_from_order(ORDER, home).check_warnings)
+    warnings = len(api.calculation(order=ORDER, home=home).views().check_warnings)
     assert warnings == 3  # предупреждения проверок Петрова с брифом
     assert body[1] == "Проверки: 0 ошибок, 3 предупреждения"
     path = home / "orders" / ORDER / "out" / "kitchen-views.pdf"
     assert body[2] == f"Виды PDF: {path} (стен 2, страниц 3)"
     data = json.loads(runner.invoke(app, ["3d", "petrov", "--json"]).output)
-    expected = json.loads(api.views_from_order(ORDER, home).model_dump_json())
+    expected = json.loads(api.calculation(order=ORDER, home=home).views().model_dump_json())
     assert data["scene"] == expected["scene"] and data["findings"] == expected["findings"]
     assert data["mock"] is True and data["output"]["kind"] == "views" and data["pages"] == 3
 
@@ -90,7 +92,7 @@ def petrov_views(home, **edits):
 
     path = home / "p.json"
     path.write_text(json.dumps(petrov(**edits), ensure_ascii=False), encoding="utf-8")
-    return api.views_from_project(path, home)
+    return api.calculation(project=path, home=home).views()
 
 
 def wall_page(pages, wall):
@@ -172,7 +174,7 @@ def test_plan_names_the_gap_with_its_appliance_and_hatches_it(home):
     data["appliances"].append({"type": "fridge", "width": 580, "module": "ПМ2"})
     path = home / "p.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    pages = api.views_layout(api.views_from_project(path, home))
+    pages = api.views_layout(api.calculation(project=path, home=home).views())
     plan = pages[0]
     assert "ПМ2 холодильник" in [label.text for label in plan.labels]
     assert sum(s.kind == "gap" and s.hatch for s in plan.shapes) == 3
@@ -210,7 +212,7 @@ def u_shaped(home):
         ]},
         {"label": "В", "length": 1800, "rows": [{"kind": "lower", "modules": [mod("Н8", "base_door", 1200)]}]},
     ]  # fmt: skip
-    return api.views_from_project(write(home, walls), home)
+    return api.calculation(project=write(home, walls), home=home).views()
 
 
 def long_wall(home):
@@ -218,9 +220,9 @@ def long_wall(home):
 
     lower = [mod(f"Н{i}", "base_door", 150 if i % 2 else 450) for i in range(1, 21)]
     upper = [mod(f"В{i}", "wall_door", 300) for i in range(1, 21)]
-    return api.views_from_project(write(home, [{"label": "A", "length": 6000, "rows": [
+    return api.calculation(project=write(home, [{"label": "A", "length": 6000, "rows": [
         {"kind": "lower", "modules": lower}, {"kind": "upper", "modules": upper},
-    ]}]), home)  # fmt: skip
+    ]}]), home=home).views()  # fmt: skip
 
 
 def test_views_layout_keeps_every_label_inside_the_sheet_and_apart(home):
@@ -245,10 +247,10 @@ def import_v2(home):
 
 def test_watermark_and_banner_on_every_page_when_mock_and_none_without(home):
     petrov_order(home)
-    for text in pages_of(api.views_and_save(ORDER, home)):
+    for text in pages_of(api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0]):
         assert text.count(MOCK_BANNER) == 2 and "версия проекта 1" in text  # знак и строка колонтитула
     unmock(home)
-    result = api.views_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0]
     assert not result.mock
     for text in pages_of(result):
         assert "МОК" not in text and "версия проекта 1" in text
@@ -256,20 +258,20 @@ def test_watermark_and_banner_on_every_page_when_mock_and_none_without(home):
 
 def test_output_is_registered_and_becomes_stale_after_new_version(home):
     petrov_order(home)
-    api.views_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0]
     outputs = [o for o in api.list_outputs(ORDER, home) if o.kind == "views"]
     assert [(o.path, o.source_version) for o in outputs] == [(f"orders/{ORDER}/out/kitchen-views.pdf", 1)]
     import_v2(home)
     status = api.status(ORDER, home)
     assert [s.command for s in status.stale if s.kind == "views"] == [f"kitchen 3d {ORDER}"]
     assert "виды кухни" in status.text
-    api.views_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0]
     assert not [s for s in api.status(ORDER, home).stale if s.kind == "views"]
 
 
 def test_from_order_writes_nothing(home):
     petrov_order(home)
-    result = api.views_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).views()
     assert result.output is None and result.source.version == 1
     assert not (home / "orders" / ORDER / "out" / "kitchen-views.pdf").exists()
     assert api.list_outputs(ORDER, home) == []
@@ -279,8 +281,16 @@ def test_pdf_is_deterministic_for_one_date(home):
     from datetime import date
 
     petrov_order(home)
-    first = Path(api.views_and_save(ORDER, home, on=date(2026, 11, 15)).output.file).read_bytes()
-    second = Path(api.views_and_save(ORDER, home, on=date(2026, 11, 15)).output.file).read_bytes()
+    first = Path(
+        api.save(calc := api.calculation(order=ORDER, home=home), calc.views(), on=date(2026, 11, 15))[
+            0
+        ].output.file
+    ).read_bytes()
+    second = Path(
+        api.save(calc := api.calculation(order=ORDER, home=home), calc.views(), on=date(2026, 11, 15))[
+            0
+        ].output.file
+    ).read_bytes()
     assert first == second
 
 
@@ -290,7 +300,7 @@ def test_project_with_check_errors_is_drawn_with_a_banner_on_every_page(home):
     data["walls"][0]["length"] = 2900
     path = home / "p.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    result = api.views_from_project(path, home)
+    result = api.calculation(project=path, home=home).views()
     errors = len(result.errors)
     assert errors >= 1
     banner = f"Проверки: {errors} {'ошибка' if errors == 1 else 'ошибки'} — сверьте проект"
@@ -331,7 +341,7 @@ def test_corner_overlap_refuses_the_views(home):
     from kitchen.errors import OrderError
 
     with pytest.raises(OrderError) as e:
-        api.views_from_project(write(home, walls), home)
+        api.calculation(project=write(home, walls), home=home).views()
     assert e.value.problems == [
         "В1 (стена A) и В5 (стена Б) пересекаются в углу: нужен верхний угловой модуль или отступ верхнего ряда"
     ]
@@ -367,9 +377,9 @@ def test_views_draw_a_project_whose_module_does_not_build(home):
     path.write_text(
         json.dumps(petrov(Н3={"width": 100}, Н4={"width": 1100}), ensure_ascii=False), encoding="utf-8"
     )
-    assert api.placement_from_project(path, home).findings == []
-    assert [f.code for f in api.check_project(path, home).errors] == ["module_build"]
-    result = api.views_from_project(path, home)
+    assert api.calculation(project=path, home=home).placement().findings == []
+    assert [f.code for f in api.calculation(project=path, home=home).check().errors] == ["module_build"]
+    result = api.calculation(project=path, home=home).views()
     assert [f.code for f in result.errors] == ["module_build"]
     assert all(any("Проверки: 1 ошибка" in lb.text for lb in p.labels) for p in api.views_layout(result))
     n3 = next(m for m in result.scene.modules if m.label == "Н3")
@@ -383,10 +393,12 @@ def test_views_draw_unknown_template_and_too_small_part_as_bare_boxes(home):
         data = petrov(Н2=edit) if "template" in edit else petrov(Н3=edit)
         path = home / "p.json"
         path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-        checked = api.check_project(path, home)
+        checked = api.calculation(project=path, home=home).check()
         assert code in [f.code for f in checked.errors], code
-        assert api.placement_from_project(path, home).findings == []  # расстановка проходит, отказа нет
-        result = api.views_from_project(path, home)
+        assert (
+            api.calculation(project=path, home=home).placement().findings == []
+        )  # расстановка проходит, отказа нет
+        result = api.calculation(project=path, home=home).views()
         assert code in [f.code for f in result.errors]
         bare = [m.label for m in result.scene.modules if not m.facades and not m.tall and m.row == "lower"]
         assert bare, code
@@ -417,7 +429,9 @@ def test_low_of_uppers_is_the_lowest_upper_on_the_wall(home):
 
     path = home / "p.json"
     path.write_text(json.dumps(petrov(В1={"height": 900}), ensure_ascii=False), encoding="utf-8")
-    page = next(p for p in api.views_layout(api.views_from_project(path, home)) if p.wall == "A")
+    page = next(
+        p for p in api.views_layout(api.calculation(project=path, home=home).views()) if p.wall == "A"
+    )
     assert ("низ верхних", 1300) in [(lv.name, lv.z) for lv in page.levels]
 
 
@@ -430,7 +444,11 @@ def test_blind_part_of_a_corner_first_in_its_row_is_on_the_left(home):
         ),
         wall("Б", 2250, [corner("Н4", "base_corner", 1050, "A"), mod("Н5", "base_door", 1200)]),
     ]
-    n4 = next(m for m in api.views_from_project(write(home, walls), home).scene.modules if m.label == "Н4")
+    n4 = next(
+        m
+        for m in api.calculation(project=write(home, walls), home=home).views().scene.modules
+        if m.label == "Н4"
+    )
     assert n4.blind_width == 598 and n4.blind.x == 0
     assert min(f.x for f in n4.facades) == 598
 
@@ -440,25 +458,25 @@ def test_plan_row_depth_is_the_deepest_module_of_the_row_with_facade(home):
 
     path = home / "p.json"
     path.write_text(json.dumps(petrov(Н1={"depth": 600}), ensure_ascii=False), encoding="utf-8")
-    plan = api.views_layout(api.views_from_project(path, home))[0]
+    plan = api.views_layout(api.calculation(project=path, home=home).views())[0]
     texts = [lb.text for lb in plan.labels]
     assert "глубина: нижние 619, верхние 339" in texts  # стена A: 600 + 19 фасад, остальные 579
     assert "глубина: нижние 579, верхние 339" in texts  # стена Б без правок
 
 
 def test_views_of_a_clean_project_keep_the_parts_warnings(home):
-    assert api.views_from_project(PETROV, home).warnings == ["Н5: без задней стенки"]
+    assert api.calculation(project=PETROV, home=home).views().warnings == ["Н5: без задней стенки"]
 
 
 def test_only_the_module_that_does_not_build_loses_its_facades(home):
     from tests.test_placement import petrov
 
-    clean = {m.label: m for m in api.views_from_project(PETROV, home).scene.modules}
+    clean = {m.label: m for m in api.calculation(project=PETROV, home=home).views().scene.modules}
     path = home / "p.json"
     path.write_text(
         json.dumps(petrov(Н3={"width": 100}, Н4={"width": 1100}), ensure_ascii=False), encoding="utf-8"
     )
-    broken = {m.label: m for m in api.views_from_project(path, home).scene.modules}
+    broken = {m.label: m for m in api.calculation(project=path, home=home).views().scene.modules}
     assert [label for label, m in broken.items() if not m.facades] == ["Н3"]
     for label in ("Н1", "Н5", "В5", "В6"):
         assert broken[label].facades == clean[label].facades, label
@@ -471,19 +489,17 @@ def test_order_views_draw_a_module_that_stopped_building_after_a_workshop_edit(h
     text = yaml.read_text(encoding="utf-8")
     assert "макс_ширина: 150}" in text
     yaml.write_text(text.replace("макс_ширина: 150}", "макс_ширина: 100}"), encoding="utf-8")
-    result = api.views_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0]
     assert [(f.code, f.subject) for f in result.errors] == [("module_build", "Н3")]
     assert result.output is not None
     assert next(m for m in result.scene.modules if m.label == "Н3").facades == []
 
 
-def test_views_and_save_lays_pages_out_once(home, monkeypatch):
+def test_saving_views_lays_pages_out_once(home, monkeypatch):
     """Тикет 47: раскладка страниц считается в `_views` один раз; запись PDF берёт её же."""
     petrov_order(home)
-    calls = []
-    real = api.views_page_layout
-    monkeypatch.setattr(api, "views_page_layout", lambda *a, **k: calls.append(1) or real(*a, **k))
-    api.views_and_save(ORDER, home)
+    calls = counter(monkeypatch, "kitchen.calculation.views_page_layout")
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0]
     assert len(calls) == 1
 
 
@@ -497,7 +513,9 @@ def test_views_layout_of_a_result_read_back_from_json_lays_the_pages_out_again(h
 
 def test_pdf_page_of_wall_a_names_both_blind_parts_by_the_facade_edge(home):
     petrov_order(home)
-    text = " ".join(pages_of(api.views_and_save(ORDER, home))[1].split())  # узкая подпись переносится
+    text = " ".join(
+        pages_of(api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0])[1].split()
+    )  # узкая подпись переносится
     assert "глухая часть 598" in text and "глухая часть 154" in text
 
 
@@ -516,7 +534,7 @@ def test_camera_looks_at_half_of_the_tallest_box_of_the_scene(home):
     from tests.test_placement import mod, wall, write
 
     lowers = [mod(f"Н{i}", "base_door", 600) for i in range(1, 4)]
-    scene = api.views_from_project(write(home, [wall("A", 1800, lowers)]), home).scene3d
+    scene = api.calculation(project=write(home, [wall("A", 1800, lowers)]), home=home).views().scene3d
     assert max(b.max[2] for m in scene.modules for b in m.boxes) == 820
     assert scene.camera.target == [900, 0, 410]  # одна стена — её середина; половина верха нижних
     assert long_wall(home).scene3d.camera.target[2] == 1100  # верхние до 2200 — половина их верха

@@ -1,12 +1,11 @@
 """PDF видов кухни (тикет 41): рисует страницы `views.layout` на альбомном листе общего слоя `kitchen.pdf`
 (колонтитул и водяной знак мока — его)."""
 
-from datetime import date
 from pathlib import Path
 
 from reportlab.pdfgen.canvas import Canvas
 
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, Stamp
 from kitchen.views import Label, Segment, Shape, ViewPage
 
 __all__ = ["write_views"]
@@ -77,13 +76,9 @@ def _label(canvas: Canvas, label: Label) -> None:
     canvas.restoreState()
 
 
-def write_views(
-    path: Path, pages: list[ViewPage], *, order: str, version: int | None, mock: bool, on: date
-) -> None:
+def write_views(path: Path, pages: list[ViewPage], *, stamp: Stamp) -> None:
     """PDF по раскладке `views.layout`: A4 альбомная, страница на элемент списка."""
-    doc = PdfDocument(
-        path, order=order, version=version, mock=mock, on=on, title=f"Виды кухни {order}", landscape=True
-    )
+    doc = PdfDocument(path, stamp=stamp, title=f"Виды кухни {stamp.order}", landscape=True)
     for page in pages:
 
         def draw(canvas: Canvas, a: Area, page=page) -> None:

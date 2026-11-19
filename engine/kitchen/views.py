@@ -22,6 +22,7 @@ from kitchen.common import is_tall
 from kitchen.errors import OrderError
 from kitchen.format import num, plural
 from kitchen.geometry import turn
+from kitchen.metrics import FONT, FONT_BOLD, Area, page_area, register_fonts
 from kitchen.models import Workshop
 from kitchen.parts import (
     APPLIANCE_NAMES,
@@ -32,7 +33,6 @@ from kitchen.parts import (
     gap_name,
     is_facade,
 )
-from kitchen.pdf import FONT, FONT_BOLD, Area, page_area, register_fonts
 from kitchen.placement import Placement, WallPlace, part_in_room
 from kitchen.project import Project, is_gap
 from kitchen.ral import UNKNOWN, ral_rgb

@@ -17,8 +17,8 @@ ORDER = "2026-047-petrov"
 def test_edges_order_pdf_and_totals(home):
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
-    result = api.edges_and_save("petrov", home)
-    parts = api.parts_from_order("petrov", home)
+    result = api.save(calc := api.calculation(order="petrov", home=home), calc.edging())[0]
+    parts = api.calculation(order="petrov", home=home).parts()
     assert result.edges == parts.edges
     assert result.source.version == 1
     assert result.output.source_version == 1
@@ -42,7 +42,9 @@ def test_edges_cli_order_and_file_contract(home, base_door_project):
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
     result = runner.invoke(app, ["edges", "petrov", "--json"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == json.loads(api.edges_and_save("petrov", home).model_dump_json())
+    assert json.loads(result.output) == json.loads(
+        api.save(calc := api.calculation(order="petrov", home=home), calc.edging())[0].model_dump_json()
+    )
     text = runner.invoke(app, ["edges", "petrov"])
     assert text.exit_code == 0, text.output
     assert "edging-map.pdf" in text.output and "МОК-ДАННЫЕ" in text.output
@@ -51,7 +53,7 @@ def test_edges_cli_order_and_file_contract(home, base_door_project):
 def test_every_edged_part_and_totals_on_multipage_pdf(home):
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
-    result = api.edges_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.edging())[0]
     pages = [page.extract_text() for page in PdfReader(result.output.file).pages]
     assert len(pages) > 1
     assert all("МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА" in text and "версия проекта 1" in text for text in pages)
@@ -77,7 +79,7 @@ def test_empty_edging_and_non_mock_pdf(home, base_door_project):
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
     api.order_new(ORDER, home=home)
     api.import_project(ORDER, base_door_project, home=home)
-    result = api.edges_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.edging())[0]
     assert result.parts == [] and result.edges == {}
     pages = [page.extract_text() for page in PdfReader(result.output.file).pages]
     assert len(pages) == 1 and "Нет деталей с кромкой" in pages[0]
@@ -85,7 +87,7 @@ def test_empty_edging_and_non_mock_pdf(home, base_door_project):
 
 
 def test_edging_meters_match_the_base_door_golden(home, base_door_project):
-    result = api.edges_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).edging()
     assert result.edges["edge_08_white"].model_dump() == {
         "clean_m": 3.71,
         "with_allowance_m": 3.89,
@@ -97,14 +99,14 @@ def test_edging_meters_match_the_base_door_golden(home, base_door_project):
 def test_new_version_replaces_only_edging_output(home):
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
-    api.cut_and_save(ORDER, home)
-    api.edges_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.cut())[0]
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.edging())[0]
     project = json.loads((FIXTURES / "petrov_project.json").read_text())
     project["ceiling_height"] = 2650
     path = home / "project-v2.json"
     path.write_text(json.dumps(project, ensure_ascii=False))
     api.import_project(ORDER, path, home=home)
-    result = api.edges_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.edging())[0]
     assert sorted((o.kind, o.source_version) for o in api.list_outputs(ORDER, home)) == [
         ("cutting", 1),
         ("edging", 2),
@@ -121,7 +123,7 @@ def test_long_edge_id_does_not_overflow_the_footer(home, base_door_project):
     api.order_new(ORDER, home=home)
     api.import_project(ORDER, base_door_project, home=home)
     with pytest.raises(KitchenError, match="слишком велика"):
-        api.edges_and_save(ORDER, home)
+        api.save(calc := api.calculation(order=ORDER, home=home), calc.edging())[0]
     assert not api.list_outputs(ORDER, home)
 
 
@@ -134,7 +136,7 @@ def test_summary_page_uses_summary_headers(home, base_door_project):
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
     api.order_new(ORDER, home=home)
     api.import_project(ORDER, base_door_project, home=home)
-    result = api.edges_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.edging())[0]
     assert len(result.parts) == 42
     pages = [page.extract_text() for page in PdfReader(result.output.file).pages]
     summary_pages = [p for p in pages if f"{result.edges['edge_08_white'].clean_m:.3f}" in p]

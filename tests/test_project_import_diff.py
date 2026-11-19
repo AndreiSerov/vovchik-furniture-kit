@@ -136,7 +136,7 @@ def test_parts_rejects_unsupported_contents(home, base_door_project):
     data["walls"][0]["rows"][0]["modules"][0]["contents"] = {"drawers": 2}
     write(base_door_project, data)
     with pytest.raises(OrderError, match="наполнение"):
-        api.parts_from_project(base_door_project)
+        api.calculation(project=base_door_project).parts()
 
 
 def test_material_overrides_take_precedence(home, base_door_project):
@@ -144,11 +144,11 @@ def test_material_overrides_take_precedence(home, base_door_project):
     row = data["walls"][0]["rows"][0]
     row["materials"] = {"body": "ldsp_16_oak"}
     write(base_door_project, data)
-    result = api.parts_from_project(base_door_project)
+    result = api.calculation(project=base_door_project).parts()
     assert result.modules[0].parts[0].material == "ldsp_16_oak"
     row["modules"][0]["materials"] = {"body": "ldsp_16_white"}
     write(base_door_project, data)
-    result = api.parts_from_project(base_door_project)
+    result = api.calculation(project=base_door_project).parts()
     assert result.modules[0].parts[0].material == "ldsp_16_white"
 
 

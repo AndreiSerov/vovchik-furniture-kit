@@ -9,7 +9,9 @@ from tests.test_placement import PETROV, corner, edit, mod, place, placement_err
 
 def tall_overlaps(home, walls):
     return [
-        f.message for f in api.check_project(write(home, walls), home).findings if f.code == "tall_overlap"
+        f.message
+        for f in api.calculation(project=write(home, walls), home=home).check().findings
+        if f.code == "tall_overlap"
     ]
 
 
@@ -77,8 +79,10 @@ def test_ceiling_is_not_checked_without_uppers_and_tall(home):
 
 
 def test_parts_of_module_on_turned_wall_lie_inside_its_box(home):
-    result = api.placement_from_project(PETROV, home)
-    parts = next(m for m in api.parts_from_project(PETROV, home).modules if m.module == "В6").parts
+    result = api.calculation(project=PETROV, home=home).placement()
+    parts = next(
+        m for m in api.calculation(project=PETROV, home=home).parts().modules if m.module == "В6"
+    ).parts
     place_ = next(m for m in result.modules if m.label == "В6")
     assert place_.rotation == 90
     (lo, hi) = place_.bounds()
@@ -220,7 +224,9 @@ def test_ring_error_comes_with_the_ceiling_error(home):
 
 def test_ring_is_accepted_by_check_and_import_and_3d_refuses_without_files(home):
     path = write(home, ring([2850, 2850, 2850]))
-    assert [f.code for f in api.check_project(path, home).findings if f.level == "error"] == []
+    assert [
+        f.code for f in api.calculation(project=path, home=home).check().findings if f.level == "error"
+    ] == []
     api.order_new("2026-047-petrov", home=home)
     assert api.import_project("petrov", path, home=home).version == 1
     result = CliRunner().invoke(app, ["3d", "petrov"])

@@ -6,7 +6,7 @@ from tests.test_gap import base, gap, lower, mod, write
 
 
 def views_of(home, walls):
-    return api.views_from_project(write(home, walls), home)
+    return api.calculation(project=write(home, walls), home=home).views()
 
 
 def depth_of_gap(result, label):

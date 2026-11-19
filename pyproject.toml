@@ -13,6 +13,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "import-linter>=2.1",
     "pypdf>=7.1.0",
     "pytest>=8",
     "pytest-timeout>=2.4.0",
@@ -34,8 +35,103 @@ module-root = "engine"
 [tool.ruff]
 line-length = 110
 target-version = "py311"
+# Скрипт проекта без расширения `.py`: иначе `ruff check` и `ruff format` в `scripts/check` его не видят.
+extend-include = ["scripts/count-asserts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Зависший тест падает с ошибкой, а не ждёт таймаута агента. Самый медленный тест — около 3 с.
 timeout = 30
+
+[tool.importlinter]
+root_package = "kitchen"
+
+[[tool.importlinter.contracts]]
+name = "Слои ADR 0002"
+type = "layers"
+layers = [
+    "kitchen.cli",
+    "kitchen.api : kitchen.calculation",
+    "kitchen.cutting_pdf : kitchen.edging_pdf : kitchen.drilling_pdf : kitchen.assembly_pdf : kitchen.trip_pdf : kitchen.quote_pdf : kitchen.views_pdf : kitchen.views_html : kitchen.scene3d : kitchen.pdf",
+    "kitchen.assembly : kitchen.brief : kitchen.checks : kitchen.common : kitchen.cutting : kitchen.drilling : kitchen.economy : kitchen.estimate : kitchen.geometry : kitchen.models : kitchen.parts : kitchen.placement : kitchen.project : kitchen.purchase : kitchen.quote : kitchen.store : kitchen.tall : kitchen.trip : kitchen.views : kitchen.workshop",
+    "kitchen.errors : kitchen.format : kitchen.formulas : kitchen.metrics : kitchen.ral : kitchen.result",
+]
+
+[[tool.importlinter.contracts]]
+name = "CLI ходит только в api"
+type = "forbidden"
+source_modules = ["kitchen.cli"]
+forbidden_modules = [
+    "kitchen.assembly",
+    "kitchen.assembly_pdf",
+    "kitchen.brief",
+    "kitchen.calculation",
+    "kitchen.checks",
+    "kitchen.common",
+    "kitchen.cutting",
+    "kitchen.cutting_pdf",
+    "kitchen.drilling",
+    "kitchen.drilling_pdf",
+    "kitchen.economy",
+    "kitchen.edging_pdf",
+    "kitchen.estimate",
+    "kitchen.format",
+    "kitchen.formulas",
+    "kitchen.geometry",
+    "kitchen.metrics",
+    "kitchen.models",
+    "kitchen.parts",
+    "kitchen.pdf",
+    "kitchen.placement",
+    "kitchen.project",
+    "kitchen.purchase",
+    "kitchen.quote",
+    "kitchen.quote_pdf",
+    "kitchen.ral",
+    "kitchen.scene3d",
+    "kitchen.store",
+    "kitchen.tall",
+    "kitchen.trip",
+    "kitchen.trip_pdf",
+    "kitchen.views",
+    "kitchen.views_html",
+    "kitchen.views_pdf",
+    "kitchen.workshop",
+]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Писатели независимы"
+type = "independence"
+modules = [
+    "kitchen.cutting_pdf",
+    "kitchen.edging_pdf",
+    "kitchen.drilling_pdf",
+    "kitchen.assembly_pdf",
+    "kitchen.trip_pdf",
+    "kitchen.quote_pdf",
+    "kitchen.views_pdf",
+    "kitchen.views_html",
+]
+
+[[tool.importlinter.contracts]]
+name = "Расчёты не ходят в БД"
+type = "forbidden"
+source_modules = [
+    "kitchen.parts",
+    "kitchen.cutting",
+    "kitchen.drilling",
+    "kitchen.assembly",
+    "kitchen.trip",
+    "kitchen.estimate",
+    "kitchen.economy",
+    "kitchen.quote",
+    "kitchen.purchase",
+    "kitchen.checks",
+    "kitchen.placement",
+    "kitchen.views",
+    "kitchen.tall",
+    "kitchen.common",
+]
+forbidden_modules = ["kitchen.store", "kitchen.api", "kitchen.calculation"]
+allow_indirect_imports = true

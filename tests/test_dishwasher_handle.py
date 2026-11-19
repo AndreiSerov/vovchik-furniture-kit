@@ -21,7 +21,7 @@ def n6(parts):
 
 def test_petrov_handles_18_and_n6_has_one(home):
     """Проверка 1."""
-    parts = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    parts = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     assert parts.hardware["handle_profile"] == 18
     assert n6(parts).hardware == {"handle_profile": 1}
     golden = json.loads((GOLDEN / "dishwasher_panel_600.json").read_text(encoding="utf-8"))
@@ -31,7 +31,7 @@ def test_petrov_handles_18_and_n6_has_one(home):
 def test_construction_two_handles_per_facade_gives_two_on_n6_and_36_for_petrov(home):
     """Проверка 5."""
     _edit_workshop(home, "construction.yaml", "ручки: по одной на фасад", "ручки: по 2 на фасад")
-    parts = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    parts = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     assert n6(parts).hardware == {"handle_profile": 2}
     assert parts.hardware["handle_profile"] == 36
 
@@ -46,7 +46,7 @@ def test_module_material_handles_override_gives_second_handle_on_n6_only(home):
             for module in row["modules"]:
                 if module["label"] == "Н6":
                     module["materials"] = {"handles": "handle_knob"}
-    parts = api.parts_from_project(write_project(home, data), home)
+    parts = api.calculation(project=write_project(home, data), home=home).parts()
     assert n6(parts).hardware == {"handle_knob": 1}
     assert parts.hardware["handle_profile"] == 17 and parts.hardware["handle_knob"] == 1
 
@@ -58,7 +58,7 @@ def test_dishwasher_in_gap_has_no_facade_and_no_handle(home):
         [{"length": 1050, "label": "A", "rows": [lower(base("Н1"), gap("ПМ1", 450))]}],
         appliances=[{"type": "dishwasher", "width": 450, "module": "ПМ1"}],
     )
-    parts = api.parts_from_project(path, home)
+    parts = api.calculation(project=path, home=home).parts()
     assert parts.hardware["handle_profile"] == 2
     assert all(m.module != "ПМ1" for m in parts.modules)
 
@@ -66,7 +66,7 @@ def test_dishwasher_in_gap_has_no_facade_and_no_handle(home):
 def test_petrov_assembly_n6_lists_one_handle_without_steps(home):
     """Проверка 2 и блок Н6 в JSON."""
     petrov(home)
-    result = api.assembly_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).assembly()
     block = module_of(result, "Н6")
     assert [(h.id, h.quantity, h.installed) for h in block.hardware] == [("handle_profile", 1, "объект")]
     assert block.steps == [] and not block.carcass
@@ -74,13 +74,13 @@ def test_petrov_assembly_n6_lists_one_handle_without_steps(home):
     for m in result.modules:
         for h in m.hardware:
             total[h.id] = total.get(h.id, 0) + h.quantity
-    assert total == api.parts_from_order(ORDER, home).hardware
+    assert total == api.calculation(order=ORDER, home=home).parts().hardware
 
 
 def test_petrov_assembly_pdf_has_handle_line_under_n6_row_and_no_parts_table(home):
     """Проверка 3."""
     petrov(home)
-    result = api.assembly_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.assembly())[0]
     text = "\n".join(p.extract_text() for p in PdfReader(result.output.file).pages)
     flat = re.sub(r"\s+", " ", text)
     row = "Н6 — фасад посудомоечной машины, 450 мм: корпуса нет, фасад Н6-фасад крепится к посудомойке на объекте"
@@ -96,10 +96,10 @@ def test_handle_marked_workshop_on_n6_has_no_site_note_and_still_no_steps(home):
     edit(
         home, "hardware.yaml", "{id: handle_profile, ставится: объект,", "{id: handle_profile, ставится: цех,"
     )
-    block = module_of(api.assembly_from_order(ORDER, home), "Н6")
+    block = module_of(api.calculation(order=ORDER, home=home).assembly(), "Н6")
     assert [(h.id, h.quantity, h.installed) for h in block.hardware] == [("handle_profile", 1, "цех")]
     assert block.steps == []
-    result = api.assembly_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.assembly())[0]
     flat = re.sub(r"\s+", " ", "\n".join(p.extract_text() for p in PdfReader(result.output.file).pages))
     block = flat.split("Н6 — фасад посудомоечной машины")[1].split("В5 — ")[0]
     assert "Фурнитура: Ручка-профиль торцевая — 1 шт" in block and "1 шт, на объекте" not in block
@@ -108,16 +108,16 @@ def test_handle_marked_workshop_on_n6_has_no_site_note_and_still_no_steps(home):
 def test_petrov_purchase_estimate_economy_and_trip_numbers(home):
     """Проверка 8: числа с прогона движка до тикета 55 (Петров, версия 1)."""
     petrov(home)
-    parts = api.parts_from_order(ORDER, home)
+    parts = api.calculation(order=ORDER, home=home).parts()
     assert parts.hardware["handle_profile"] == 18
-    purchase = api.purchase_from_order(ORDER, home)
+    purchase = api.calculation(order=ORDER, home=home).purchase()
     assert purchase.total == 158074.70
     handles = [i for shop in purchase.shops for i in shop.items if i.id == "handle_profile"]
     assert [(i.quantity, i.amount) for i in handles] == [(18, 6300.00)]
-    estimate = api.estimate_from_order(ORDER, home, economy=True)
+    estimate = api.calculation(order=ORDER, home=home).estimate(economy=True)
     assert estimate.price == 222000 and estimate.margin == 16405.59
     assert (estimate.economy.price, estimate.economy.saving) == (185000, 37000)
-    trip = api.trip_from_order(ORDER, home)
+    trip = api.calculation(order=ORDER, home=home).trip()
     site = next(sec for sec in trip.sections if sec.title.startswith("Фурнитура для монтажа"))
     assert "Ручка-профиль торцевая — 18 шт" in [i.text for i in site.items]
 

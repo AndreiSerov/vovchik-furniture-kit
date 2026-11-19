@@ -6,6 +6,7 @@ cd "$(dirname "$0")/.."
 
 uv run ruff check
 uv run ruff format --check
+uv run lint-imports
 uv run python -m kitchen.skill_lint
 # Тесты идут в 6 процессах: тесты одного файла — в одном процессе, фикстуры модуля считаются один раз.
 uv run pytest -q -x -n 6 --dist loadfile

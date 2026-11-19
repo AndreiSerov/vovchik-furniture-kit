@@ -23,7 +23,7 @@ def holes(result, purpose=None, surface=None):
 
 @pytest.fixture(scope="module")
 def petrov():
-    return api.parts_from_project(PETROV, Path(__file__).resolve().parent.parent)
+    return api.calculation(project=PETROV, home=Path(__file__).resolve().parent.parent).parts()
 
 
 def test_petrov_confirmat_holes_cups_and_plate_holes_match_hardware(petrov):
@@ -59,7 +59,7 @@ def cups(part):
 def test_base_door_600_cups_22_from_facade_edge_and_100_from_ends(home, base_door_project):
     """Фасады 716×297 (две двери): по 2 чашки; базовые кромки фасада — нижняя и левая.
     Левая дверь на петлях слева: 22 от левой кромки; правая — справа: 297 − 22 = 275 от левой."""
-    p = parts_of(api.parts_from_project(base_door_project, home))
+    p = parts_of(api.calculation(project=base_door_project, home=home).parts())
     left, right = p["Н1-фасад-Л"], p["Н1-фасад-П"]
     assert left.base_edges == right.base_edges == ["-z", "-x"]
     assert cups(left) == [(100, 22), (616, 22)]
@@ -73,7 +73,7 @@ def test_facade_above_900_has_three_cups_middle_exactly_halfway(home, base_door_
     path = project_with(
         base_door_project, {"label": "Н1", "template": "base_door", "width": 400, "height": 1000}
     )
-    result = api.parts_from_project(path, home)
+    result = api.calculation(project=path, home=home).parts()
     assert cups(parts_of(result)["Н1-фасад"]) == [(100, 22), (498, 22), (896, 22)]
     assert result.hardware["hinge_71B3550"] == 3
 
@@ -81,11 +81,13 @@ def test_facade_above_900_has_three_cups_middle_exactly_halfway(home, base_door_
 def test_tall_door_cups_follow_hinge_table(home, base_door_project):
     """Пенал: верхняя дверь 798 мм — 2 петли по таблице; пенал выше (2500) — дверь 1198 мм, 3 петли."""
     path = project_with(base_door_project, {"label": "П1", "template": "tall_oven", "width": 600})
-    door = parts_of(api.parts_from_project(path, home))["П1-фасад"]
+    door = parts_of(api.calculation(project=path, home=home).parts())["П1-фасад"]
     assert cups(door) == [(100, 22), (698, 22)]
-    assert not parts_of(api.parts_from_project(path, home))["П1-фасад-1"].holes  # фасад ящика без петель
+    assert not parts_of(api.calculation(project=path, home=home).parts())[
+        "П1-фасад-1"
+    ].holes  # фасад ящика без петель
     path = project_with(path, {"label": "П1", "template": "tall_oven", "width": 600, "height": 2500})
-    result = api.parts_from_project(path, home)
+    result = api.calculation(project=path, home=home).parts()
     assert cups(parts_of(result)["П1-фасад"]) == [(100, 22), (599, 22), (1098, 22)]
     assert result.hardware["hinge_71B3550"] == 3
 
@@ -105,7 +107,7 @@ def test_single_door_plates_follow_hinge_side(home, base_door_project, contents,
     module = {"label": "Н1", "template": "base_door", "width": 400}
     if contents:
         module["contents"] = contents
-    result = api.parts_from_project(project_with(base_door_project, module), home)
+    result = api.calculation(project=project_with(base_door_project, module), home=home).parts()
     assert plated(result) == expected
     door = parts_of(result)["Н1-фасад"]
     edge = 22 if expected == ["Н1-бок-Л"] else 396 - 22  # фасад 396: чашки у кромки со стороны петель
@@ -113,16 +115,16 @@ def test_single_door_plates_follow_hinge_side(home, base_door_project, contents,
 
 
 def test_two_doors_plates_on_both_sides(home, base_door_project):
-    assert plated(api.parts_from_project(base_door_project, home)) == ["Н1-бок-Л", "Н1-бок-П"]
+    assert plated(api.calculation(project=base_door_project, home=home).parts()) == ["Н1-бок-Л", "Н1-бок-П"]
 
 
 def test_hinge_side_on_two_doors_or_corner_is_an_error(home, base_door_project):
     two = {"label": "Н1", "template": "base_door", "width": 600, "contents": {"hinge_side": "right"}}
     with pytest.raises(OrderError, match="Н1.*сторона петель"):
-        api.parts_from_project(project_with(base_door_project, two), home)
+        api.calculation(project=project_with(base_door_project, two), home=home).parts()
     lift = {"label": "В1", "template": "wall_lift", "width": 600, "contents": {"hinge_side": "left"}}
     with pytest.raises(OrderError, match="В1.*сторона петель"):
-        api.parts_from_project(project_with(base_door_project, lift, kind="upper"), home)
+        api.calculation(project=project_with(base_door_project, lift, kind="upper"), home=home).parts()
 
 
 def test_corner_hinges_follow_place_in_row(home):
@@ -130,21 +132,21 @@ def test_corner_hinges_follow_place_in_row(home):
     petrov = json.loads(PETROV.read_text(encoding="utf-8"))
     path = home / "petrov.json"
     path.write_text(json.dumps(petrov, ensure_ascii=False), encoding="utf-8")
-    result = api.parts_from_project(path, home)
+    result = api.calculation(project=path, home=home).parts()
     ids = plated(result)
     assert {"Н4-бок-Л", "В4-бок-Л"} <= set(ids) and not {"Н4-бок-П", "В4-бок-П"} & set(ids)
     lower = petrov["walls"][0]["rows"][0]["modules"]
     lower.insert(0, lower.pop())  # Н4 первым в ряду: глухая часть слева, петли справа
     lower[0]["corner"] = {"adjacent_wall": "Б"}
     path.write_text(json.dumps(petrov, ensure_ascii=False), encoding="utf-8")
-    ids = plated(api.parts_from_project(path, home))
+    ids = plated(api.calculation(project=path, home=home).parts())
     assert "Н4-бок-П" in ids and "Н4-бок-Л" not in ids
     corner = {"label": "Н4", "template": "base_corner", "width": 1050, "corner": {"adjacent_wall": "Б"}}
     corner["contents"] = {"hinge_side": "right"}
     lower[0] = corner
     path.write_text(json.dumps(petrov, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(OrderError, match="Н4.*углового.*мест"):
-        api.parts_from_project(path, home)
+        api.calculation(project=path, home=home).parts()
 
 
 def extent(part):
@@ -216,7 +218,7 @@ def signature(part, mirror_axis=None):
 
 
 def test_left_and_right_sides_and_facades_are_mirrored(home, base_door_project):
-    p = parts_of(api.parts_from_project(base_door_project, home))
+    p = parts_of(api.calculation(project=base_door_project, home=home).parts())
     left, right = p["Н1-бок-Л"], p["Н1-бок-П"]
     assert signature(left) == signature(right) and signature(left)
     assert {h.from_face for h in left.holes if h.purpose == "hinge_plate"} == {"+x"}  # внутренняя пласть
@@ -256,7 +258,9 @@ def two_walls(path):
 def test_every_template_builds_and_drills_only_known_purposes(home, base_door_project, module, kind):
     """Тикет 20: и у каждого шаблона отверстий полкодержателей — 5 на полкодержатель, направляющих — 6 на
     комплект Tandembox (МОК: 3 на направляющую)."""
-    result = api.parts_from_project(two_walls(project_with(base_door_project, module, kind=kind)), home)
+    result = api.calculation(
+        project=two_walls(project_with(base_door_project, module, kind=kind)), home=home
+    ).parts()
     found = holes(result)
     assert {h.purpose for _, h in found} <= {"confirmat", "hinge_cup", "hinge_plate", "shelf_pin", "runner"}
     hw = result.hardware
@@ -296,7 +300,7 @@ def test_workshop_offsets_move_holes(home, base_door_project):
     edit_construction(home, "отступ_от_торца: 100", "отступ_от_торца: 110")
     edit_construction(home, "отступ_от_лицевой_кромки: 50", "отступ_от_лицевой_кромки: 60")
     edit_construction(home, "отступ_от_передней_кромки: 37", "отступ_от_передней_кромки: 40")
-    p = parts_of(api.parts_from_project(base_door_project, home))
+    p = parts_of(api.calculation(project=base_door_project, home=home).parts())
     assert cups(p["Н1-фасад-Л"]) == [(110, 24), (606, 24)]
     bottom = sorted(h.from_base for h in p["Н1-дно"].holes)  # от передней и левой кромок дна
     assert bottom == [(60, 0), (60, 568), (510, 0), (510, 568)]
@@ -307,7 +311,7 @@ def test_base_edges_rule_changes_reference_edges(home, base_door_project):
     edit_construction(
         home, "базовые_кромки: [нижняя, передняя, левая]", "базовые_кромки: [верхняя, задняя, правая]"
     )
-    p = parts_of(api.parts_from_project(base_door_project, home))
+    p = parts_of(api.calculation(project=base_door_project, home=home).parts())
     assert p["Н1-фасад-Л"].base_edges == ["+z", "+x"]
     assert cups(p["Н1-фасад-Л"]) == [(100, 275), (616, 275)]
 
@@ -342,7 +346,7 @@ def test_drilling_keys_are_listed_in_mocks(repo):
 
 def test_drilling_reconciles_holes_with_hardware(home):
     """Карта присадки Петрова: только детали с отверстиями; сверка с фурнитурой этапа 1 сходится."""
-    result = api.drilling_from_project(PETROV, home)
+    result = api.calculation(project=PETROV, home=home).drilling()
     assert all(p.holes for p in result.parts)
     assert len(result.parts) == len({p.id for p in result.parts})
     checks = {c.name: (c.holes, c.expected) for c in result.checks}
@@ -360,22 +364,22 @@ def test_drilling_reconciles_holes_with_hardware(home):
 def test_drilling_refuses_when_holes_do_not_match_hardware(home):
     """Две планки на петлю присадка не размечает: в деталях предупреждение, карта — ошибка сверки."""
     edit_construction(home, "ответные_планки: по одной на петлю", "ответные_планки: по 2 на петлю")
-    parts = api.parts_from_project(PETROV, home)
+    parts = api.calculation(project=PETROV, home=home).parts()
     assert any("ответных планок не размечены" in w for w in parts.warnings)
     with pytest.raises(OrderError, match="ответные планки: отверстий — 0, а нужно 80"):
-        api.drilling_from_project(PETROV, home)
+        api.calculation(project=PETROV, home=home).drilling()
 
 
 def test_plate_holes_are_symmetric_around_cup_height(home, base_door_project):
     """base_door 600: чашки на высоте 2 + 100 = 102 и 2 + 616 = 618 от низа корпуса; отверстия планки — ±16."""
-    p = parts_of(api.parts_from_project(base_door_project, home))
+    p = parts_of(api.calculation(project=base_door_project, home=home).parts())
     zs = sorted(h.center.z for h in p["Н1-бок-Л"].holes if h.purpose == "hinge_plate")
     assert zs == [86, 118, 602, 634]
     assert sorted(h.center.z for h in p["Н1-фасад-Л"].holes) == [102, 618]
 
 
 def test_end_hole_is_in_the_middle_of_thickness_and_face_hole_goes_through(home, base_door_project):
-    p = parts_of(api.parts_from_project(base_door_project, home))
+    p = parts_of(api.calculation(project=base_door_project, home=home).parts())
     ends = [h for h in p["Н1-дно"].holes if h.surface == "end"]
     assert ends and {h.in_thickness for h in ends} == {8}
     assert {h.center.z for h in ends} == {8}  # дно на z=0, толщина 16
@@ -396,22 +400,22 @@ def test_end_hole_is_in_the_middle_of_thickness_and_face_hole_goes_through(home,
 def test_impossible_drilling_is_a_module_error(home, base_door_project, old, new, message):
     edit_construction(home, old, new)
     with pytest.raises(OrderError, match=message):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_tiny_module_holes_clash_is_a_module_error(home, base_door_project):
     """W 100: дно 68 мм, встречные отверстия 40 + 40 мм в торцах сходятся — ошибка модуля (DECISIONS)."""
     path = project_with(base_door_project, {"label": "Н1", "template": "base_door", "width": 100})
     with pytest.raises(OrderError, match="Н1.*Н1-дно.*пересекается"):
-        api.parts_from_project(path, home)
+        api.calculation(project=path, home=home).parts()
 
 
 def test_two_plates_per_hinge_warn_once_and_map_names_the_cause(home):
     edit_construction(home, "ответные_планки: по одной на петлю", "ответные_планки: по 2 на петлю")
-    parts = api.parts_from_project(PETROV, home)
+    parts = api.calculation(project=PETROV, home=home).parts()
     assert len([w for w in parts.warnings if "ответных планок не размечены" in w]) == 1
     with pytest.raises(OrderError, match="Причина: .*планки по 2 на петлю.*не размечает"):
-        api.drilling_from_project(PETROV, home)
+        api.calculation(project=PETROV, home=home).drilling()
 
 
 # Повторное ревью тикета 19: сквозное против глухого и чашка вне фасада — ошибки модуля.
@@ -420,13 +424,13 @@ def test_through_confirmat_and_plate_hole_on_one_axis_clash(home, base_door_proj
     edit_construction(home, "отступ_от_торца: 100", "отступ_от_торца: 22")
     path = project_with(base_door_project, {"label": "Н1", "template": "base_door", "width": 450})
     with pytest.raises(OrderError, match="Н1-бок-Л.*пересекается"):
-        api.parts_from_project(path, home)
+        api.calculation(project=path, home=home).parts()
 
 
 def test_cup_outside_facade_is_a_module_error(home, base_door_project):
     edit_construction(home, "отступ_от_кромки_фасада: 22", "отступ_от_кромки_фасада: 10")
     with pytest.raises(OrderError, match="чашка петли.*выходит за деталь"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_hinge_side_on_wall_corner_is_an_error(home):
@@ -436,4 +440,4 @@ def test_hinge_side_on_wall_corner_is_an_error(home):
     path = home / "petrov.json"
     path.write_text(json.dumps(petrov, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(OrderError, match="В4.*углового.*мест"):
-        api.parts_from_project(path, home)
+        api.calculation(project=path, home=home).parts()

@@ -16,7 +16,7 @@ def write_petrov(home, data):
 
 
 def test_own_height_of_tall_sets_top_of_uppers(home):
-    result = api.placement_from_project(write_petrov(home, petrov(П1={"height": 2300})), home)
+    result = api.calculation(project=write_petrov(home, petrov(П1={"height": 2300})), home=home).placement()
     assert result.top_of_uppers == 2400
     assert box(result, "П1")[1][2] == 2400
     assert {box(result, m.label)[1][2] for m in result.modules if m.row == "upper"} == {2400}
@@ -66,7 +66,7 @@ def test_tall_above_the_ceiling_is_the_placement_error(home):
 
 
 def test_petrov_has_no_placement_finding(home):
-    result = api.placement_from_project(PETROV, home)
+    result = api.calculation(project=PETROV, home=home).placement()
     assert result.top_of_uppers == 2200
     assert result.findings == []
 

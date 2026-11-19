@@ -47,7 +47,7 @@ def one_module_project(home, template, width=None, **extra):
 
 def test_petrov_has_18_handles(home):
     """Проверка 1: число ручек Петрова; детали Петрова держат эталоны и `test_petrov.py`."""
-    parts = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    parts = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     assert parts.hardware["handle_profile"] == 18
 
 
@@ -63,7 +63,7 @@ def test_handles_equal_facades_times_per_unit(home, template, width, extra, per_
     """Проверка 3."""
     if per_unit == 2:
         _edit_workshop(home, "construction.yaml", "ручки: по одной на фасад", "ручки: по 2 на фасад")
-    parts = api.parts_from_project(one_module_project(home, template, width, **extra), home)
+    parts = api.calculation(project=one_module_project(home, template, width, **extra), home=home).parts()
     module = parts.modules[0]
     facades = sum(p.area_m2 is not None for p in module.parts)
     assert facades > 0
@@ -81,7 +81,7 @@ def test_handles_equal_facades_times_per_unit(home, template, width, extra, per_
 )
 def test_handles_per_template_are_concrete_numbers(home, template, width, extra, handles):
     """Проверка 3, числа по шаблонам (тикет 65): не пересчёт того же правила."""
-    parts = api.parts_from_project(one_module_project(home, template, width, **extra), home)
+    parts = api.calculation(project=one_module_project(home, template, width, **extra), home=home).parts()
     assert parts.modules[0].hardware["handle_profile"] == handles
 
 
@@ -92,7 +92,9 @@ def test_handles_registry_is_covered():
 
 def test_module_without_facades_has_no_handle_key(home):
     """Проверка 5."""
-    parts = api.parts_from_project(one_module_project(home, "base_door", 600, contents={"doors": 0}), home)
+    parts = api.calculation(
+        project=one_module_project(home, "base_door", 600, contents={"doors": 0}), home=home
+    ).parts()
     module = parts.modules[0]
     assert not any(p.area_m2 is not None for p in module.parts)
     assert "handle_profile" not in module.hardware

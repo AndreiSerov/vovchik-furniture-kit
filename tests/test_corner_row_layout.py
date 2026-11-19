@@ -14,13 +14,13 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 def test_start_offset_keeps_petrov_sums_and_lengths(home):
-    result = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     assert [f for f in result.findings if f.code == "row_sum"] == []
     common = {c.kind: c.length_mm for c in result.common}
     # руками (тикет 11, 32): нижний фронт 2800 + 1200 − 600 = 3400, верхние 2200 + 1200 = 3400, столешница 3400
     assert (common["plinth"], common["rail"], common["countertop"]) == (3400, 3400, 3400)
     # тот же ряд в расстановке: Б нижний — с 600, верхний — с 336
-    placed = api.placement_from_project(FIXTURES / "petrov_project.json", home)
+    placed = api.calculation(project=FIXTURES / "petrov_project.json", home=home).placement()
     starts = {(m.wall, m.row): m.x for m in placed.modules if m.label in ("Н5", "В5")}
     assert starts == {("Б", "lower"): 600, ("Б", "upper"): 600}
     assert [(g.label, g.x) for g in placed.gaps] == [("ПМ1", 336)]
@@ -48,9 +48,9 @@ def test_tall_of_other_row_after_start_offset_stands_after_its_row_neighbour(hom
         ]},
     ]  # fmt: skip
     path = write(home, walls)
-    findings = api.check_project(path, home).findings
+    findings = api.calculation(project=path, home=home).check().findings
     assert [f for f in findings if f.code in ("row_sum", "tall_overlap")] == []
-    at = {m.label: m.x for m in api.placement_from_project(path, home).modules}
+    at = {m.label: m.x for m in api.calculation(project=path, home=home).placement().modules}
     assert (at["Н5"], at["П1"], at["Н6"]) == (600, 1200, 1800)
 
 
@@ -138,9 +138,9 @@ def test_fuzz_sums_and_positions_match_hand_layout(home):
     for trial in range(60):
         walls, expected, holder = build_case(rnd)
         path = write(home, walls)
-        findings = api.check_project(path, home).findings
+        findings = api.calculation(project=path, home=home).check().findings
         assert [f.message for f in findings if f.code in ("row_sum", "tall_overlap")] == [], (trial, walls)
-        placed = api.placement_from_project(path, home)
+        placed = api.calculation(project=path, home=home).placement()
         assert {m.label: (m.wall, m.x) for m in placed.modules} == expected, (trial, json.dumps(walls))
         # ряд без углового модуля доходит до угла на обеих стенах — модули сходятся в углу
         codes = {f.code for f in placed.findings}

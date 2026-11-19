@@ -61,11 +61,11 @@ def wall_3700(lower_gap=True, upper_gap=True):
 
 
 def common(home, path):
-    return {c.kind: c for c in api.parts_from_project(path, home).common}
+    return {c.kind: c for c in api.calculation(project=path, home=home).parts().common}
 
 
 def codes(home, path):
-    return {f.code for f in api.check_project(path, home).findings}
+    return {f.code for f in api.calculation(project=path, home=home).check().findings}
 
 
 # --- схема ---------------------------------------------------------------------
@@ -73,7 +73,7 @@ def codes(home, path):
 
 def test_gap_entry_parses_and_is_in_the_row_in_place(home):
     walls = [{"label": "A", "length": 1200, "rows": [lower(base("Н1"), gap("ПМ1"))]}]
-    quote = api.quote_from_project(write(home, walls), 14, home)
+    quote = api.calculation(project=write(home, walls), home=home).quote(14)
     assert [(m.label, m.row) for m in quote.modules] == [("Н1", "lower"), ("ПМ1", "lower")]
 
 
@@ -96,15 +96,15 @@ def test_gap_entry_parses_and_is_in_the_row_in_place(home):
 def test_gap_schema_rejects(home, entry):
     walls = [{"label": "A", "length": 600, "rows": [lower(entry)]}]
     with pytest.raises(OrderError):
-        api.check_project(write(home, walls), home)
+        api.calculation(project=write(home, walls), home=home).check()
 
 
 def test_fractional_gap_width_is_the_whole_millimetres_error(home):
     path = write(home, [{"label": "A", "length": 1200, "rows": [lower(base("Н1"), gap("ПМ1", 600.5))]}])
-    [f] = [f for f in api.check_project(path, home).findings if "целое" in f.message]
+    [f] = [f for f in api.calculation(project=path, home=home).check().findings if "целое" in f.message]
     assert "ПМ1" in f.message and "600.5" in f.message
     with pytest.raises(OrderError, match="целое число миллиметров"):
-        api.parts_from_project(path, home)
+        api.calculation(project=path, home=home).parts()
 
 
 # --- сумма ряда -----------------------------------------------------------------
@@ -114,7 +114,7 @@ def test_row_sum_counts_gap_and_message_names_gaps(home):
     assert "row_sum" not in codes(home, write(home, wall_3700()))
     walls = wall_3700()
     walls[0]["length"] = 3800
-    found = api.check_project(write(home, walls), home).findings
+    found = api.calculation(project=write(home, walls), home=home).check().findings
     messages = sorted(f.message for f in found if f.code == "row_sum")
     tail = "занимает 3700 мм (модули, пустые места, угловые смещения, пенал), "
     tail += "а длина стены 3800 мм: разница 100 мм (допуск 0 мм)."
@@ -206,15 +206,15 @@ def test_tall_of_other_row_after_gap_is_placed_and_row_sum_holds(home):
 
 def test_gap_is_skipped_by_every_walk(home):
     path = write(home, wall_3700(), led=True)
-    parts = api.parts_from_project(path, home)
+    parts = api.calculation(project=path, home=home).parts()
     assert {m.module for m in parts.modules} == {"Н1", "Н2", "Н3", "Н4", "Н5", "В1", "В2", "В3", "В4", "В5"}
-    api.cut_from_project(path, home)
-    api.drilling_from_project(path, home)
-    assert "ПМ1" not in {m.label for m in api.assembly_from_project(path, home).modules}
-    estimate = api.estimate_from_project(path, home)
+    api.calculation(project=path, home=home).cut()
+    api.calculation(project=path, home=home).drilling()
+    assert "ПМ1" not in {m.label for m in api.calculation(project=path, home=home).assembly().modules}
+    estimate = api.calculation(project=path, home=home).estimate()
     install = next(line for line in estimate.labor.lines if line.operation == "install")
     assert install.quantity == 10
-    quote = api.quote_from_project(path, 14, home)
+    quote = api.calculation(project=path, home=home).quote(14)
     assert [m.text for m in quote.modules if m.label in ("ПМ1", "ПМ2")] == [
         "пустое место, 600 мм",
         "пустое место, 600 мм",
@@ -227,7 +227,7 @@ def test_corner_next_to_gap_is_first_with_blind_part_on_the_left(home):
         {"label": "A", "length": 1650, "rows": [lower(corner, gap("ПМ1"))]},
         {"label": "Б", "length": 1200, "rows": [lower(base("Н5"), base("Н6"))]},
     ]
-    parts = api.parts_from_project(write(home, walls), home)
+    parts = api.calculation(project=write(home, walls), home=home).parts()
     corner_parts = next(m.parts for m in parts.modules if m.module == "Н4")
     filler = next(p for p in corner_parts if p.name == "заглушка")
     facade = next(p for p in corner_parts if p.name == "фасад")
@@ -238,10 +238,10 @@ def test_economy_purchase_and_cutting_skip_gaps(home):
     path = write(home, wall_3700(), led=True)
     api.order_new(ORDER)
     api.import_project("petrov", path, home=home)
-    assert api.estimate_from_order("petrov", home, economy=True).price > 0
-    purchase = api.purchase_from_order("petrov", home)
+    assert api.calculation(order="petrov", home=home).estimate(economy=True).price > 0
+    purchase = api.calculation(order="petrov", home=home).purchase()
     assert purchase.total > 0
-    cut = api.cut_from_order("petrov", home)
+    cut = api.calculation(order="petrov", home=home).cut()
     assert all("ПМ" not in str(piece) for piece in cut.materials)
 
 
@@ -257,7 +257,7 @@ def test_gap_width_600_and_600_point_0_make_no_new_version(home):
 def test_schema_error_names_the_key_as_written_in_the_file(home):
     walls = [{"label": "A", "length": 600, "rows": [lower(base("Н1", 0)), upper(gap("ПМ2", 0))]}]
     with pytest.raises(OrderError) as e:
-        api.check_project(write(home, walls), home)
+        api.calculation(project=write(home, walls), home=home).check()
     assert "«walls[0].rows[0].modules[0].width»" in str(e.value)
     assert "«walls[0].rows[1].modules[0].width»" in str(e.value)
 
@@ -265,12 +265,17 @@ def test_schema_error_names_the_key_as_written_in_the_file(home):
 def test_schema_error_keeps_module_key_outside_row_entries(home):
     walls = [{"label": "A", "length": 600, "rows": [lower(base("Н1"))]}]
     with pytest.raises(OrderError) as e:
-        api.check_project(write(home, walls, appliances=[{"type": "oven", "width": 600}]), home)
+        api.calculation(
+            project=write(home, walls, appliances=[{"type": "oven", "width": 600}]), home=home
+        ).check()
     assert "«appliances[0].module»" in str(e.value)
 
 
 def test_cut_json_has_no_gaps_mm(home):
-    assert '"gaps_mm"' not in api.cut_from_project(write(home, wall_3700()), home).model_dump_json()
+    assert (
+        '"gaps_mm"'
+        not in api.calculation(project=write(home, wall_3700()), home=home).cut().model_dump_json()
+    )
 
 
 # --- тикет 51: отметка «под столешницей» у пустого места верхнего ряда ----------
@@ -293,14 +298,14 @@ def test_upper_gap_under_countertop_is_one_warning_and_the_project_is_accepted(h
         }
     ]
     path = write(home, walls)
-    result = api.check_project(path, home)
+    result = api.calculation(project=path, home=home).check()
     [found] = [f for f in result.findings if f.code == "gap_upper_countertop"]
     assert (found.level, found.subject, found.message) == ("warning", "ПМ1", UPPER_COUNTERTOP)
     assert result.errors == []
     assert common(home, path)["countertop"].length_mm == 1200
     api.order_new(ORDER)
     assert api.import_project("petrov", path, home=home).version == 1
-    parts = api.parts_from_project(path, home)
+    parts = api.calculation(project=path, home=home).parts()
     assert UPPER_COUNTERTOP in {f.message for f in parts.findings}
 
 
@@ -322,7 +327,7 @@ def test_lower_gap_under_countertop_and_plain_upper_gap_give_no_such_finding(hom
 
 
 def views_of(home, walls):
-    return api.views_from_project(write(home, walls), home)
+    return api.calculation(project=write(home, walls), home=home).views()
 
 
 def gap_of(result, label):

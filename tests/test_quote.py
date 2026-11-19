@@ -107,8 +107,8 @@ def petrov(tmp_path_factory):
     home = workshop_home(tmp_path_factory, "quote-petrov")
     api.brief_save(ORDER, BRIEF, home)
     api.import_project(ORDER, PETROV, home=home)
-    result = api.quote_and_save(ORDER, 35, home)
-    return result, api.estimate_from_order(ORDER, home), pdf_text(result.outputs[0].file)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.quote(35))[0]
+    return result, api.calculation(order=ORDER, home=home).estimate(), pdf_text(result.outputs[0].file)
 
 
 @pytest.fixture(scope="module")
@@ -117,9 +117,9 @@ def small_economy(tmp_path_factory):
     home = workshop_home(tmp_path_factory, "quote-small-economy")
     import_order(home)
     before = versions_of(home)
-    result = api.quote_and_save(SMALL_ORDER, 20, home, economy=True)
+    result = api.save(calc := api.calculation(order=SMALL_ORDER, home=home), calc.quote(20, economy=True))[0]
     after = versions_of(home)
-    estimate = api.estimate_from_order(SMALL_ORDER, home, economy=True)
+    estimate = api.calculation(order=SMALL_ORDER, home=home).estimate(economy=True)
     return home, result, estimate, before, after
 
 
@@ -137,7 +137,7 @@ def test_total_equals_estimate_price_and_prepayment_follows_formula(petrov):
 def test_prepayment_override_changes_both_figures(tmp_path):
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
     edit(tmp_path, "pricing.yaml", "предоплата: 0.5", "предоплата: 0.3")
-    quote = api.quote_from_project(write_project(tmp_path, SMALL), 35, tmp_path)
+    quote = api.calculation(project=write_project(tmp_path, SMALL), home=tmp_path).quote(35)
     assert quote.price == SMALL_PRICE
     assert quote.prepayment == SMALL_PRICE * 3 // 10 and quote.balance == SMALL_PRICE - SMALL_PRICE * 3 // 10
 
@@ -145,7 +145,7 @@ def test_prepayment_override_changes_both_figures(tmp_path):
 def test_prepayment_is_whole_rubles_and_balance_is_the_rest(tmp_path):
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
     edit(tmp_path, "pricing.yaml", "предоплата: 0.5", "предоплата: 0.3333")
-    quote = api.quote_from_project(write_project(tmp_path, SMALL), 35, tmp_path)
+    quote = api.calculation(project=write_project(tmp_path, SMALL), home=tmp_path).quote(35)
     expected = int(Decimal(SMALL_PRICE) * Decimal("0.3333") + Decimal("0.5"))  # до рубля, от половины вверх
     assert quote.prepayment == expected and quote.balance == SMALL_PRICE - expected
 
@@ -162,7 +162,7 @@ def test_prepayment_above_one_is_a_load_error(home):
 @pytest.mark.parametrize("days", [None, 0, -1, 366, 2.5, True, "35"])
 def test_bad_days_is_a_russian_error(home, days):
     with pytest.raises(InputError) as e:
-        api.quote_from_project(PETROV, days, home)
+        api.calculation(project=PETROV, home=home).quote(days)
     assert "--days" in "".join(e.value.problems) and "рабочих дней" in "".join(e.value.problems)
 
 
@@ -282,7 +282,7 @@ def test_no_hardware_brands_in_composition(petrov):
 
 def test_small_project_composition_is_exact_and_lift_front_is_not_a_door(tmp_path):
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
-    quote = api.quote_from_project(write_project(tmp_path, SMALL), 20, tmp_path)
+    quote = api.calculation(project=write_project(tmp_path, SMALL), home=tmp_path).quote(20)
     assert [(m.label, m.text) for m in quote.modules] == [
         ("Н1", "нижний модуль с тремя ящиками, 600 мм"),
         ("Н2", "модуль под мойку с двумя дверями и выдвижным ведром, 750 мм; техника: мойка"),
@@ -308,7 +308,7 @@ def test_no_banner_when_all_nine_files_are_real(home):
             path.read_text(encoding="utf-8").replace("mock: true", "mock: false"), encoding="utf-8"
         )
     import_order(home)
-    quote = api.quote_and_save(SMALL_ORDER, 20, home)
+    quote = api.save(calc := api.calculation(order=SMALL_ORDER, home=home), calc.quote(20))[0]
     assert not quote.mock and quote.warning is None
     assert MOCK_BANNER not in pdf_text(quote.outputs[0].file)
     assert MOCK_BANNER not in Path(quote.outputs[1].file).read_text(encoding="utf-8")
@@ -327,7 +327,7 @@ def test_master_file_alone_keeps_the_banner(home):
     ):
         edit(home, f"{name}.yaml", "mock: true", "mock: false")
     import_order(home)
-    quote = api.quote_and_save(SMALL_ORDER, 20, home)
+    quote = api.save(calc := api.calculation(order=SMALL_ORDER, home=home), calc.quote(20))[0]
     assert quote.mock_files == ["master.yaml"] and quote.warning == MOCK_BANNER
     assert MOCK_BANNER in pdf_text(quote.outputs[0].file)
 
@@ -371,7 +371,7 @@ def test_economy_does_not_change_project_versions(small_economy):
 
 def test_quote_without_economy_has_no_economy_section(tmp_path):
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
-    quote = api.quote_from_project(write_project(tmp_path, SMALL), 20, tmp_path)
+    quote = api.calculation(project=write_project(tmp_path, SMALL), home=tmp_path).quote(20)
     assert quote.economy is None and "economy" not in json.loads(quote.model_dump_json())
 
 
@@ -380,11 +380,11 @@ def test_quote_without_economy_has_no_economy_section(tmp_path):
 
 def test_outputs_are_registered_replaced_and_marked_stale(home):
     import_order(home)
-    first = api.quote_and_save(SMALL_ORDER, 20, home)
+    first = api.save(calc := api.calculation(order=SMALL_ORDER, home=home), calc.quote(20))[0]
     pdf, js = (Path(o.file) for o in first.outputs)
     assert pdf.name == "quote.pdf" and js.name == "quote.json" and pdf.parent.name == "out"
     assert json.loads(js.read_text(encoding="utf-8"))["price"] == first.price
-    api.quote_and_save(SMALL_ORDER, 45, home)
+    api.save(calc := api.calculation(order=SMALL_ORDER, home=home), calc.quote(45))[0]
     assert "45 рабочих дней" in pdf_text(pdf) and json.loads(js.read_text(encoding="utf-8"))["days"] == 45
     kinds = [o.kind for o in api.list_outputs(SMALL_ORDER, home)]
     assert sorted(kinds) == ["quote_json", "quote_pdf"]  # повтор заменил записи, а не добавил
@@ -398,13 +398,13 @@ def test_outputs_are_registered_replaced_and_marked_stale(home):
 def test_quote_of_order_without_project_version_is_a_clear_error(home):
     api.order_new(SMALL_ORDER, client="Сидоров", home=home)
     with pytest.raises(OrderError) as e:
-        api.quote_and_save(SMALL_ORDER, 20, home)
+        api.save(calc := api.calculation(order=SMALL_ORDER, home=home), calc.quote(20))[0]
     assert "проекта ещё нет" in "".join(e.value.problems)
 
 
 def test_project_file_writes_nothing(tmp_path):
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
-    api.quote_from_project(write_project(tmp_path, SMALL), 20, tmp_path)
+    api.calculation(project=write_project(tmp_path, SMALL), home=tmp_path).quote(20)
     assert not (tmp_path / "orders").exists()
 
 
@@ -416,7 +416,7 @@ def test_cli_json_is_the_api_model_and_text_has_the_total(home):
     result = runner.invoke(app, ["quote", "sidorov", "--days", "20", "--json"])
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
-    expected = api.quote_from_order(SMALL_ORDER, 20, home)
+    expected = api.calculation(order=SMALL_ORDER, home=home).quote(20)
     assert data == json.loads(expected.model_copy(update={"outputs": []}).model_dump_json()) | {
         "outputs": data["outputs"]
     }
@@ -472,7 +472,7 @@ def small_quote(tmp_path, project=SMALL, days=20, **edits):
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
     for name, (old, new) in edits.items():
         edit(tmp_path, name, old, new)
-    return api.quote_from_project(write_project(tmp_path, project), days, tmp_path)
+    return api.calculation(project=write_project(tmp_path, project), home=tmp_path).quote(days)
 
 
 @pytest.mark.parametrize(
@@ -494,7 +494,7 @@ def test_days_are_declined(count, words):
 def test_days_and_offer_days_are_declined_in_pdf(home):
     edit(home, "master.yaml", "срок_действия_предложения_дней: 14", "срок_действия_предложения_дней: 21")
     import_order(home)
-    quote = api.quote_and_save(SMALL_ORDER, 21, home)
+    quote = api.save(calc := api.calculation(order=SMALL_ORDER, home=home), calc.quote(21))[0]
     text = pdf_text(quote.outputs[0].file)
     assert "Срок изготовления и монтажа: 21 рабочий день" in text
     assert "Предложение действует 21 день" in text
@@ -515,7 +515,9 @@ def test_master_details_come_from_master_yaml(home):
     edit(home, "master.yaml", "000000000000", "123456789012")
     edit(home, "master.yaml", "срок_действия_предложения_дней: 14", "срок_действия_предложения_дней: 30")
     import_order(home)
-    text = pdf_text(api.quote_and_save(SMALL_ORDER, 20, home).outputs[0].file)
+    text = pdf_text(
+        api.save(calc := api.calculation(order=SMALL_ORDER, home=home), calc.quote(20))[0].outputs[0].file
+    )
     for expected in (
         "Другой Мастер Иванович",
         "+7 (111) 111-11-11",
@@ -608,7 +610,7 @@ def test_module_override_lists_all_values_with_labels(tmp_path):
 
 def test_body_override_lists_values_with_labels_and_pdf_prints_them(home):
     import_order(home, with_materials(**{"row_lower:0": {"body": "ldsp_16_oak"}}))
-    quote = api.quote_and_save(SMALL_ORDER, 20, home)
+    quote = api.save(calc := api.calculation(order=SMALL_ORDER, home=home), calc.quote(20))[0]
     assert quote.body.startswith("ЛДСП Egger 16 мм, дуб Галифакс H1180 (Н1), ЛДСП Egger 16 мм, белый")
     assert "Корпус: " + quote.body in pdf_text(quote.outputs[0].file)
 
@@ -630,7 +632,7 @@ def test_group_without_modules_is_not_printed(home):
     project = with_materials()
     project["walls"][0]["rows"] = project["walls"][0]["rows"][:1]
     import_order(home, project)
-    quote = api.quote_and_save(SMALL_ORDER, 20, home)
+    quote = api.save(calc := api.calculation(order=SMALL_ORDER, home=home), calc.quote(20))[0]
     text = pdf_text(quote.outputs[0].file)
     assert quote.facades_upper is None and "Фасады верхние" not in text and "Фасады нижние" in text
 
@@ -644,7 +646,7 @@ def test_economy_without_replacements_says_so(tmp_path):
     project = copy.deepcopy(BASE_DOOR_PROJECT)
     project["order"] = SMALL_ORDER
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
-    quote = api.quote_from_project(write_project(tmp_path, project), 20, tmp_path, economy=True)
+    quote = api.calculation(project=write_project(tmp_path, project), home=tmp_path).quote(20, economy=True)
     assert quote.economy.replacements == [] and quote.economy.price == quote.price
 
 
@@ -663,8 +665,8 @@ def test_countertop_in_quote_is_the_priced_countertop_not_an_override(tmp_path):
     """КП берёт столешницу из `common.size_countertop`, как цена, раскрой и закупка."""
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
     path = write_project(tmp_path, with_materials())
-    quote = api.quote_from_project(path, 20, tmp_path)
-    assert quote.countertop == api.cut_from_project(path, tmp_path).countertop.name
+    quote = api.calculation(project=path, home=tmp_path).quote(20)
+    assert quote.countertop == api.calculation(project=path, home=tmp_path).cut().countertop.name
     assert quote.countertop == "Столешница Egger 38 мм, мрамор Леванто"
 
 
@@ -868,11 +870,11 @@ def broken_draft(tmp_path):
 
 def test_quote_project_with_check_errors_warns_like_estimate(broken_draft):
     path, home = broken_draft
-    errors = [f.message for f in api.check_project(path, home).errors]
+    errors = [f.message for f in api.calculation(project=path, home=home).check().errors]
     assert errors
     for warnings in (
-        api.estimate_from_project(path, home).warnings,
-        api.quote_from_project(path, 20, home).warnings,
+        api.calculation(project=path, home=home).estimate().warnings,
+        api.calculation(project=path, home=home).quote(20).warnings,
     ):
         for message in errors:
             assert any(message in w for w in warnings), (message, warnings)
@@ -888,12 +890,12 @@ def test_cli_quote_project_prints_the_check_warning(broken_draft, monkeypatch):
 def test_valid_draft_has_no_check_warning(tmp_path):
     shutil.copytree(REPO / "workshop", tmp_path / "workshop")
     path = write_project(tmp_path, SMALL)
-    assert not [w for w in api.quote_from_project(path, 20, tmp_path).warnings if "проверк" in w]
+    assert not [w for w in api.calculation(project=path, home=tmp_path).quote(20).warnings if "проверк" in w]
 
 
 def test_quote_json_and_pdf_carry_no_check_warnings(home):
     import_order(home)
-    quote = api.quote_and_save(SMALL_ORDER, 20, home)
+    quote = api.save(calc := api.calculation(order=SMALL_ORDER, home=home), calc.quote(20))[0]
     assert "warnings" not in json.loads(Path(quote.outputs[1].file).read_text(encoding="utf-8"))
 
 
@@ -932,10 +934,14 @@ def test_project_schema_has_no_countertop_at_row_or_module():
 @pytest.mark.parametrize("where", ["row_lower:row", "row_lower:1", "row_upper:row"])
 def test_countertop_override_is_a_check_finding_and_reaches_parts(home, where):
     path = write_project(home, with_materials(**{where: {"countertop": "top_38_marble"}}), "override.json")
-    finding = [f for f in api.check_project(path, home).errors if f.code == "countertop_override"]
+    finding = [
+        f for f in api.calculation(project=path, home=home).check().errors if f.code == "countertop_override"
+    ]
     assert len(finding) == 1 and "только для всего проекта" in finding[0].message
     assert [
-        f.code for f in api.parts_from_project(path, home).findings if f.code == "countertop_override"
+        f.code
+        for f in api.calculation(project=path, home=home).parts().findings
+        if f.code == "countertop_override"
     ] == ["countertop_override"]
 
 

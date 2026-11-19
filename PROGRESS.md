@@ -99,6 +99,21 @@
 - [x] 64 — Чек-лист выезда: этаж и лифт отдельными полями ([спека](docs/specs/stage-8-backlog.md))
 - [x] 65 — Уборка этапа 8 ([спека](docs/specs/stage-8-backlog.md))
 
+## Этап 9. Расчёт одним модулем
+
+Четыре проверки готовности пройдены (2026-11-18, 2026-11-19), замечания внесены; тикеты готовы к сборке по порядку этого списка (решение мастера 2026-11-19: без пятой проверки). Ветка `stage-9`.
+
+- [x] 66 — Снимок выводов до рефакторинга ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 67 — Слои движка под import-linter ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 68 — Штамп PDF и HTML 3D ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 69 — Перенос в `kitchen.calculation` ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 70 — Расчёт и методы-выводы ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 71 — `save`, таблица сохранения, `production` ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 72 — CLI на расчёте ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 73 — Тесты на расчёте, часть 1 ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 74 — Тесты на расчёте, часть 2 ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 75 — Удаление старой формы и снимка, уборка этапа ([спека](docs/specs/stage-9-api-calculation.md))
+
 ## Бэклог (после MVP)
 
 Решение 2026-11-15: MVP — от брифа до документов цеха и КП, с упрощённым 3D. Остальное ждёт здесь.

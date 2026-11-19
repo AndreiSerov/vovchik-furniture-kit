@@ -19,7 +19,9 @@ def test_purchase_cli_matches_api_and_shows_items(home):
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
     result = runner.invoke(app, ["purchase", "petrov", "--json"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == json.loads(api.purchase_and_save("petrov", home).model_dump_json())
+    assert json.loads(result.output) == json.loads(
+        api.save(calc := api.calculation(order="petrov", home=home), calc.purchase())[0].model_dump_json()
+    )
     text = runner.invoke(app, ["purchase", "petrov"])
     assert text.exit_code == 0, text.output
     lines = text.output.strip().splitlines()
@@ -35,7 +37,9 @@ def test_production_cli_matches_api_and_shows_outputs(home):
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
     result = runner.invoke(app, ["production", "petrov", "--json"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output) == json.loads(api.production_and_save("petrov", home).model_dump_json())
+    assert json.loads(result.output) == json.loads(
+        api.production(api.calculation(order="petrov", home=home)).model_dump_json()
+    )
     text = runner.invoke(app, ["production", "petrov"])
     assert text.exit_code == 0, text.output
     lines = text.output.strip().splitlines()

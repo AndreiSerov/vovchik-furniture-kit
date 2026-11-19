@@ -1,6 +1,6 @@
 """Тикет 42: 3D в HTML (`kitchen 3d` пишет рядом с PDF видов `kitchen-3d.html`).
 
-Логика — через API (`api.views_and_save`, `api.views_from_order`, `api.views_from_project`); HTML разбирает
+Логика — через API (`api.calculation(...).views()`, `api.save`); HTML разбирает
 `html.parser`, встроенный JSON — `json`. Работу скрипта в браузере проверяет `tests/test_views_js.py` (node)."""
 
 import json
@@ -58,7 +58,7 @@ class Page(HTMLParser):
 
 
 def html_of(home, **kw):
-    result = api.views_and_save(ORDER, home, **kw)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.views(), **kw)[0]
     path = Path(result.output_html.file)
     return result, path.read_text(encoding="utf-8"), Page(path.read_text(encoding="utf-8"))
 
@@ -84,7 +84,7 @@ def test_embedded_json_has_every_module_label_with_its_dimensions(home):
     scene = embedded(page)
     labels = [label for ms in petrov_labels().values() for label in ms]
     assert sorted({m["label"] for m in scene["modules"]}) == sorted(set(labels))  # П1 — один раз
-    placed = api.placement_from_order(ORDER, home)
+    placed = api.calculation(order=ORDER, home=home).placement()
     boxes = {m.label: m for m in placed.modules}
     by_label = {m["label"]: m for m in scene["modules"]}
     for label, place in boxes.items():
@@ -157,7 +157,7 @@ def test_fallback_text_is_present_for_when_3d_does_not_start(home):
 def test_captions_are_the_composition_lines_of_the_quote(home):
     petrov_order(home)
     scene = embedded(html_of(home)[2])
-    quote = api.quote_from_order(ORDER, 35, home)
+    quote = api.calculation(order=ORDER, home=home).quote(35)
     lines = {m.label: m.text for m in quote.modules}
     captions = {m["label"]: m["caption"] for m in scene["modules"]}
     assert set(captions) == set(lines)
@@ -174,7 +174,7 @@ def test_gap_with_an_appliance_is_named_by_it(home):
     data["appliances"].append({"type": "fridge", "width": 600, "height": 1800, "depth": 600, "module": "ПМ1"})
     path = home / "p.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    scene = api.views_from_project(path, home).scene3d
+    scene = api.calculation(project=path, home=home).views().scene3d
     assert {m.label: m.caption for m in scene.modules}["ПМ1"] == "ПМ1 — место под холодильник, 264 мм"
 
 
@@ -230,7 +230,7 @@ def test_placement_error_refuses_and_writes_no_html(home):
     path.write_text(json.dumps(petrov(П1={"height": 2700}), ensure_ascii=False), encoding="utf-8")
     api.import_project(ORDER, path, home=home)
     with pytest.raises(OrderError) as e:
-        api.views_and_save(ORDER, home)
+        api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0]
     assert "Верх верхних модулей 2800 мм выше потолка 2700 мм." in e.value.problems
     assert not (home / "orders" / ORDER / "out" / "kitchen-3d.html").exists()
 
@@ -243,13 +243,13 @@ def test_walls_without_a_corner_module_refuse(home):
         json.dumps(petrov(Н4={"corner": None}, В4={"corner": None}), ensure_ascii=False), encoding="utf-8"
     )
     with pytest.raises(OrderError) as e:
-        api.views_from_project(path, home)
+        api.calculation(project=path, home=home).views()
     assert e.value.problems[0].startswith("Стены A и Б не соединены угловым модулем")
 
 
 def test_both_outputs_are_registered_and_stale_after_new_version(home):
     petrov_order(home)
-    api.views_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0]
     outputs = {o.kind: o for o in api.list_outputs(ORDER, home) if o.kind in {"views", "views_html"}}
     assert outputs["views"].path == f"orders/{ORDER}/out/kitchen-views.pdf"
     assert outputs["views_html"].path == f"orders/{ORDER}/out/kitchen-3d.html"
@@ -258,14 +258,14 @@ def test_both_outputs_are_registered_and_stale_after_new_version(home):
     stale = {s.kind: s for s in api.status(ORDER, home).stale if s.kind in {"views", "views_html"}}
     assert set(stale) == {"views", "views_html"}
     assert {s.command for s in stale.values()} == {f"kitchen 3d {ORDER}"}
-    api.views_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.views())[0]
     assert not [s for s in api.status(ORDER, home).stale if s.kind.startswith("views")]
 
 
 def test_project_mode_writes_no_files_and_carries_the_scene(home):
     path = home / "p.json"
     path.write_text(PETROV.read_text(encoding="utf-8"), encoding="utf-8")
-    result = api.views_from_project(path, home)
+    result = api.calculation(project=path, home=home).views()
     assert result.output is None and result.output_html is None
     assert result.scene3d.modules and not (home / "orders").exists()
     data = json.loads(runner.invoke(app, ["3d", "--project", str(path), "--json"]).output)
@@ -284,9 +284,9 @@ def test_cli_prints_the_3d_line_after_the_pdf_line(home):
 def test_html_is_deterministic_for_one_date(home):
 
     petrov_order(home)
-    a = api.views_and_save(ORDER, home, on=date(2026, 11, 16))
+    a = api.save(calc := api.calculation(order=ORDER, home=home), calc.views(), on=date(2026, 11, 16))[0]
     first = Path(a.output_html.file).read_bytes()
-    api.views_and_save(ORDER, home, on=date(2026, 11, 16))
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.views(), on=date(2026, 11, 16))[0]
     assert Path(a.output_html.file).read_bytes() == first
 
 
@@ -321,7 +321,7 @@ def test_boxes_are_in_the_facade_colour_and_unknown_colour_is_grey(home):
     data["materials"]["facades_upper_color"] = "сиреневый"
     path = home / "p.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    rgb = {m.label: m.boxes[0].rgb for m in api.views_from_project(path, home).scene3d.modules}
+    rgb = {m.label: m.boxes[0].rgb for m in api.calculation(project=path, home=home).views().scene3d.modules}
     assert rgb["Н1"] == "#CAC4B0"  # RAL 7044
     assert rgb["В2"] == "#B0B0B0"  # нераспознанный — серый
 

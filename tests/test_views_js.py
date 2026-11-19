@@ -39,7 +39,7 @@ def _node_required_in_ci():
 def viewed(tmp_path_factory):
     home = tmp_path_factory.mktemp("home")
     shutil.copytree(REPO / "workshop", home / "workshop")
-    scene = api.views_from_project(PETROV, home)
+    scene = api.calculation(project=PETROV, home=home).views()
     data = home / "scene.json"
     data.write_text(scene.model_dump_json(), encoding="utf-8")
     done = subprocess.run(

@@ -43,7 +43,7 @@ def codes(result):
 # S1. Неизвестный шаблон
 def test_unknown_template_is_a_finding_not_a_keyerror(home):
     path = write(home, lower({"label": "Н1", "template": "foo", "width": 600}), 600)
-    result = api.check_project(path, home)
+    result = api.calculation(project=path, home=home).check()
     assert codes(result) == ["module_build"]
     assert "неизвестный шаблон" in result.errors[0].message
 
@@ -53,7 +53,7 @@ def test_unknown_template_does_not_hide_the_other_modules(home):
         {"label": "Н1", "template": "foo", "width": 600},
         {"label": "Н2", "template": "base_drawers", "width": 600, "depth": 400},
     ]
-    result = api.check_project(write(home, lower(*modules), 1200), home)
+    result = api.calculation(project=write(home, lower(*modules), 1200), home=home).check()
     assert sorted(f.subject for f in result.errors) == ["Н1", "Н2"]
 
 
@@ -92,15 +92,15 @@ def test_schema_template_is_the_registry(repo):
 )
 def test_nonpositive_part_sizes_are_an_error(home, module):
     path = write(home, lower(module), module["width"])
-    result = api.check_project(path, home)
+    result = api.calculation(project=path, home=home).check()
     assert codes(result) == ["module_build"]
     with pytest.raises(KitchenError):
-        api.parts_from_project(path, home)
+        api.calculation(project=path, home=home).parts()
 
 
 def test_nonpositive_part_error_names_part_and_size(home):
     path = write(home, lower({"label": "Н1", "template": "base_door", "width": 30}), 30)
-    message = api.check_project(path, home).errors[0].message
+    message = api.calculation(project=path, home=home).check().errors[0].message
     assert "Н1" in message and "-2" in message
 
 
@@ -110,7 +110,7 @@ def test_schema_rejects_nonpositive_module_size(home, key, value):
     module = {"label": "Н1", "template": "base_door", "width": 600, key: value}
     path = write(home, lower(module), 600)
     with pytest.raises(KitchenError, match="Н1|width|height|depth|больше"):
-        api.check_project(path, home)
+        api.calculation(project=path, home=home).check()
 
 
 def test_schema_rejects_nonpositive_niche(home):
@@ -119,7 +119,7 @@ def test_schema_rejects_nonpositive_niche(home):
     data["appliances"] = [{"type": "oven", "width": 600, "module": "Н1", "niche_height": 0}]
     path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(KitchenError):
-        api.check_project(path, home)
+        api.calculation(project=path, home=home).check()
 
 
 def test_schema_file_has_minimums(repo):
@@ -134,9 +134,9 @@ def test_schema_file_has_minimums(repo):
 def test_negative_legacy_shelves_rejected(home, shelves):
     path = write(home, lower({"label": "Н1", "template": "base_door", "width": 600, "shelves": shelves}), 600)
     with pytest.raises(KitchenError):
-        api.check_project(path, home)
+        api.calculation(project=path, home=home).check()
     with pytest.raises(KitchenError):
-        api.parts_from_project(path, home)
+        api.calculation(project=path, home=home).parts()
 
 
 # Инвариант: количество фурнитуры не меньше нуля
@@ -150,9 +150,9 @@ def test_module_with_negative_hardware_is_a_module_build_error(home, monkeypatch
 
     monkeypatch.setitem(TEMPLATES, "base_door", Template(build, "lower", title="нижний модуль"))
     path = write(home, lower({"label": "Н1", "template": "base_door", "width": 600}), 600)
-    assert codes(api.check_project(path, home)) == ["module_build"]
+    assert codes(api.calculation(project=path, home=home).check()) == ["module_build"]
     with pytest.raises(KitchenError, match="shelf_pin_5"):
-        api.parts_from_project(path, home)
+        api.calculation(project=path, home=home).parts()
 
 
 # S4. Метки
@@ -165,7 +165,7 @@ def test_check_project_reports_duplicate_labels(home):
         ),
         1000,
     )
-    result = api.check_project(path, home)
+    result = api.calculation(project=path, home=home).check()
     assert [f.subject for f in result.errors if f.code == "duplicate_label"] == ["Н1"]
     assert any(f.code == "part_exceeds_sheet" and f.subject.startswith("Н1") for f in result.errors)
 
@@ -175,7 +175,7 @@ def test_tall_written_in_two_rows_is_a_duplicate_label(home):
         {"kind": "lower", "modules": [{"label": "П1", "template": "tall_oven", "width": 600}]},
         {"kind": "upper", "modules": [{"label": "П1", "template": "tall_oven", "width": 600}]},
     ]
-    result = api.check_project(write(home, rows, 600), home)
+    result = api.calculation(project=write(home, rows, 600), home=home).check()
     assert [f.subject for f in result.errors if f.code == "duplicate_label"] == ["П1"]
 
 
@@ -186,7 +186,11 @@ def test_import_rejects_duplicate_labels_with_the_same_finding(home):
         {"label": "Н1", "template": "base_door", "width": 400},
     ]
     path = write(home, lower(*modules), 1000)
-    message = next(f.message for f in api.check_project(path, home).errors if f.code == "duplicate_label")
+    message = next(
+        f.message
+        for f in api.calculation(project=path, home=home).check().errors
+        if f.code == "duplicate_label"
+    )
     with pytest.raises(KitchenError) as e:
         api.import_project("petrov", path, home=home)
     assert message in e.value.problems
@@ -203,16 +207,21 @@ def talls_in_two_rows(home):
 
 def test_two_talls_in_different_rows_fill_both_rows(home):
     path = talls_in_two_rows(home)
-    assert [f for f in api.check_project(path, home).findings if f.code == "row_sum"] == []
-    result = api.parts_from_project(path, home)
+    assert [f for f in api.calculation(project=path, home=home).check().findings if f.code == "row_sum"] == []
+    result = api.calculation(project=path, home=home).parts()
     assert [f for f in result.findings if f.code == "row_sum"] == []
     assert next(c for c in result.common if c.kind == "plinth").length_mm == 1200
 
 
 def test_one_tall_and_two_talls_in_one_row_as_before(home):
     one = write(home, lower({"label": "П1", "template": "tall_oven", "width": 600}), 600)
-    assert [f for f in api.check_project(one, home).findings if f.code == "row_sum"] == []
-    assert next(c for c in api.parts_from_project(one, home).common if c.kind == "plinth").length_mm == 600
+    assert [f for f in api.calculation(project=one, home=home).check().findings if f.code == "row_sum"] == []
+    assert (
+        next(
+            c for c in api.calculation(project=one, home=home).parts().common if c.kind == "plinth"
+        ).length_mm
+        == 600
+    )
     two = write(
         home,
         lower(
@@ -221,8 +230,13 @@ def test_one_tall_and_two_talls_in_one_row_as_before(home):
         ),
         1200,
     )
-    assert [f for f in api.check_project(two, home).findings if f.code == "row_sum"] == []
-    assert next(c for c in api.parts_from_project(two, home).common if c.kind == "plinth").length_mm == 1200
+    assert [f for f in api.calculation(project=two, home=home).check().findings if f.code == "row_sum"] == []
+    assert (
+        next(
+            c for c in api.calculation(project=two, home=home).parts().common if c.kind == "plinth"
+        ).length_mm
+        == 1200
+    )
 
 
 # T1. Ящик Tandembox
@@ -230,7 +244,7 @@ def test_drawer_does_not_fit_has_one_text_for_base_drawers_and_tall(home):
     drawers = write(
         home, lower({"label": "Н1", "template": "base_drawers", "width": 120, "height": 150}), 120
     )
-    base = api.check_project(drawers, home).errors[0].message
+    base = api.calculation(project=drawers, home=home).check().errors[0].message
     assert "ящик не помещается" in base
     assert any(ch.isdigit() for ch in base.split("не помещается", 1)[1])
     # пенал: габариты проекта до ящика не доходят (ниши не вмещаются раньше), низкий фасад ящика — в мастерской
@@ -240,7 +254,7 @@ def test_drawer_does_not_fit_has_one_text_for_base_drawers_and_tall(home):
         encoding="utf-8",
     )
     tall = write(home, lower({"label": "П1", "template": "tall_oven", "width": 600}), 600)
-    tall_message = api.check_project(tall, home).errors[0].message
+    tall_message = api.calculation(project=tall, home=home).check().errors[0].message
     assert "ящик не помещается" in tall_message
     # одна формулировка: после метки текст до «ящик не помещается» совпадает
     shape = lambda text: re.sub(r"\d+", "N", text.split(":", 1)[1])
@@ -272,12 +286,12 @@ def test_grid_of_sizes_gives_error_or_sound_parts(home, template):
         {"label": "A", "length": 1, "rows": [{"kind": row_kind, "modules": modules}]},
         {"label": "Б", "length": 1, "rows": []},
     ]
-    result = api.check_project(write(home, [], 0, walls=walls), home)
+    result = api.calculation(project=write(home, [], 0, walls=walls), home=home).check()
     bad = {f.subject for f in result.errors if f.code != "row_sum"}
     good = [m for m in modules if m["label"] not in bad]
     assert good, f"сетка ни разу не построила {template}"  # иначе сетка про этот шаблон ничего не проверяет
     walls[0]["rows"][0]["modules"] = good
-    parts = api.parts_from_project(write(home, [], 0, walls=walls), home)
+    parts = api.calculation(project=write(home, [], 0, walls=walls), home=home).parts()
     assert {m.module for m in parts.modules} == {m["label"] for m in good}
     for module in parts.modules:
         for p in module.parts:
@@ -307,7 +321,7 @@ def test_countertop_excludes_tall_from_other_row_after_own_tall(home):
     data = json.loads(path.read_text())
     data["materials"]["countertop"] = "top_38_marble"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    result = api.parts_from_project(path, home)
+    result = api.calculation(project=path, home=home).parts()
     assert [f for f in result.findings if f.code == "row_sum"] == []
     top = next(c for c in result.common if c.kind == "countertop")
     assert top.length_mm == 1800, top
@@ -318,12 +332,12 @@ def test_appliance_on_unknown_template_module_is_one_finding(home):
     data = json.loads(path.read_text())
     data["appliances"] = [{"type": "oven", "width": 595, "module": "Н1"}]
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    assert codes(api.check_project(path, home)) == ["module_build"]
+    assert codes(api.calculation(project=path, home=home).check()) == ["module_build"]
 
 
 def depth_codes(home, depth):
     path = write(home, lower({"label": "Н1", "template": "base_drawers", "width": 600, "depth": depth}), 600)
-    return [f for f in api.check_project(path, home).errors]
+    return [f for f in api.calculation(project=path, home=home).check().errors]
 
 
 def test_drawer_depth_is_one_rule_with_the_back_wall(home):
@@ -333,14 +347,14 @@ def test_drawer_depth_is_one_rule_with_the_back_wall(home):
         assert [f.code for f in errors] == ["drawer_depth"], (depth, errors)
         assert "506" in errors[0].message and str(depth) in errors[0].message
         with pytest.raises(KitchenError, match="506"):
-            api.parts_from_project(
-                write(
+            api.calculation(
+                project=write(
                     home,
                     lower({"label": "Н1", "template": "base_drawers", "width": 600, "depth": depth}),
                     600,
                 ),
-                home,
-            )
+                home=home,
+            ).parts()
     assert depth_codes(home, 506) == []
 
 
@@ -351,7 +365,7 @@ def test_labels_equal_after_normalisation_are_duplicates(home, second):
         {"label": "Н1", "template": "base_door", "width": 600},
         {"label": second, "template": "base_door", "width": 600},
     ]
-    result = api.check_project(write(home, lower(*modules), 1200), home)
+    result = api.calculation(project=write(home, lower(*modules), 1200), home=home).check()
     found = [f for f in result.errors if f.code == "duplicate_label"]
     assert len(found) == 1
     assert "«Н1»" in found[0].message and f"«{second}»" in found[0].message
@@ -363,9 +377,13 @@ def test_kitchen_parts_gives_the_duplicate_label_finding_text(home):
         {"label": "Н1", "template": "base_door", "width": 400},
     ]
     path = write(home, lower(*modules), 1000)
-    message = next(f.message for f in api.check_project(path, home).errors if f.code == "duplicate_label")
+    message = next(
+        f.message
+        for f in api.calculation(project=path, home=home).check().errors
+        if f.code == "duplicate_label"
+    )
     with pytest.raises(KitchenError) as e:
-        api.parts_from_project(path, home)
+        api.calculation(project=path, home=home).parts()
     assert message in e.value.problems
     assert "Маркировка" not in str(e.value)
 
@@ -380,7 +398,7 @@ def test_duplicate_label_keeps_dims_of_the_first_module(home):
     data = json.loads(path.read_text())
     data["appliances"] = [{"type": "dishwasher", "width": 450, "module": "Н1"}]
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    assert "niche_too_small" in codes(api.check_project(path, home))
+    assert "niche_too_small" in codes(api.calculation(project=path, home=home).check())
 
 
 # Тикет 35: текст находки глубины ящика и `limit` называют одно число

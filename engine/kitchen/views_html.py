@@ -7,10 +7,10 @@ three.js r147 (`vendor/three/`) и скрипт страницы (`web/viewer.js
 """
 
 import json
-from datetime import date
 from html import escape
 from pathlib import Path
 
+from kitchen.metrics import Stamp
 from kitchen.result import MOCK_BANNER
 from kitchen.scene3d import Scene3D
 from kitchen.views import checks_banner
@@ -58,12 +58,14 @@ def _json(scene: Scene3D) -> str:
     return text
 
 
-def render_html(scene: Scene3D, *, order: str, version: int | None, on: date, mock: bool, errors: int) -> str:
-    version_text = f"версия проекта {version}" if version is not None else "версия проекта не записана"
-    title = escape(f"Кухня {order} · {version_text}")
-    head = escape(f"Заказ {order} · {version_text} · {on.strftime('%d.%m.%Y')}")
+def render_html(scene: Scene3D, *, stamp: Stamp, errors: int) -> str:
+    version_text = (
+        f"версия проекта {stamp.version}" if stamp.version is not None else "версия проекта не записана"
+    )
+    title = escape(f"Кухня {stamp.order} · {version_text}")
+    head = escape(f"Заказ {stamp.order} · {version_text} · {stamp.on.strftime('%d.%m.%Y')}")
     banners = ""
-    if mock:
+    if stamp.mock:
         banners += f'<div id="mock-banner">{escape(MOCK_BANNER)}</div>\n'
     if errors:
         banners += f'<div id="errors-banner">{escape(checks_banner(errors))}</div>\n'
@@ -104,9 +106,5 @@ KitchenViewer.start(THREE, JSON.parse(document.getElementById("scene-data").text
 """
 
 
-def write_html(
-    path: Path, scene: Scene3D, *, order: str, version: int | None, on: date, mock: bool, errors: int
-) -> None:
-    path.write_text(
-        render_html(scene, order=order, version=version, on=on, mock=mock, errors=errors), encoding="utf-8"
-    )
+def write_html(path: Path, scene: Scene3D, *, stamp: Stamp, errors: int) -> None:
+    path.write_text(render_html(scene, stamp=stamp, errors=errors), encoding="utf-8")

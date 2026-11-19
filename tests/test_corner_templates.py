@@ -28,7 +28,7 @@ def corner_project(path, template, width, kind, contents=None):
 def test_base_corner_has_carousel_and_one_facade(home, base_door_project):
     # ПРОВЕРИТЬ МАСТЕРУ: заглушка закрывает глухую часть, карусель вместо полки.
     corner_project(base_door_project, "base_corner", 1050, "lower")
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     parts = result.modules[0].parts
     assert [p.width for p in parts if p.name == "фасад"] == [450]
     assert len([p for p in parts if p.name == "заглушка"]) == 1
@@ -39,7 +39,7 @@ def test_base_corner_has_carousel_and_one_facade(home, base_door_project):
 def test_wall_corner_odd_width_uses_one_door(home, base_door_project):
     # ПРОВЕРИТЬ МАСТЕРУ: прямой корпус, одна дверь и заглушка из ЛДСП.
     corner_project(base_door_project, "wall_corner", 601, "upper")
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     parts = result.modules[0].parts
     assert len([p for p in parts if p.name == "фасад"]) == 1
     assert len([p for p in parts if p.name == "заглушка"]) == 1
@@ -51,7 +51,7 @@ def test_corner_filler_uses_workshop_material_and_edge_rule(home, base_door_proj
     path = home / "workshop/construction.yaml"
     path.write_text(path.read_text().replace("кромить_заглушку: true", "кромить_заглушку: false"))
     corner_project(base_door_project, "base_corner", 1050, "lower")
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     part = next(p for p in result.modules[0].parts if p.name == "заглушка")
     assert part.material == "ldsp_16_white"
     assert all(not edge for edge in part.edges.values())
@@ -66,7 +66,7 @@ def test_corner_rejects_impossible_geometry(home, base_door_project):
     project["walls"][0]["rows"][0]["modules"][0]["depth"] = 10
     base_door_project.write_text(json.dumps(project))
     with pytest.raises(OrderError, match="габариты"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_corner_manual_golden(home, base_door_project):
@@ -76,7 +76,7 @@ def test_corner_manual_golden(home, base_door_project):
     # кромка 4874 + 9×30 = 5144 мм, закупка 5,7 м.
     for template, width, kind in (("base_corner", 1050, "lower"), ("wall_corner", 600, "upper")):
         corner_project(base_door_project, template, width, kind)
-        result = api.parts_from_project(base_door_project, home)
+        result = api.calculation(project=base_door_project, home=home).parts()
         expected = load_golden(f"{template}_{width}")
         assert golden_dump(result) == expected
 
@@ -87,7 +87,7 @@ def test_corner_uses_specified_filler_material(home, base_door_project):
         path.read_text().replace("материал_заглушки: ldsp_16_white", "материал_заглушки: ldsp_16_oak")
     )
     corner_project(base_door_project, "base_corner", 1050, "lower")
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     part = next(p for p in result.modules[0].parts if p.name == "заглушка")
     assert part.material == "ldsp_16_oak"
     assert part.thickness == 16
@@ -103,7 +103,7 @@ def test_wall_corner_rejects_carousel(home, base_door_project):
     project["walls"][0]["rows"][0]["modules"][0]["contents"] = {"inserts": ["corner_carousel"]}
     base_door_project.write_text(json.dumps(project))
     with pytest.raises(OrderError, match="наполнение"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_corner_accepts_matching_contents(home, base_door_project):
@@ -115,7 +115,7 @@ def test_corner_accepts_matching_contents(home, base_door_project):
         project = json.loads(base_door_project.read_text())
         project["walls"][0]["rows"][0]["modules"][0]["contents"] = contents
         base_door_project.write_text(json.dumps(project, ensure_ascii=False))
-        result = api.parts_from_project(base_door_project, home)
+        result = api.calculation(project=base_door_project, home=home).parts()
         assert len([p for p in result.modules[0].parts if p.name == "фасад"]) == 1
 
 
@@ -128,7 +128,7 @@ def test_corner_requires_adjacent_wall(home, base_door_project):
     del project["walls"][0]["rows"][0]["modules"][0]["corner"]
     base_door_project.write_text(json.dumps(project))
     with pytest.raises(OrderError, match="соседн"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_workshop_rejects_negative_corner_values(home):
@@ -148,21 +148,21 @@ def test_corner_rejects_missing_or_same_adjacent_wall(home, base_door_project):
         project["walls"][0]["rows"][0]["modules"][0]["corner"]["adjacent_wall"] = neighbor
         base_door_project.write_text(json.dumps(project))
         with pytest.raises(OrderError, match="соседн"):
-            api.parts_from_project(base_door_project, home)
+            api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_base_corner_with_shelf_manual_golden(home, base_door_project):
     # ПРОВЕРИТЬ МАСТЕРУ. Тикет 17: угловой без карусели с одной полкой и полкодержателями, эталон — вручную
     # (`tests/golden/base_corner_1050_shelf.json`); эталон без замены (`base_corner_1050`) не меняется.
     corner_project(base_door_project, "base_corner", 1050, "lower", {"shelves": 1, "inserts": []})
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     assert "corner_carousel" not in result.hardware and result.hardware["shelf_pin_5"] == 4
     assert golden_dump(result) == load_golden("base_corner_1050_shelf")
 
 
 def test_base_corner_with_zero_shelves_keeps_carousel(home, base_door_project):
     corner_project(base_door_project, "base_corner", 1050, "lower", {"shelves": 0})
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     assert result.hardware["corner_carousel"] == 1 and "shelf_pin_5" not in result.hardware
 
 
@@ -174,4 +174,4 @@ def test_base_corner_shelf_and_carousel_together_is_an_error(home, base_door_pro
         base_door_project, "base_corner", 1050, "lower", {"shelves": 1, "inserts": ["corner_carousel"]}
     )
     with pytest.raises(OrderError, match="неподдерживаемое наполнение"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()

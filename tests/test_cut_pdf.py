@@ -1,6 +1,7 @@
 """Карта раскроя PDF (2.2) и учёт выводов: через `kitchen.api`, PDF читаем обратно `pypdf`."""
 
 import json
+import shutil
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +13,7 @@ from kitchen import api
 from kitchen.cutting import Cut, MaterialCut, Placement, SheetCut
 from kitchen.cutting_pdf import place_lines, scheme_labels, scheme_scale, write_cutting_map
 from kitchen.errors import OrderError
-from kitchen.pdf import FONT, FONT_BOLD, Area, page_area, register_fonts
+from kitchen.pdf import FONT, FONT_BOLD, Area, Stamp, page_area, register_fonts
 from pypdf import PdfReader
 from reportlab.pdfbase.pdfmetrics import stringWidth
 
@@ -36,7 +37,7 @@ def sheets_of(result):
 
 def test_pdf_has_page_per_sheet_with_markings_cuts_and_utilization(home):
     petrov(home)
-    r = api.cut_and_save("petrov", home)
+    r = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     assert r.output.file == str(home / "orders" / ORDER / "out" / "cutting-map.pdf")
     pages = pages_of(r)
     sheets = sheets_of(r)
@@ -56,15 +57,15 @@ def test_pdf_without_mock_has_no_watermark(home):
     petrov(home)
     for p in (home / "workshop").glob("*.yaml"):
         p.write_text(p.read_text(encoding="utf-8").replace("mock: true", "mock: false"), encoding="utf-8")
-    r = api.cut_and_save("petrov", home)
+    r = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     assert not r.mock
     assert all("МОК" not in t and ORDER in t for t in pages_of(r))
 
 
 def test_output_registered_with_source_version_and_replaced_on_rerun(home):
     petrov(home)
-    r = api.cut_and_save("petrov", home)
-    api.cut_and_save("petrov", home)
+    r = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
+    api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     outs = api.list_outputs("petrov", home)
     assert [(o.kind, o.source_version, o.path) for o in outs] == [
         ("cutting", 1, f"orders/{ORDER}/out/cutting-map.pdf")
@@ -76,14 +77,14 @@ def test_output_registered_with_source_version_and_replaced_on_rerun(home):
     p = home / "p2.json"
     p.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     assert api.import_project(ORDER, p, home=home).version == 2
-    r2 = api.cut_and_save("petrov", home)
+    r2 = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     assert [o.source_version for o in api.list_outputs("petrov", home)] == [2]
     assert "версия проекта 2" in pages_of(r2)[0]
 
 
 def test_failed_output_commit_preserves_previous_pdf_and_record(home):
     petrov(home)
-    original = api.cut_and_save("petrov", home)
+    original = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     path = Path(original.output.file)
     before = path.read_bytes()
     previous = api.list_outputs("petrov", home)
@@ -106,7 +107,7 @@ def test_failed_output_commit_preserves_previous_pdf_and_record(home):
         """)
 
     with pytest.raises(sqlite3.IntegrityError):
-        api.cut_and_save("petrov", home)
+        api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     assert path.read_bytes() == before
     assert api.list_outputs("petrov", home) == previous
     assert list(path.parent.iterdir()) == [path]
@@ -114,7 +115,9 @@ def test_failed_output_commit_preserves_previous_pdf_and_record(home):
 
 def test_concurrent_failed_saves_restore_the_original_pdf(home, monkeypatch):
     petrov(home)
-    original = api.cut_and_save("petrov", home, on=date(2026, 1, 1))
+    original = api.save(calc := api.calculation(order="petrov", home=home), calc.cut(), on=date(2026, 1, 1))[
+        0
+    ]
     path = Path(original.output.file)
     before = path.read_bytes()
     previous = api.list_outputs("petrov", home)
@@ -135,7 +138,7 @@ def test_concurrent_failed_saves_restore_the_original_pdf(home, monkeypatch):
     second_ready = threading.Event()
     copied = threading.Event()
     replace = Path.replace
-    copy2 = api.shutil.copy2
+    copy2 = shutil.copy2
 
     def controlled_replace(source, target):
         if threading.current_thread().name == "first" and source.name == "previous.pdf":
@@ -155,12 +158,12 @@ def test_concurrent_failed_saves_restore_the_original_pdf(home, monkeypatch):
         return copy2(source, target, *args, **kwargs)
 
     monkeypatch.setattr(Path, "replace", controlled_replace)
-    monkeypatch.setattr(api.shutil, "copy2", observed_copy)
+    monkeypatch.setattr(shutil, "copy2", observed_copy)
 
     def save(name, day):
         threading.current_thread().name = name
         with pytest.raises(sqlite3.IntegrityError):
-            api.cut_and_save("petrov", home, on=date(2026, 1, day))
+            api.save(calc := api.calculation(order="petrov", home=home), calc.cut(), on=date(2026, 1, day))[0]
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(save, "first", 2)
@@ -189,7 +192,7 @@ def test_old_calculation_cannot_replace_newer_output(home, monkeypatch):
     petrov(home)
     prepared = threading.Event()
     release = threading.Event()
-    write = api.write_cutting_map
+    write = write_cutting_map
 
     def delayed_write(*args, **kwargs):
         write(*args, **kwargs)
@@ -197,12 +200,12 @@ def test_old_calculation_cannot_replace_newer_output(home, monkeypatch):
             prepared.set()
             assert release.wait(10)
 
-    monkeypatch.setattr(api, "write_cutting_map", delayed_write)
+    monkeypatch.setattr("kitchen.calculation.write_cutting_map", delayed_write)
 
     def old_calculation():
         threading.current_thread().name = "old-calculation"
         with pytest.raises(OrderError, match="верси"):
-            api.cut_and_save("petrov", home)
+            api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         old = pool.submit(old_calculation)
@@ -213,7 +216,7 @@ def test_old_calculation_cannot_replace_newer_output(home, monkeypatch):
             p = home / "p2.json"
             p.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
             assert api.import_project(ORDER, p, home=home).version == 2
-            new = api.cut_and_save("petrov", home)
+            new = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
             path = Path(new.output.file)
             before = path.read_bytes()
             assert [o.source_version for o in api.list_outputs("petrov", home)] == [2]
@@ -227,15 +230,15 @@ def test_old_calculation_cannot_replace_newer_output(home, monkeypatch):
     assert list(path.parent.iterdir()) == [path]
 
 
-def test_cut_from_order_writes_nothing(home):
+def test_cut_of_an_order_writes_nothing(home):
     petrov(home)
-    r = api.cut_from_order("petrov", home)
+    r = api.calculation(order="petrov", home=home).cut()
     assert r.output is None and not (home / "orders" / ORDER / "out").exists()
 
 
 def test_every_part_has_a_numbered_line_in_the_list(home):
     petrov(home)
-    r = api.cut_and_save("petrov", home)
+    r = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     for text, (m, s) in zip(pages_of(r), sheets_of(r), strict=True):
         for i, pl in enumerate(s.placements, 1):
             assert f"{i}. {pl.part} {pl.w}×{pl.h}" in text
@@ -243,7 +246,7 @@ def test_every_part_has_a_numbered_line_in_the_list(home):
 
 def test_cut_numbers_overlap_neither_each_other_nor_part_labels_at_real_scale(home):
     petrov(home)
-    r = api.cut_and_save("petrov", home)
+    r = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     k = scheme_scale(page_area().w, (2800, 2070))
     assert 0.18 < k < 0.2  # реальный масштаб страницы, а не придуманный
     for m, s in sheets_of(r):
@@ -335,10 +338,7 @@ def test_huge_sheet_continues_on_extra_pages_with_all_text(tmp_path):
         [m],
         kerf=4,
         trim=10,
-        order=ORDER,
-        version=1,
-        mock=False,
-        on=date(2026, 11, 14),
+        stamp=Stamp(ORDER, 1, False, date(2026, 11, 14)),
     )
     pages = [p.extract_text() for p in PdfReader(path).pages]
     assert len(pages) >= 2

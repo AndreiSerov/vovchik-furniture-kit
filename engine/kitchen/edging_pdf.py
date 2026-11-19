@@ -1,6 +1,5 @@
 """PDF карты кромления: таблица деталей и итоги рассчитанного метража."""
 
-from datetime import date
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -9,7 +8,7 @@ from reportlab.platypus import Paragraph
 
 from kitchen.errors import KitchenError
 from kitchen.parts import EdgeTotals, Part
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, Stamp, page_area
 
 _STYLE = ParagraphStyle("edging", fontName=FONT, fontSize=8, leading=10, splitLongWords=True)
 _HEADING = ParagraphStyle("edging-heading", parent=_STYLE, fontName=FONT_BOLD)
@@ -32,13 +31,10 @@ def write_edging_map(
     totals: dict[str, EdgeTotals],
     *,
     purchase_digits: int,
-    order: str,
-    version: int | None,
-    mock: bool,
-    on: date,
+    stamp: Stamp,
 ) -> None:
     """Таблица всех кромлёных деталей, затем итог каждой кромки, с продолжением на страницах."""
-    doc = PdfDocument(path, order=order, version=version, mock=mock, on=on, title=f"Карта кромления {order}")
+    doc = PdfDocument(path, stamp=stamp, title=f"Карта кромления {stamp.order}")
     area = page_area()
     widths = [area.w * fraction for fraction in _COLS]
     details = [
