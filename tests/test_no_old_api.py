@@ -5,6 +5,9 @@
 import ast
 from pathlib import Path
 
+import pytest
+from kitchen import api
+
 TESTS = Path(__file__).resolve().parent
 
 # Имена, которые тикет 75 удаляет из `kitchen.api`, и константы имён файлов, удалённые в тикете 71.
@@ -114,3 +117,9 @@ def test_old_api_exceptions_only_shrink():
     assert not stale, (
         "Убери из OLD_API_EXCEPTIONS файлы, которые больше не зовут старую форму api:\n" + "\n".join(stale)
     )
+
+
+@pytest.mark.parametrize("name", sorted(REMOVED))
+def test_the_old_api_is_gone(name):
+    """Тикет 75 (п. 1): старой формы в `kitchen.api` нет."""
+    assert not hasattr(api, name)

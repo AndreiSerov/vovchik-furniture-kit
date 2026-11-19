@@ -40,6 +40,9 @@ TODAY = date(2026, 11, 18)
 DAYS = 20
 HOME = "<HOME>"
 
+# Тикет 75: у текущего движка — расчёт (`calculation`/`save`/`production`), у базового коммита — старая форма.
+NEW_API = hasattr(api, "calculation")
+
 # Малый проект теста КП (`tests/test_quote.py`, SMALL) на стене 1000 мм вместо 1350: ряды не сходятся.
 BROKEN_ORDER = "2026-051-sidorov"
 
@@ -209,7 +212,45 @@ class Case:
         for key, call in calls.items():
             self.put(f"reads/{key}.json", _dump(_capture(call)))
 
+    def calculation_reads(self, **source: Any) -> None:
+        """Новый интерфейс: каждый вывод — из своего расчёта, как прежние функции `*_from_*`."""
+
+        def calc() -> Any:
+            return api.calculation(**source, home=self.home)
+
+        calls: dict[str, Callable[[], Any]] = {
+            "parts": lambda: calc().parts(),
+            "cut": lambda: calc().cut(),
+            "edging": lambda: calc().edging(),
+            "drilling": lambda: calc().drilling(),
+            "assembly": lambda: calc().assembly(),
+            "trip": lambda: calc().trip(),
+        }
+        if "order" in source:  # закупка в снимке — только у заказа, детали «экономии» — только у файла
+            calls["purchase"] = lambda: calc().purchase()
+        calls |= {
+            "estimate": lambda: calc().estimate(),
+            "estimate_economy": lambda: calc().estimate(economy=True),
+            "quote": lambda: calc().quote(DAYS),
+            "quote_economy": lambda: calc().quote(DAYS, economy=True),
+            "views": lambda: calc().views(),
+            "placement": lambda: calc().placement(),
+            "check": lambda: calc().check(),
+        }
+        if "project" in source:
+            calls["economy_parts"] = lambda: calc().economy_parts()
+        calls |= {
+            "layout_drilling": lambda: api.drilling_map_layout(calc().drilling()),
+            "layout_assembly": lambda: api.assembly_layout(calc().assembly()),
+            "layout_trip": lambda: api.trip_layout(calc().trip()),
+            "layout_views": lambda: api.views_layout(calc().views()),
+        }
+        self.reads(calls)
+
     def order_reads(self, order: str) -> None:
+        if NEW_API:
+            self.calculation_reads(order=order)
+            return
         home = self.home
         self.reads(
             {
@@ -235,6 +276,9 @@ class Case:
         )
 
     def project_reads(self, path: Path) -> None:
+        if NEW_API:
+            self.calculation_reads(project=path)
+            return
         home = self.home
         self.reads(
             {
@@ -261,22 +305,34 @@ class Case:
 
     # шаги записи
 
+    def calculation_steps(self, order: str) -> list[tuple[str, Callable[[], Any]]]:
+        """Новый интерфейс: каждый шаг — свой расчёт и `save`, как прежние `*_and_save`."""
+
+        def saved(output: Callable[[Any], Any]) -> Callable[[], Any]:
+            def step() -> Any:
+                calc = api.calculation(order=order, home=self.home)
+                return api.save(calc, output(calc))[0]
+
+            return step
+
+        return [
+            ("cut", saved(lambda c: c.cut())),
+            ("edging", saved(lambda c: c.edging())),
+            ("drilling", saved(lambda c: c.drilling())),
+            ("assembly", saved(lambda c: c.assembly())),
+            ("trip", saved(lambda c: c.trip())),
+            ("purchase", saved(lambda c: c.purchase())),
+            ("estimate", saved(lambda c: c.estimate())),
+            ("estimate_economy", saved(lambda c: c.estimate(economy=True))),
+            ("quote", saved(lambda c: c.quote(DAYS))),
+            ("quote_economy", saved(lambda c: c.quote(DAYS, economy=True))),
+            ("views", saved(lambda c: c.views())),
+            ("production", lambda: api.production(api.calculation(order=order, home=self.home))),
+        ]
+
     def save_steps(self, order: str) -> None:
         home = self.home
-        steps: list[tuple[str, Callable[[], Any]]] = [
-            ("cut", lambda: api.cut_and_save(order, home)),
-            ("edging", lambda: api.edges_and_save(order, home)),
-            ("drilling", lambda: api.drilling_and_save(order, home)),
-            ("assembly", lambda: api.assembly_and_save(order, home)),
-            ("trip", lambda: api.trip_and_save(order, home)),
-            ("purchase", lambda: api.purchase_and_save(order, home)),
-            ("estimate", lambda: api.estimate_and_save(order, home)),
-            ("estimate_economy", lambda: api.estimate_and_save(order, home, economy=True)),
-            ("quote", lambda: api.quote_and_save(order, DAYS, home)),
-            ("quote_economy", lambda: api.quote_and_save(order, DAYS, home, economy=True)),
-            ("views", lambda: api.views_and_save(order, home)),
-            ("production", lambda: api.production_and_save(order, home)),
-        ]
+        steps = self.calculation_steps(order) if NEW_API else self.old_steps(order)
         for number, (key, call) in enumerate(steps, 1):
             prefix = f"save/{number:02d}_{key}"
             self.put(f"{prefix}/result.json", _dump(_capture(call)))
@@ -290,6 +346,24 @@ class Case:
             self.put(f"{prefix}/outputs.json", _dump(tables["outputs"]))
             self.put(f"{prefix}/done.json", _dump(tables["done"]))
             self.put(f"{prefix}/files.json", _dump(_out_listing(home)))
+
+    def old_steps(self, order: str) -> list[tuple[str, Callable[[], Any]]]:
+        """Старая форма: на ней идёт прогон «до» по базовому коммиту."""
+        home = self.home
+        return [
+            ("cut", lambda: api.cut_and_save(order, home)),
+            ("edging", lambda: api.edges_and_save(order, home)),
+            ("drilling", lambda: api.drilling_and_save(order, home)),
+            ("assembly", lambda: api.assembly_and_save(order, home)),
+            ("trip", lambda: api.trip_and_save(order, home)),
+            ("purchase", lambda: api.purchase_and_save(order, home)),
+            ("estimate", lambda: api.estimate_and_save(order, home)),
+            ("estimate_economy", lambda: api.estimate_and_save(order, home, economy=True)),
+            ("quote", lambda: api.quote_and_save(order, DAYS, home)),
+            ("quote_economy", lambda: api.quote_and_save(order, DAYS, home, economy=True)),
+            ("views", lambda: api.views_and_save(order, home)),
+            ("production", lambda: api.production_and_save(order, home)),
+        ]
 
 
 def _without_sink_brief(raw: dict) -> dict:

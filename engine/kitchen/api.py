@@ -5,7 +5,7 @@ import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, tzinfo
+from datetime import tzinfo
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from kitchen import brief as brief_check
 from kitchen import placement, store
 from kitchen.assembly import AssemblyModule
-from kitchen.assembly_pdf import AssemblyPageLayout, layout, write_assembly
+from kitchen.assembly_pdf import AssemblyPageLayout, layout
 from kitchen.calculation import (
     PRODUCTION_KINDS,
     AssemblyResult,
@@ -36,20 +36,13 @@ from kitchen.calculation import (
     TripResult,
     ValidationContext,
     ViewsResult,
-    _build_cut,
-    _build_parts,
     _canonical,
     _current_version,
-    _draft_warnings,
-    _estimate,
     _insert_log,
     _latest_brief,
     _open_order,
-    _output_info,
     _project_hash,
     _read_json,
-    _save_outputs,
-    _with_economy,
     _write_reason,
     calculation,
     parse_project_file,
@@ -64,14 +57,14 @@ from kitchen.common import (
     pair_by_model_then_order,
 )
 from kitchen.drilling import DrillingCheck
-from kitchen.drilling_pdf import PageLayout, map_layout, write_drilling_map
+from kitchen.drilling_pdf import PageLayout, map_layout
 from kitchen.economy import EconomyLine, EconomyVariant
 from kitchen.errors import InputError, KitchenError, OrderError
 from kitchen.estimate import EstimateLabor, LaborLine
 from kitchen.format import group_digits, num, plural, working_days
 from kitchen.geometry import PURPOSE_RU
 from kitchen.metrics import Stamp
-from kitchen.models import Appliances, Economy, Hardware, Labor, Materials, Workshop
+from kitchen.models import Appliances, Economy, Hardware, Labor, Materials
 from kitchen.parts import (
     APPLIANCE_NAMES,
     ROW_NOM,
@@ -81,10 +74,10 @@ from kitchen.parts import (
     PartsGap,
 )
 from kitchen.placement import ModulePlace, SceneObject
-from kitchen.project import Project, parse_project
-from kitchen.quote import DAYS_ERROR, build_quote, check_days, money, parse_days, percent
+from kitchen.project import parse_project
+from kitchen.quote import DAYS_ERROR, money, parse_days, percent
 from kitchen.result import MOCK_BANNER, Result
-from kitchen.trip_pdf import TripPageLayout, write_trip
+from kitchen.trip_pdf import TripPageLayout
 from kitchen.trip_pdf import layout as trip_page_layout
 from kitchen.views import ViewPage
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
@@ -102,6 +95,7 @@ __all__ = [
     "BriefShowResult",
     "CheckResult",
     "CommonItem",
+    "CutResult",
     "DiffResult",
     "DrillingCheck",
     "DrillingResult",
@@ -135,36 +129,19 @@ __all__ = [
     "StaleOutput",
     "Stamp",
     "StatusResult",
+    "TripResult",
     "ValidationContext",
     "ValidationResult",
     "ViewPage",
     "ViewsResult",
     "WorkshopCheck",
-    "assembly_and_save",
-    "assembly_from_order",
-    "assembly_from_project",
     "assembly_layout",
     "brief_save",
     "brief_show",
     "calculation",
-    "check_order",
-    "check_project",
     "check_workshop",
-    "cut_and_save",
-    "cut_from_order",
-    "cut_from_project",
     "diff_project",
-    "drilling_and_save",
-    "drilling_from_order",
-    "drilling_from_project",
     "drilling_map_layout",
-    "economy_parts_from_project",
-    "edges_and_save",
-    "edges_from_order",
-    "edges_from_project",
-    "estimate_and_save",
-    "estimate_from_order",
-    "estimate_from_project",
     "export_project",
     "group_digits",
     "import_project",
@@ -176,31 +153,15 @@ __all__ = [
     "order_show",
     "parse_days",
     "part_in_room",
-    "parts_from_order",
-    "parts_from_project",
     "percent",
-    "placement_from_order",
-    "placement_from_project",
     "plural",
     "production",
-    "production_and_save",
-    "purchase_and_save",
-    "purchase_from_order",
     "quick_estimate",
-    "quote_and_save",
-    "quote_from_order",
-    "quote_from_project",
     "resolve_home",
     "save",
     "status",
-    "trip_and_save",
-    "trip_from_order",
-    "trip_from_project",
     "trip_layout",
     "validate_wrapper",
-    "views_and_save",
-    "views_from_order",
-    "views_from_project",
     "views_layout",
     "working_days",
 ]
@@ -1049,69 +1010,10 @@ def _data_hash(data: dict) -> str:
         return hashlib.sha256(_canonical(data).encode("utf-8")).hexdigest()
 
 
-def parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
-    """`kitchen parts --project <файл>`: детали проекта из файла (черновик до импорта)."""
-    return calculation(project=path, home=home).parts()
-
-
-def parts_from_order(order: str, home: Path | None = None) -> PartsResult:
-    """`kitchen parts <заказ>`: детали текущей версии проекта, проверки с последним брифом заказа."""
-    return calculation(order=order, home=home).parts()
-
-
-# --- раскрой ------------------------------------------------------------------
-
-
-def cut_from_project(path: Path, home: Path | None = None) -> CutResult:
-    """`kitchen cut --project <файл>`: раскрой деталей проекта из файла (черновик до импорта)."""
-    return calculation(project=path, home=home).cut()
-
-
-def cut_from_order(order: str, home: Path | None = None) -> CutResult:
-    """`kitchen cut <заказ>`: раскрой деталей текущей версии проекта."""
-    return calculation(order=order, home=home).cut()
-
-
-def _save_output(
-    home: Path, source: PartsSource, kind: OutputKind, filename: str, write_pdf: Callable[[Path], None]
-) -> OutputInfo:
-    info = _output_info(home, source, kind, filename)
-    _save_outputs(home, source, [(info, write_pdf)], [])
-    return info
-
-
-def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -> CutResult:
-    """`kitchen cut <заказ>`: раскрой и сохранённый PDF карты."""
-    return save(calc := calculation(order=order, home=home), calc.cut(), on=on)[0]
-
-
-def edges_from_order(order: str, home: Path | None = None) -> EdgingResult:
-    return calculation(order=order, home=home).edging()
-
-
-def edges_from_project(path: Path, home: Path | None = None) -> EdgingResult:
-    return calculation(project=path, home=home).edging()
-
-
-def edges_and_save(order: str, home: Path | None = None, on: date | None = None) -> EdgingResult:
-    """Карта кромления текущей версии и её регистрация в заказе."""
-    return save(calc := calculation(order=order, home=home), calc.edging(), on=on)[0]
-
-
-# --- присадка -----------------------------------------------------------------
+# --- раскладка страниц выводов ------------------------------------------------
 
 
 HOLE_PURPOSES = PURPOSE_RU  # назначение отверстия -> по-русски, для текста CLI
-
-
-def drilling_from_order(order: str, home: Path | None = None) -> DrillingResult:
-    """Присадка текущей версии проекта заказа, без записи файлов."""
-    return calculation(order=order, home=home).drilling()
-
-
-def drilling_from_project(path: Path, home: Path | None = None) -> DrillingResult:
-    """`kitchen drilling --project <файл>`: присадка проекта из файла, файлов не пишет."""
-    return calculation(project=path, home=home).drilling()
 
 
 def drilling_map_layout(result: DrillingResult) -> list[PageLayout]:
@@ -1119,62 +1021,9 @@ def drilling_map_layout(result: DrillingResult) -> list[PageLayout]:
     return map_layout(result.parts, result.checks)
 
 
-def _drilling_writer(result: DrillingResult, on: date | None) -> Callable[[Path], None]:
-    return lambda path: write_drilling_map(
-        path,
-        result.parts,
-        result.checks,
-        stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
-    )
-
-
-def drilling_and_save(order: str, home: Path | None = None, on: date | None = None) -> DrillingResult:
-    """`kitchen drilling <заказ>`: присадка текущей версии, PDF карты и регистрация вывода (как у раскроя)."""
-    return save(calc := calculation(order=order, home=home), calc.drilling(), on=on)[0]
-
-
-# --- сборочный лист -----------------------------------------------------------
-
-
-def assembly_from_order(order: str, home: Path | None = None) -> AssemblyResult:
-    """Сборочный лист текущей версии проекта заказа, без записи файлов."""
-    return calculation(order=order, home=home).assembly()
-
-
-def assembly_from_project(path: Path, home: Path | None = None) -> AssemblyResult:
-    """`kitchen assembly --project <файл>`: сборочный лист проекта из файла, файлов не пишет."""
-    return calculation(project=path, home=home).assembly()
-
-
 def assembly_layout(result: AssemblyResult) -> list[AssemblyPageLayout]:
     """Раскладка страниц сборочного листа (строки, кегли, положение) — ровно то, что рисует PDF."""
     return layout(result.modules)
-
-
-def assembly_and_save(order: str, home: Path | None = None, on: date | None = None) -> AssemblyResult:
-    """`kitchen assembly <заказ>`: сборочный лист текущей версии, PDF и регистрация вывода."""
-    return save(calc := calculation(order=order, home=home), calc.assembly(), on=on)[0]
-
-
-def _assembly_writer(result: AssemblyResult, on: date | None) -> Callable[[Path], None]:
-    return lambda path: write_assembly(
-        path,
-        result.modules,
-        stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
-    )
-
-
-# --- чек-лист выезда ----------------------------------------------------------
-
-
-def trip_from_order(order: str, home: Path | None = None) -> TripResult:
-    """Чек-лист выезда текущей версии проекта заказа, без записи файлов."""
-    return calculation(order=order, home=home).trip()
-
-
-def trip_from_project(path: Path, home: Path | None = None) -> TripResult:
-    """`kitchen trip --project <файл>`: чек-лист из файла, файлов не пишет; брифа у файла нет — шапка из «—»."""
-    return calculation(project=path, home=home).trip()
 
 
 def trip_layout(result: TripResult) -> list[TripPageLayout]:
@@ -1182,109 +1031,9 @@ def trip_layout(result: TripResult) -> list[TripPageLayout]:
     return trip_page_layout(result.header, result.sections)
 
 
-def trip_and_save(order: str, home: Path | None = None, on: date | None = None) -> TripResult:
-    """`kitchen trip <заказ>`: чек-лист текущей версии, PDF и регистрация вывода."""
-    return save(calc := calculation(order=order, home=home), calc.trip(), on=on)[0]
-
-
-def _trip_writer(result: TripResult, on: date | None) -> Callable[[Path], None]:
-    return lambda path: write_trip(
-        path,
-        result.header,
-        result.sections,
-        stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
-    )
-
-
-def purchase_from_order(order: str, home: Path | None = None) -> PurchaseResult:
-    return calculation(order=order, home=home).purchase()
-
-
-def purchase_and_save(order: str, home: Path | None = None) -> PurchaseResult:
-    return save(calc := calculation(order=order, home=home), calc.purchase())[0]
-
-
-def _estimate_run(
-    project: Project,
-    home: Path,
-    source: PartsSource,
-    brief: sqlite3.Row | None,
-    warnings: list[str],
-    workshop: Workshop,
-    economy: bool,
-) -> tuple[EstimateResult, PartsResult]:
-    """Смета снимка проекта и его детали: одна цепочка для сметы и КП, цена у них одна."""
-    parts = _build_parts(project, home, source, brief, warnings, workshop)
-    cut = _build_cut(project, home, source, brief, warnings, workshop)
-    result = _estimate(project, parts, cut, workshop)
-    draft = _draft_warnings(source, parts)
-    result = result.model_copy(update={"warnings": [*result.warnings, *draft]}) if draft else result
-    return _with_economy(result, project, home, workshop, economy), parts
-
-
-def estimate_from_order(order: str, home: Path | None = None, economy: bool = False) -> EstimateResult:
-    """Смета текущей версии проекта; `economy` добавляет вариант «экономия» (копия, версия не меняется)."""
-    return calculation(order=order, home=home).estimate(economy)
-
-
-def estimate_from_project(path: Path, home: Path | None = None, economy: bool = False) -> EstimateResult:
-    """`kitchen estimate --project <файл>`: смета проекта из файла, без файлов выводов и записи в БД."""
-    return calculation(project=path, home=home).estimate(economy)
-
-
-def economy_parts_from_project(path: Path, home: Path | None = None) -> PartsResult:
-    """Детали копии проекта из файла со всеми предложенными заменами «экономии»: то, из чего считана цена
-    «экономии». Ничего не пишет."""
-    return calculation(project=path, home=home).economy_parts()
-
-
-def estimate_and_save(order: str, home: Path | None = None, economy: bool = False) -> EstimateResult:
-    return save(calc := calculation(order=order, home=home), calc.estimate(economy))[0]
-
-
-def _quote(
-    project: Project,
-    home: Path,
-    source: PartsSource,
-    brief: sqlite3.Row | None,
-    warnings: list[str],
-    days: int,
-    economy: bool,
-) -> QuoteResult:
-    check_days(days)  # единственная проверка срока: до расчёта, без срока КП не выдать
-    workshop = load_workshop(home)
-    estimate, parts = _estimate_run(project, home, source, brief, warnings, workshop, economy)
-    body = build_quote(
-        project, parts.modules, workshop, days=days, price=estimate.price, economy=estimate.economy
-    )
-    return QuoteResult(
-        **body.model_dump(),
-        source=estimate.source,
-        warnings=estimate.warnings,
-        mock=estimate.mock,
-        mock_files=estimate.mock_files,
-    )
-
-
-def quote_from_order(order: str, days: int, home: Path | None = None, economy: bool = False) -> QuoteResult:
-    """КП текущей версии проекта заказа. `days` — срок изготовления и монтажа в рабочих днях, вписывает мастер."""
-    return calculation(order=order, home=home).quote(days, economy)
-
-
-def quote_from_project(path: Path, days: int, home: Path | None = None, economy: bool = False) -> QuoteResult:
-    """`kitchen quote --project <файл>`: КП проекта из файла, без файлов выводов и записи в БД."""
-    return calculation(project=path, home=home).quote(days, economy)
-
-
-def quote_and_save(
-    order: str, days: int, home: Path | None = None, economy: bool = False, on: date | None = None
-) -> QuoteResult:
-    """КП заказа: `quote.pdf` и `quote.json` из одной модели, обе записи — в реестре выводов заказа."""
-    return save(calc := calculation(order=order, home=home), calc.quote(days, economy), on=on)[0]
-
-
-def production_and_save(order: str, home: Path | None = None, on: date | None = None) -> ProductionResult:
-    return production(calculation(order=order, home=home), on)
+def views_layout(result: ViewsResult) -> list[ViewPage]:
+    """Раскладка страниц видов (фигуры, линии, подписи, цепочки, высоты) — ровно то, что рисует PDF."""
+    return view_pages(result)
 
 
 def list_outputs(order: str, home: Path | None = None) -> list[OutputInfo]:
@@ -1304,58 +1053,12 @@ def list_outputs(order: str, home: Path | None = None) -> list[OutputInfo]:
     ]
 
 
-# --- проверки проекта ---------------------------------------------------------
-
-
-def check_project(path: Path, home: Path | None = None) -> CheckResult:
-    """`проверки проекта` из файла без БД: все находки сразу."""
-    return calculation(project=path, home=home).check()
-
-
-def check_order(order: str, home: Path | None = None) -> CheckResult:
-    """`kitchen check <заказ>`: находки проверок текущей версии проекта с последним брифом заказа."""
-    return calculation(order=order, home=home).check()
-
-
 # --- расстановка в комнате ----------------------------------------------------
 
 
 def part_in_room(place: ModulePlace, part: Part) -> SceneObject:
     """Деталь модуля (`parts`) в комнате той же расстановкой, что и модуль: контракт для видов и HTML."""
     return placement.part_in_room(place, part)
-
-
-def placement_from_project(path: Path, home: Path | None = None) -> PlacementResult:
-    """Расстановка проекта из файла (черновик до импорта)."""
-    return calculation(project=path, home=home).placement()
-
-
-def placement_from_order(order: str, home: Path | None = None) -> PlacementResult:
-    """Расстановка текущей версии проекта заказа."""
-    return calculation(order=order, home=home).placement()
-
-
-# --- виды кухни в PDF ---------------------------------------------------------
-
-
-def views_from_project(path: Path, home: Path | None = None) -> ViewsResult:
-    """`kitchen 3d --project <файл>`: виды проекта из файла, файлов не пишет."""
-    return calculation(project=path, home=home).views()
-
-
-def views_from_order(order: str, home: Path | None = None) -> ViewsResult:
-    """Виды текущей версии проекта заказа, без записи файлов."""
-    return calculation(order=order, home=home).views()
-
-
-def views_layout(result: ViewsResult) -> list[ViewPage]:
-    """Раскладка страниц видов (фигуры, линии, подписи, цепочки, высоты) — ровно то, что рисует PDF."""
-    return view_pages(result)
-
-
-def views_and_save(order: str, home: Path | None = None, on: date | None = None) -> ViewsResult:
-    """`kitchen 3d <заказ>`: виды текущей версии — PDF и HTML 3D, оба регистрируются как выводы одной версии."""
-    return save(calc := calculation(order=order, home=home), calc.views(), on=on)[0]
 
 
 # --- быстрая вилка ------------------------------------------------------------

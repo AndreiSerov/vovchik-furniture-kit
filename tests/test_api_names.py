@@ -1,6 +1,9 @@
-"""Тикет 69: перенос в `kitchen.calculation` не меняет интерфейс `api` — прежние имена на месте."""
+"""Имена `api.__all__` по тикетам этапа 9: перенос в `kitchen.calculation` (69) прежних имён не убирает,
+расчёт (70) и сохранение (71) добавляют новую форму, тикет 75 удаляет старую."""
 
 from kitchen import api
+
+from tests.test_no_old_api import REMOVED
 
 # `api.__all__` до тикета 69: перенос не убирает из интерфейса ни одного имени.
 BEFORE_69 = {
@@ -123,8 +126,19 @@ ADDED_IN_70 = {"calculation"}
 ADDED_IN_71 = {"save", "production"}
 
 
-def test_api_all_keeps_the_old_names_and_adds_the_new_ones():
-    assert set(api.__all__) == BEFORE_69 | ADDED_IN_69 | ADDED_IN_70 | ADDED_IN_71
+# Тикет 75: типы результатов, которые тесты берут из `api`, — в `__all__` (спека: «все типы результатов»).
+ADDED_IN_75 = {"CutResult", "TripResult"}
+
+
+def test_api_all_is_the_new_form_without_the_old_one():
+    expected = (BEFORE_69 | ADDED_IN_69 | ADDED_IN_70 | ADDED_IN_71 | ADDED_IN_75) - REMOVED
+    assert set(api.__all__) == expected
+
+
+def test_api_all_has_the_calculation_and_no_removed_name():
+    """Тикет 75 (п. 4)."""
+    assert not set(api.__all__) & REMOVED
+    assert {"calculation", "save", "production", "Stamp"} <= set(api.__all__)
 
 
 def test_every_name_in_api_all_resolves():
