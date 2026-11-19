@@ -30,7 +30,7 @@ def test_corner_last_in_row_has_blind_part_at_the_corner(home, base_door_project
     ):
         corner_project(base_door_project, template, width, kind)
         add_neighbour(base_door_project, kind, before=True)
-        result = api.parts_from_project(base_door_project, home)
+        result = api.calculation(project=base_door_project, home=home).parts()
         assert x_of(result, label, "фасад") == facade_x
         assert x_of(result, label, "заглушка") == filler_x
 
@@ -43,6 +43,6 @@ def test_corner_first_in_row_is_mirrored(home, base_door_project):
     ):
         corner_project(base_door_project, template, width, kind)
         add_neighbour(base_door_project, kind, before=False)
-        result = api.parts_from_project(base_door_project, home)
+        result = api.calculation(project=base_door_project, home=home).parts()
         assert x_of(result, label, "фасад") == facade_x
         assert x_of(result, label, "заглушка") == filler_x

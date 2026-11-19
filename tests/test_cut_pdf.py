@@ -37,7 +37,7 @@ def sheets_of(result):
 
 def test_pdf_has_page_per_sheet_with_markings_cuts_and_utilization(home):
     petrov(home)
-    r = api.cut_and_save("petrov", home)
+    r = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     assert r.output.file == str(home / "orders" / ORDER / "out" / "cutting-map.pdf")
     pages = pages_of(r)
     sheets = sheets_of(r)
@@ -57,15 +57,15 @@ def test_pdf_without_mock_has_no_watermark(home):
     petrov(home)
     for p in (home / "workshop").glob("*.yaml"):
         p.write_text(p.read_text(encoding="utf-8").replace("mock: true", "mock: false"), encoding="utf-8")
-    r = api.cut_and_save("petrov", home)
+    r = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     assert not r.mock
     assert all("МОК" not in t and ORDER in t for t in pages_of(r))
 
 
 def test_output_registered_with_source_version_and_replaced_on_rerun(home):
     petrov(home)
-    r = api.cut_and_save("petrov", home)
-    api.cut_and_save("petrov", home)
+    r = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
+    api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     outs = api.list_outputs("petrov", home)
     assert [(o.kind, o.source_version, o.path) for o in outs] == [
         ("cutting", 1, f"orders/{ORDER}/out/cutting-map.pdf")
@@ -77,14 +77,14 @@ def test_output_registered_with_source_version_and_replaced_on_rerun(home):
     p = home / "p2.json"
     p.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     assert api.import_project(ORDER, p, home=home).version == 2
-    r2 = api.cut_and_save("petrov", home)
+    r2 = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     assert [o.source_version for o in api.list_outputs("petrov", home)] == [2]
     assert "версия проекта 2" in pages_of(r2)[0]
 
 
 def test_failed_output_commit_preserves_previous_pdf_and_record(home):
     petrov(home)
-    original = api.cut_and_save("petrov", home)
+    original = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     path = Path(original.output.file)
     before = path.read_bytes()
     previous = api.list_outputs("petrov", home)
@@ -107,7 +107,7 @@ def test_failed_output_commit_preserves_previous_pdf_and_record(home):
         """)
 
     with pytest.raises(sqlite3.IntegrityError):
-        api.cut_and_save("petrov", home)
+        api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     assert path.read_bytes() == before
     assert api.list_outputs("petrov", home) == previous
     assert list(path.parent.iterdir()) == [path]
@@ -115,7 +115,9 @@ def test_failed_output_commit_preserves_previous_pdf_and_record(home):
 
 def test_concurrent_failed_saves_restore_the_original_pdf(home, monkeypatch):
     petrov(home)
-    original = api.cut_and_save("petrov", home, on=date(2026, 1, 1))
+    original = api.save(calc := api.calculation(order="petrov", home=home), calc.cut(), on=date(2026, 1, 1))[
+        0
+    ]
     path = Path(original.output.file)
     before = path.read_bytes()
     previous = api.list_outputs("petrov", home)
@@ -161,7 +163,7 @@ def test_concurrent_failed_saves_restore_the_original_pdf(home, monkeypatch):
     def save(name, day):
         threading.current_thread().name = name
         with pytest.raises(sqlite3.IntegrityError):
-            api.cut_and_save("petrov", home, on=date(2026, 1, day))
+            api.save(calc := api.calculation(order="petrov", home=home), calc.cut(), on=date(2026, 1, day))[0]
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(save, "first", 2)
@@ -203,7 +205,7 @@ def test_old_calculation_cannot_replace_newer_output(home, monkeypatch):
     def old_calculation():
         threading.current_thread().name = "old-calculation"
         with pytest.raises(OrderError, match="верси"):
-            api.cut_and_save("petrov", home)
+            api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         old = pool.submit(old_calculation)
@@ -214,7 +216,7 @@ def test_old_calculation_cannot_replace_newer_output(home, monkeypatch):
             p = home / "p2.json"
             p.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
             assert api.import_project(ORDER, p, home=home).version == 2
-            new = api.cut_and_save("petrov", home)
+            new = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
             path = Path(new.output.file)
             before = path.read_bytes()
             assert [o.source_version for o in api.list_outputs("petrov", home)] == [2]
@@ -230,13 +232,13 @@ def test_old_calculation_cannot_replace_newer_output(home, monkeypatch):
 
 def test_cut_from_order_writes_nothing(home):
     petrov(home)
-    r = api.cut_from_order("petrov", home)
+    r = api.calculation(order="petrov", home=home).cut()
     assert r.output is None and not (home / "orders" / ORDER / "out").exists()
 
 
 def test_every_part_has_a_numbered_line_in_the_list(home):
     petrov(home)
-    r = api.cut_and_save("petrov", home)
+    r = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     for text, (m, s) in zip(pages_of(r), sheets_of(r), strict=True):
         for i, pl in enumerate(s.placements, 1):
             assert f"{i}. {pl.part} {pl.w}×{pl.h}" in text
@@ -244,7 +246,7 @@ def test_every_part_has_a_numbered_line_in_the_list(home):
 
 def test_cut_numbers_overlap_neither_each_other_nor_part_labels_at_real_scale(home):
     petrov(home)
-    r = api.cut_and_save("petrov", home)
+    r = api.save(calc := api.calculation(order="petrov", home=home), calc.cut())[0]
     k = scheme_scale(page_area().w, (2800, 2070))
     assert 0.18 < k < 0.2  # реальный масштаб страницы, а не придуманный
     for m, s in sheets_of(r):

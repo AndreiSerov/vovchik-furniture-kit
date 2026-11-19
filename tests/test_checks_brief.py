@@ -54,7 +54,7 @@ def project_hood(home, **extra):
 
 
 def errors(path, home):
-    return [f for f in api.check_project(path, home).findings if f.level == "error"]
+    return [f for f in api.calculation(project=path, home=home).check().findings if f.level == "error"]
 
 
 # --- какой бриф --------------------------------------------------------------------
@@ -62,7 +62,7 @@ def errors(path, home):
 
 def test_no_brief_is_a_warning_and_does_not_block(home):
     api.order_new(ORDER, client="Петров П. П.")
-    result = api.check_project(project_dw(home), home)
+    result = api.calculation(project=project_dw(home), home=home).check()
     [f] = [f for f in result.findings if f.code == "brief_missing"]
     assert f.level == "warning" and "брифа нет, техника не сверена" in f.message.lower()
     assert "нет брифа" not in f.message.lower()
@@ -71,7 +71,7 @@ def test_no_brief_is_a_warning_and_does_not_block(home):
 
 def test_brief_present_means_no_missing_warning_and_result_names_the_brief(home):
     save_brief(home, [dw()])
-    result = api.check_project(project_dw(home), home)
+    result = api.calculation(project=project_dw(home), home=home).check()
     assert [f for f in result.findings if f.code == "brief_missing"] == []
     assert result.brief_id == 1 and result.brief_saved_at
 
@@ -79,7 +79,7 @@ def test_brief_present_means_no_missing_warning_and_result_names_the_brief(home)
 def test_latest_brief_is_used(home):
     save_brief(home, [])
     save_brief(home, [dw()], name="b2.json")
-    assert api.check_project(project_dw(home), home).brief_id == 2
+    assert api.calculation(project=project_dw(home), home=home).check().brief_id == 2
 
 
 # --- состав и привязка к шаблонам ------------------------------------------------------

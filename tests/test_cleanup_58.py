@@ -60,14 +60,14 @@ def test_check_project_says_the_same_as_import(home):
 def test_edges_cli_text_has_one_decimal_for_purchase(home):
     petrov(home)
     out = runner.invoke(app, ["edges", ORDER]).output
-    for total in api.parts_from_order(ORDER, home).edges.values():
+    for total in api.calculation(order=ORDER, home=home).parts().edges.values():
         assert f"к закупке {total.purchase_m:.1f} м" in out
     assert "50.9 м" in out and "50.900" not in out
 
 
 def test_edging_pdf_purchase_column_has_one_decimal(home):
     petrov(home)
-    result = api.edges_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.edging())[0]
     text = "\n".join(page.extract_text() for page in PdfReader(result.output.file).pages)
     assert "50.9" in text and "50.900" not in text
     for total in result.edges.values():
@@ -91,7 +91,7 @@ def test_purchase_digits_follow_the_rounding_step(home, step, digits):
     path.write_text(text, encoding="utf-8")
     petrov(home)
     out = runner.invoke(app, ["edges", ORDER]).output
-    result = api.edges_and_save(ORDER, home)
+    result = api.save(calc := api.calculation(order=ORDER, home=home), calc.edging())[0]
     pdf = "\n".join(page.extract_text() for page in PdfReader(result.output.file).pages)
     for total in result.edges.values():
         assert f"к закупке {total.purchase_m:.{digits}f} м" in out
@@ -101,7 +101,7 @@ def test_purchase_digits_follow_the_rounding_step(home, step, digits):
 def test_production_edge_line_is_unchanged(home):
     petrov(home)
     out = runner.invoke(app, ["production", ORDER]).output
-    for total in api.parts_from_order(ORDER, home).edges.values():
+    for total in api.calculation(order=ORDER, home=home).parts().edges.values():
         assert f"к закупке {total.purchase_m:.1f} м" in out
 
 
@@ -213,7 +213,7 @@ def test_production_bundle_edging_map_follows_the_rounding_step_of_home(home, mo
     petrov(home)
     monkeypatch.delenv("KITCHEN_HOME")
     monkeypatch.chdir(REPO)  # у репозитория свой workshop/ с шагом 0.1
-    result = api.production_and_save(ORDER, home)
+    result = api.production(api.calculation(order=ORDER, home=home))
     pdf = home / "orders" / ORDER / "out" / "edging-map.pdf"
     text = "\n".join(page.extract_text() for page in PdfReader(pdf).pages)
     assert result.edging.purchase_digits == 2
@@ -224,7 +224,7 @@ def test_production_bundle_edging_map_follows_the_rounding_step_of_home(home, mo
 def test_edges_cli_keeps_three_decimals_for_clean_and_allowance(home):
     petrov(home)
     out = runner.invoke(app, ["edges", ORDER]).output
-    for edge_id, t in api.parts_from_order(ORDER, home).edges.items():
+    for edge_id, t in api.calculation(order=ORDER, home=home).parts().edges.items():
         assert (
             f"Кромка {edge_id}: чистая {t.clean_m:.3f} м, с припуском {t.with_allowance_m:.3f} м, "
             f"к закупке {t.purchase_m:.1f} м"
@@ -260,7 +260,7 @@ def test_parts_and_production_edge_line_follow_the_rounding_step(home):
     petrov(home)
     for command in ("parts", "production"):
         out = runner.invoke(app, [command, ORDER]).output
-        for total in api.parts_from_order(ORDER, home).edges.values():
+        for total in api.calculation(order=ORDER, home=home).parts().edges.values():
             assert f"к закупке {total.purchase_m:.2f} м" in out
 
 

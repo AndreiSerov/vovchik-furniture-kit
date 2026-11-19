@@ -36,12 +36,12 @@ def unmock(home):
 
 
 def all_marks(home):
-    return [p.id for m in api.parts_from_order(ORDER, home).modules for p in m.parts]
+    return [p.id for m in api.calculation(order=ORDER, home=home).parts().modules for p in m.parts]
 
 
 def test_petrov_pdf_has_every_module_and_every_mark_once_in_the_parts_table(home):
     petrov(home)
-    r = api.assembly_and_save(ORDER, home)
+    r = api.save(calc := api.calculation(order=ORDER, home=home), calc.assembly())[0]
     assert r.output.file == str(home / "orders" / ORDER / "out" / "assembly.pdf")
     text = "\n".join(pages_of(r))
     marks = all_marks(home)
@@ -66,7 +66,7 @@ def test_petrov_pdf_has_every_module_and_every_mark_once_in_the_parts_table(home
 
 def test_dishwasher_block_is_one_line_and_has_no_empty_sections(home):
     petrov(home)
-    text = "\n".join(pages_of(api.assembly_and_save(ORDER, home)))
+    text = "\n".join(pages_of(api.save(calc := api.calculation(order=ORDER, home=home), calc.assembly())[0]))
     line = "Н6 — фасад посудомоечной машины, 450 мм: корпуса нет, фасад Н6-фасад крепится к посудомойке на объекте"
     flat = re.sub(r"\s+", " ", text)
     assert line in flat
@@ -76,11 +76,11 @@ def test_dishwasher_block_is_one_line_and_has_no_empty_sections(home):
 
 def test_watermark_banner_and_version_in_footer_when_mock_and_none_without(home):
     petrov(home)
-    r = api.assembly_and_save(ORDER, home)
+    r = api.save(calc := api.calculation(order=ORDER, home=home), calc.assembly())[0]
     for text in pages_of(r):
         assert text.count(MOCK) == 2 and "версия проекта 1" in text
     unmock(home)
-    r = api.assembly_and_save(ORDER, home)
+    r = api.save(calc := api.calculation(order=ORDER, home=home), calc.assembly())[0]
     assert not r.mock
     for text in pages_of(r):
         assert "МОК" not in text and "версия проекта 1" in text
@@ -94,7 +94,7 @@ def test_empty_project_is_one_page_saying_no_modules(home):
     path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     api.order_new(ORDER, home=home)
     api.import_project(ORDER, path, home=home)
-    r = api.assembly_and_save(ORDER, home)
+    r = api.save(calc := api.calculation(order=ORDER, home=home), calc.assembly())[0]
     assert r.modules == []
     pages = pages_of(r)
     assert len(pages) == 1 and "Модулей нет" in pages[0]
@@ -102,7 +102,7 @@ def test_empty_project_is_one_page_saying_no_modules(home):
 
 def test_layout_keeps_module_whole_and_text_inside_the_sheet(home):
     petrov(home)
-    result = api.assembly_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).assembly()
     pages = api.assembly_layout(result)
     assert len(pages) > 1
     for page in pages:
@@ -118,7 +118,7 @@ def test_layout_keeps_module_whole_and_text_inside_the_sheet(home):
 
 def test_long_module_continues_on_next_page_with_continuation_heading(home):
     petrov(home)
-    result = api.assembly_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).assembly()
     block = result.modules[0]
     long = block.model_copy(update={"parts": block.parts * 8})
     pages = api.assembly_layout(result.model_copy(update={"modules": [long]}))
@@ -131,7 +131,7 @@ def test_long_module_continues_on_next_page_with_continuation_heading(home):
 
 def test_output_is_registered_and_becomes_stale_after_new_version(home):
     petrov(home)
-    api.assembly_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.assembly())[0]
     outputs = [o for o in api.list_outputs(ORDER, home) if o.kind == "assembly"]
     assert [(o.path, o.source_version) for o in outputs] == [(f"orders/{ORDER}/out/assembly.pdf", 1)]
     project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
@@ -142,13 +142,13 @@ def test_output_is_registered_and_becomes_stale_after_new_version(home):
     status = api.status(ORDER, home)
     assert [s.command for s in status.stale if s.kind == "assembly"] == [f"kitchen assembly {ORDER}"]
     assert "сборочный лист" in status.text
-    api.assembly_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.assembly())[0]
     assert not [s for s in api.status(ORDER, home).stale if s.kind == "assembly"]
 
 
 def test_from_order_writes_nothing(home):
     petrov(home)
-    r = api.assembly_from_order(ORDER, home)
+    r = api.calculation(order=ORDER, home=home).assembly()
     assert r.output is None and r.source.version == 1
     assert not (home / "orders" / ORDER / "out" / "assembly.pdf").exists()
 
@@ -156,7 +156,7 @@ def test_from_order_writes_nothing(home):
 def test_cli_order_text_and_json(home):
     petrov(home)
     data = json.loads(runner.invoke(app, ["assembly", "petrov", "--json"]).output)
-    expected = json.loads(api.assembly_from_order(ORDER, home).model_dump_json())
+    expected = json.loads(api.calculation(order=ORDER, home=home).assembly().model_dump_json())
     assert data["modules"] == expected["modules"] and data["mock"] is True
     assert data["output"]["kind"] == "assembly" and data["source"]["version"] == 1
     assert set(data) >= {"source", "output", "warnings", "mock", "modules"}
@@ -193,7 +193,7 @@ def test_cli_project_writes_nothing_and_order_with_project_is_an_error(home):
 
 def test_production_writes_assembly_not_drilling_map_and_leaves_nothing_stale(home):
     petrov(home)
-    r = api.production_and_save(ORDER, home)
+    r = api.production(api.calculation(order=ORDER, home=home))
     assert {o.kind for o in api.list_outputs(ORDER, home)} == set(api.PRODUCTION_KINDS)
     assert set(api.PRODUCTION_KINDS) == {
         "cutting", "edging", "purchase_md", "purchase_json", "assembly", "trip",
@@ -207,7 +207,7 @@ def test_production_writes_assembly_not_drilling_map_and_leaves_nothing_stale(ho
     v2.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     api.import_project(ORDER, v2, home=home)
     assert {s.kind for s in api.status(ORDER, home).stale} == set(api.PRODUCTION_KINDS)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     assert not api.status(ORDER, home).stale
 
 
@@ -231,7 +231,7 @@ def test_bad_workshop_stage_list_blocks_the_command(home):
         re.sub(r"^сборка:.*\n", "сборка: [корпус]\n", path.read_text(encoding="utf-8"), flags=re.MULTILINE)
     )
     with pytest.raises(KitchenError):
-        api.assembly_and_save(ORDER, home)
+        api.save(calc := api.calculation(order=ORDER, home=home), calc.assembly())[0]
 
 
 SECTION_HEADS = ("Детали (", "Фурнитура:", "Порядок сборки:")
@@ -239,7 +239,7 @@ SECTION_HEADS = ("Детали (", "Фурнитура:", "Порядок сбо
 
 def test_section_heading_is_never_the_last_line_of_a_page(home):
     petrov(home)
-    result = api.assembly_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).assembly()
     block = result.modules[0]
     for n in range(40, 120):
         long = block.model_copy(update={"parts": (block.parts * 10)[:n]})
@@ -250,7 +250,7 @@ def test_section_heading_is_never_the_last_line_of_a_page(home):
 
 def test_carcass_module_without_workshop_hardware_says_none(home):
     petrov(home)
-    result = api.assembly_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).assembly()
     bare = result.modules[0].model_copy(update={"hardware": []})
     pages = api.assembly_layout(result.model_copy(update={"modules": [bare]}))
     assert "Фурнитура: нет" in [line.text for line in pages[0].lines]
@@ -261,7 +261,7 @@ def test_wrapped_step_continues_with_hanging_indent(home):
     petrov(home)
     long_name = "Петля Blum Clip Top Blumotion 110° накладная с ответной планкой и заглушкой, усиленная серия"
     edit(home, "hardware.yaml", "Петля Blum Clip Top Blumotion 110° накладная", long_name)
-    pages = api.assembly_layout(api.assembly_from_order(ORDER, home))
+    pages = api.assembly_layout(api.calculation(order=ORDER, home=home).assembly())
     lines = [line for page in pages for line in page.lines]
     i = next(i for i, ln in enumerate(lines) if ln.text.startswith("4. Петли") and "усиленная" in ln.text)
     assert lines[i + 1].text.startswith("— 4 шт, фасады:") and lines[i + 1].x > lines[i].x

@@ -41,10 +41,10 @@ def apart(a, b):
 
 
 def test_base_door_is_cut_per_sheet_material_without_facades(home, base_door_project):
-    result = api.cut_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).cut()
     by = materials(result)
     assert set(by) == {"ldsp_16_white", "hdf_3_white"}  # фасад МДФ в раскрой не идёт, ХДФ отдельно от ЛДСП
-    parts = {p.id: p for p in api.parts_from_project(base_door_project, home).modules[0].parts}
+    parts = {p.id: p for p in api.calculation(project=base_door_project, home=home).parts().modules[0].parts}
     placed = {pl.part for m in result.materials for s in m.sheets for pl in s.placements}
     assert placed == {pid for pid, p in parts.items() if p.material != "mdf_enamel_matt"}
     assert result.mock is True and result.source.kind == "file"
@@ -53,10 +53,10 @@ def test_base_door_is_cut_per_sheet_material_without_facades(home, base_door_pro
 def test_pieces_are_inside_working_field_and_do_not_overlap_with_kerf(home):
     set_sheet(home, (2800, 1200))
     path = write_project(home, lambda p: None)
-    result = api.cut_from_project(path, home)
+    result = api.calculation(project=path, home=home).cut()
     ldsp = materials(result)["ldsp_16_white"]
     assert ldsp.sheet_count > 1 and ldsp.sheet_count == len(ldsp.sheets)
-    sizes = {p.id: p for m in api.parts_from_project(path, home).modules for p in m.parts}
+    sizes = {p.id: p for m in api.calculation(project=path, home=home).parts().modules for p in m.parts}
     for sheet in ldsp.sheets:
         for pl in sheet.placements:
             assert pl.x >= TRIM and pl.y >= TRIM, pl.part
@@ -70,10 +70,10 @@ def test_pieces_are_inside_working_field_and_do_not_overlap_with_kerf(home):
 
 def test_textured_material_is_never_rotated_and_grain_runs_along_x(home):
     path = write_project(home, lambda p: p["materials"].update(body="ldsp_16_oak"))
-    result = api.cut_from_project(path, home)
+    result = api.calculation(project=path, home=home).cut()
     oak = materials(result)["ldsp_16_oak"]
     assert oak.texture is True and oak.sheet_size == (2800, 2070)
-    sizes = {p.id: p for m in api.parts_from_project(path, home).modules for p in m.parts}
+    sizes = {p.id: p for m in api.calculation(project=path, home=home).parts().modules for p in m.parts}
     placements = [pl for s in oak.sheets for pl in s.placements]
     assert placements and not any(pl.rotated for pl in placements)
     assert all((pl.w, pl.h) == (sizes[pl.part].length, sizes[pl.part].width) for pl in placements)
@@ -81,7 +81,7 @@ def test_textured_material_is_never_rotated_and_grain_runs_along_x(home):
 
 def test_untextured_material_rotates_when_the_sheet_demands_it(home):
     set_sheet(home, (800, 2800))  # узкий лист: длинные детали встают только поперёк первой оси
-    result = api.cut_from_project(write_project(home, lambda p: None), home)
+    result = api.calculation(project=write_project(home, lambda p: None), home=home).cut()
     placements = [pl for s in materials(result)["ldsp_16_white"].sheets for pl in s.placements]
     assert any(pl.rotated for pl in placements)
     assert all(pl.x + pl.w <= 800 - TRIM and pl.y + pl.h <= 2800 - TRIM for pl in placements)
@@ -90,7 +90,7 @@ def test_untextured_material_rotates_when_the_sheet_demands_it(home):
 def test_part_larger_than_working_field_is_an_error(home):
     set_sheet(home, (2100, 2070))  # поле 2080: боковина пенала 2100 мм не влезает ни так, ни так
     with pytest.raises(OrderError, match=r"П1-бок-Л.*2100.*не помещается"):
-        api.cut_from_project(write_project(home, lambda p: None), home)
+        api.calculation(project=write_project(home, lambda p: None), home=home).cut()
 
 
 def replay_cuts(placements, cuts, size):
@@ -176,7 +176,7 @@ def test_part_two_mm_from_field_edge_comes_out_exactly_nominal():
 
 def test_cut_order_is_guillotine_and_frees_every_part(home):
     set_sheet(home, (2800, 1200))
-    result = api.cut_from_project(write_project(home, lambda p: None), home)
+    result = api.calculation(project=write_project(home, lambda p: None), home=home).cut()
     for m in result.materials:
         for sheet in m.sheets:
             assert sheet.cuts, "у листа с деталями есть резы"
@@ -207,17 +207,17 @@ def test_cut_longer_than_machine_maximum_is_an_error(home):
     path = home / "workshop/equipment.yaml"
     path.write_text(path.read_text().replace("макс_длина_реза: 3200", "макс_длина_реза: 1500"))
     with pytest.raises(OrderError, match=r"длиннее максимума станка 1500"):
-        api.cut_from_project(write_project(home, lambda p: None), home)
+        api.calculation(project=write_project(home, lambda p: None), home=home).cut()
 
 
 def test_result_is_deterministic(home):
     path = write_project(home, lambda p: None)
-    first = api.cut_from_project(path, home).model_dump_json()
-    assert api.cut_from_project(path, home).model_dump_json() == first
+    first = api.calculation(project=path, home=home).cut().model_dump_json()
+    assert api.calculation(project=path, home=home).cut().model_dump_json() == first
 
 
 def test_countertop_is_cut_linearly_apart_from_sheet_parts(home):
-    result = api.cut_from_project(write_project(home, lambda p: None), home)
+    result = api.calculation(project=write_project(home, lambda p: None), home=home).cut()
     top = result.countertop
     assert (top.item, top.sheet_length, top.sheet_count) == ("top_38_marble", 4100, 1)
     assert top.total_length_mm == 3400  # нижние ряды 2200 и 1200 мм без пенала
@@ -226,7 +226,7 @@ def test_countertop_is_cut_linearly_apart_from_sheet_parts(home):
 
 def test_without_countertop_there_is_no_countertop_cut(home):
     path = write_project(home, lambda p: p["materials"].pop("countertop"))
-    assert api.cut_from_project(path, home).countertop is None
+    assert api.calculation(project=path, home=home).cut().countertop is None
 
 
 @pytest.fixture
@@ -239,7 +239,7 @@ def petrov(home):
 def test_petrov_cut_numbers_and_source(petrov):
     """Эталон по моку, ПРОВЕРИТЬ МАСТЕРУ (DECISIONS.md): ЛДСП 71 деталь 17.2312 м² — 4 листа (нижняя граница по
     площади 3.12), ХДФ 11 деталей 5.2302 м² — 2 листа (один лист 5.796 м² не вмещает их гильотинно)."""
-    result = api.cut_from_order(ORDER, petrov)
+    result = api.calculation(order=ORDER, home=petrov).cut()
     assert (result.source.kind, result.source.order, result.source.version) == ("order", ORDER, 1)
     assert result.mock is True and (result.kerf, result.trim, result.max_cut_length) == (4, 10, 3200)
     by = materials(result)
@@ -249,7 +249,7 @@ def test_petrov_cut_numbers_and_source(petrov):
     assert (hdf.sheet_count, hdf.parts_count, hdf.parts_area_m2) == (2, 11, 5.2302)
     assert ldsp.utilization == pytest.approx(17.2312 / (4 * 2.8 * 2.07), abs=1e-4)
     assert ldsp.waste_m2 == pytest.approx(4 * 2.8 * 2.07 - 17.2312, abs=1e-3)
-    parts = [p for m in api.parts_from_order(ORDER, petrov).modules for p in m.parts]
+    parts = [p for m in api.calculation(order=ORDER, home=petrov).parts().modules for p in m.parts]
     expected = {p.id for p in parts if p.material != "mdf_enamel_matt"}
     assert {pl.part for m in result.materials for s in m.sheets for pl in s.placements} == expected
     for m in result.materials:
@@ -262,14 +262,14 @@ def test_petrov_cut_numbers_and_source(petrov):
 def test_no_project_yet_is_an_error(home):
     api.order_new(ORDER, home=home)
     with pytest.raises(OrderError, match="проекта ещё нет"):
-        api.cut_from_order(ORDER, home)
+        api.calculation(order=ORDER, home=home).cut()
 
 
 def test_sheet_trimming_cut_is_checked_against_machine_maximum(home):
     path = home / "workshop/equipment.yaml"
     path.write_text(path.read_text().replace("макс_длина_реза: 3200", "макс_длина_реза: 2790"))
     with pytest.raises(OrderError, match=r"подрезка листа 2800 мм.*2790"):
-        api.cut_from_project(write_project(home, lambda p: None), home)
+        api.calculation(project=write_project(home, lambda p: None), home=home).cut()
 
 
 def test_every_candidate_layout_replays_as_guillotine(home):
@@ -347,6 +347,6 @@ def test_material_texture_forbids_rotation_of_all_its_parts(home):
     )
     project = write_project(home, lambda p: None)
     with pytest.raises(OrderError, match="П1-зад"):
-        api.cut_from_project(project, home)
-    found = api.check_project(project, home).errors
+        api.calculation(project=project, home=home).cut()
+    found = api.calculation(project=project, home=home).check().errors
     assert [f.subject for f in found if f.code == "part_exceeds_sheet"] == ["П1-зад"]

@@ -22,7 +22,7 @@ def _problems(home):
 
 
 def _part(home, project, part_id):
-    result = api.parts_from_project(project, home)
+    result = api.calculation(project=project, home=home).parts()
     return next(p for m in result.modules for p in m.parts if p.id == part_id)
 
 
@@ -67,7 +67,7 @@ def test_pair_formula_with_cyrillic_variable(home, base_door_project):
 def test_inexact_division_is_a_russian_error_with_module_and_width(home, base_door_project):
     _break(home, "construction.yaml", '"(W - 4 - 2) / 2"', '"(W - 3) / 2"')
     with pytest.raises(OrderError) as e:
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
     text = "\n".join(e.value.problems)
     assert "Н1" in text and "600" in text and "нацело" in text
 
@@ -75,7 +75,7 @@ def test_inexact_division_is_a_russian_error_with_module_and_width(home, base_do
 def test_division_by_zero_is_a_russian_error(home, base_door_project):
     _break(home, "construction.yaml", '"(W - 4 - 2) / 2"', '"W / 0"')
     with pytest.raises((OrderError, WorkshopError)) as e:
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
     assert "деление на ноль" in "\n".join(e.value.problems)
 
 

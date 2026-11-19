@@ -15,7 +15,7 @@ ORDER = "2026-047-petrov"
 
 
 def codes(path, home, code):
-    return [f for f in api.check_project(path, home).findings if f.code == code]
+    return [f for f in api.calculation(project=path, home=home).check().findings if f.code == code]
 
 
 def new_order():
@@ -26,7 +26,7 @@ def test_fewer_shelf_pins_is_drilling_mismatch_warning_with_drilling_text(home):
     """Проверка 1."""
     _edit_workshop(home, "construction.yaml", "полкодержателей: 4", "полкодержателей: 2")
     with pytest.raises(OrderError) as refusal:
-        api.drilling_from_project(PETROV, home)
+        api.calculation(project=PETROV, home=home).drilling()
     [f] = codes(PETROV, home, "drilling_mismatch")
     assert f.level == "warning"
     assert f.message == str(refusal.value)
@@ -42,7 +42,7 @@ def test_two_plates_per_hinge_is_drilling_mismatch(home):
         home, "construction.yaml", "ответные_планки: по одной на петлю", "ответные_планки: по 2 на петлю"
     )
     with pytest.raises(OrderError) as refusal:
-        api.drilling_from_project(PETROV, home)
+        api.calculation(project=PETROV, home=home).drilling()
     [f] = codes(PETROV, home, "drilling_mismatch")
     assert f.level == "warning"
     assert f.message == str(refusal.value)
@@ -56,7 +56,7 @@ def test_no_shelves_no_hinges_gives_no_drilling_finding(home):
     _edit_workshop(home, "construction.yaml", "полкодержателей: 4", "полкодержателей: 2")
     path = make_project(home / "p.json", [("A", 600, [("lower", [module("Н1", "base_drawers", 600)])])])
     assert codes(path, home, "drilling_mismatch") == []
-    api.drilling_from_project(path, home)
+    api.calculation(project=path, home=home).drilling()
 
 
 def _small_saw(home):
@@ -67,7 +67,7 @@ def test_saw_shorter_than_sheet_is_sheet_over_saw_error_with_cut_text(home):
     """Проверка 4."""
     _small_saw(home)
     with pytest.raises(OrderError) as refusal:
-        api.cut_from_project(PETROV, home)
+        api.calculation(project=PETROV, home=home).cut()
     found = codes(PETROV, home, "sheet_over_saw")
     assert found and all(f.level == "error" for f in found)
     assert str(refusal.value) in {f.message for f in found}
@@ -95,7 +95,7 @@ def test_part_larger_than_sheet_field_is_part_exceeds_sheet_with_cut_text(home):
     path = home / "p.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(OrderError) as refusal:
-        api.cut_from_project(path, home)
+        api.calculation(project=path, home=home).cut()
     found = codes(path, home, "part_exceeds_sheet")
     assert found and all(f.level == "error" for f in found)
     assert str(refusal.value) in {f.message for f in found}
@@ -103,7 +103,9 @@ def test_part_larger_than_sheet_field_is_part_exceeds_sheet_with_cut_text(home):
 
 def test_petrov_on_standard_workshop_has_same_findings_as_before(home):
     """Проверка 6: снимок до правки."""
-    found = [(f.code, f.level, f.subject) for f in api.check_project(PETROV, home).findings]
+    found = [
+        (f.code, f.level, f.subject) for f in api.calculation(project=PETROV, home=home).check().findings
+    ]
     assert found == [
         ("brief_missing", "warning", ORDER),
         ("appliance_no_data", "warning", "Н5"),
@@ -114,7 +116,7 @@ def test_petrov_on_standard_workshop_has_same_findings_as_before(home):
 def test_saw_equal_to_sheet_is_no_finding_and_cut_passes(home):
     """Граница (ревью 61): лист 2800 при максимуме реза 2800 — раскрой режет, находки нет."""
     _edit_workshop(home, "equipment.yaml", "макс_длина_реза: 3200", "макс_длина_реза: 2800")
-    api.cut_from_project(PETROV, home)
+    api.calculation(project=PETROV, home=home).cut()
     assert codes(PETROV, home, "sheet_over_saw") == []
 
 
@@ -132,7 +134,7 @@ def test_drilling_mismatch_is_found_even_when_one_module_does_not_build(home, tm
     data["walls"][0]["rows"][0]["modules"][0]["template"] = "foo"
     path = tmp_path / "broken.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    found = api.check_project(path, home).findings
+    found = api.calculation(project=path, home=home).check().findings
     assert {"module_build", "drilling_mismatch"} <= {f.code for f in found}
     [mismatch] = [f for f in found if f.code == "drilling_mismatch"]
     assert mismatch.subject == data["order"]

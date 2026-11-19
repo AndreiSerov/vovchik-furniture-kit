@@ -96,26 +96,30 @@ def lines(result):
 
 def test_cost_equals_purchase_total_on_petrov(home):
     petrov(home)
-    result = api.estimate_from_order(ORDER, home)
-    assert result.materials_cost == api.purchase_from_order(ORDER, home).total
+    result = api.calculation(order=ORDER, home=home).estimate()
+    assert result.materials_cost == api.calculation(order=ORDER, home=home).purchase().total
     assert result.source.version == 1
 
 
 def test_cost_equals_purchase_total_on_small_project(small):
-    result = api.estimate_from_order(ORDER, small)
-    assert result.materials_cost == api.purchase_from_order(ORDER, small).total
+    result = api.calculation(order=ORDER, home=small).estimate()
+    assert result.materials_cost == api.calculation(order=ORDER, home=small).purchase().total
 
 
 def test_small_project_quantities_match_hand_count(small):
-    result = api.estimate_from_order(ORDER, small)
+    result = api.calculation(order=ORDER, home=small).estimate()
     assert {op: line.quantity for op, line in lines(result).items()} == SMALL_COUNTS
     assert (
-        api.parts_from_project(small / "small.json", small).edges["edge_08_white"].with_allowance_m == 6.588
+        api.calculation(project=small / "small.json", home=small)
+        .parts()
+        .edges["edge_08_white"]
+        .with_allowance_m
+        == 6.588
     )
 
 
 def test_small_project_labor_is_minutes_times_rate(small):
-    result = api.estimate_from_order(ORDER, small)
+    result = api.calculation(order=ORDER, home=small).estimate()
     # норма × количество, минут: 4*17, 3*6.588, 5*16, 30*2, 15*3, 45*3, 60, 60, 90, 90, 240
     minutes = {
         "cut": 68,
@@ -153,7 +157,7 @@ def test_small_project_labor_is_minutes_times_rate(small):
 
 
 def test_labor_total_is_sum_minutes_times_rate(small):
-    r = api.estimate_from_order(ORDER, small)
+    r = api.calculation(order=ORDER, home=small).estimate()
     assert r.labor.total == 15796.07  # 947.764 мин × 1000 / 60 = 15796.0667
     assert sum(line.amount for line in r.labor.lines) == pytest.approx(15796.06)  # строки — до копеек
 
@@ -164,13 +168,13 @@ def test_sink_with_tandembox_insert_counts_a_drawer_set(small):
     data["walls"][0]["rows"][0]["modules"][0]["contents"] = {"inserts": ["tandembox_M_500"]}
     path = small / "sink-insert.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    assert lines(api.estimate_from_project(path, small))["drawer_assembly_extra"].quantity == 4
+    assert lines(api.calculation(project=path, home=small).estimate())["drawer_assembly_extra"].quantity == 4
 
 
 def test_petrov_quantities(home):
     petrov(home)
-    got = lines(api.estimate_from_order(ORDER, home))
-    parts = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    got = lines(api.calculation(order=ORDER, home=home).estimate())
+    parts = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     assert got["cut"].quantity == 82  # 71 ЛДСП + 11 ХДФ; фасады и столешница не считаются
     project = json.loads((FIXTURES / "petrov_project.json").read_text(encoding="utf-8"))
     labels = [
@@ -186,9 +190,9 @@ def test_petrov_quantities(home):
 
 
 def test_norm_swap_changes_only_its_line_and_total(small):
-    before = api.estimate_from_order(ORDER, small)
+    before = api.calculation(order=ORDER, home=small).estimate()
     edit_workshop(small, "labor.yaml", "распил_на_деталь: 4", "распил_на_деталь: 10")
-    after = api.estimate_from_order(ORDER, small)
+    after = api.calculation(order=ORDER, home=small).estimate()
     b, a = lines(before), lines(after)
     assert a["cut"].minutes == 170 and a["cut"].amount == 2833.33
     assert {k: v for k, v in a.items() if k != "cut"} == {k: v for k, v in b.items() if k != "cut"}
@@ -197,9 +201,9 @@ def test_norm_swap_changes_only_its_line_and_total(small):
 
 
 def test_rate_swap_changes_amounts_not_minutes(small):
-    before = api.estimate_from_order(ORDER, small)
+    before = api.calculation(order=ORDER, home=small).estimate()
     edit_workshop(small, "labor.yaml", "ставка_в_час: 1000", "ставка_в_час: 1500")
-    after = api.estimate_from_order(ORDER, small)
+    after = api.calculation(order=ORDER, home=small).estimate()
     for op, line in lines(after).items():
         assert line.minutes == lines(before)[op].minutes
     assert lines(after)["install"].amount == 3375
@@ -216,7 +220,7 @@ def quiet_pricing(home, rounding="вверх до 1000"):
 
 
 def test_price_formula_with_default_pricing(small):
-    result = api.estimate_from_order(ORDER, small)
+    result = api.calculation(order=ORDER, home=small).estimate()
     materials = Decimal(str(result.materials_cost))
     raw = materials * Decimal("1.13") + Decimal(2500) + Decimal(str(result.labor.total))
     expected = int((raw / 1000).to_integral_value(rounding=ROUND_CEILING)) * 1000
@@ -235,8 +239,8 @@ def test_markup_and_consumables_follow_pricing_yaml_on_petrov(home, markup, cons
     edit_workshop(
         home, "pricing.yaml", "расходники_от_материалов: 0.03", f"расходники_от_материалов: {consumables}"
     )
-    r = api.estimate_from_order(ORDER, home)
-    materials = Decimal(str(api.purchase_from_order(ORDER, home).total))
+    r = api.calculation(order=ORDER, home=home).estimate()
+    materials = Decimal(str(api.calculation(order=ORDER, home=home).purchase().total))
     assert r.markup == float((materials * Decimal(markup)).quantize(Decimal("0.01"), ROUND_HALF_UP))
     assert r.consumables == float((materials * Decimal(consumables)).quantize(Decimal("0.01"), ROUND_HALF_UP))
     raw = materials * (1 + Decimal(markup) + Decimal(consumables)) + 2500 + Decimal(str(r.labor.total))
@@ -253,27 +257,31 @@ def with_delivery(home, amount):
 
 def test_price_rounds_up_but_exact_multiple_stays(small):
     quiet_pricing(small)
-    materials = Decimal(str(api.estimate_from_order(ORDER, small).materials_cost))
+    materials = Decimal(str(api.calculation(order=ORDER, home=small).estimate().materials_cost))
     target = (materials / 1000).to_integral_value(rounding=ROUND_CEILING) * 1000 + 1000
     with_delivery(small, target - materials)
-    assert api.estimate_from_order(ORDER, small).price == target  # ровно кратно: не растёт
+    assert api.calculation(order=ORDER, home=small).estimate().price == target  # ровно кратно: не растёт
     with_delivery(small, f"{target - materials + 1}")
-    assert api.estimate_from_order(ORDER, small).price == target + 1000  # на рубль больше: растёт
+    assert (
+        api.calculation(order=ORDER, home=small).estimate().price == target + 1000
+    )  # на рубль больше: растёт
     with_delivery(small, f"{target - materials - 1}")
-    assert api.estimate_from_order(ORDER, small).price == target  # на рубль меньше: тот же кратный
+    assert (
+        api.calculation(order=ORDER, home=small).estimate().price == target
+    )  # на рубль меньше: тот же кратный
 
 
 def test_price_rounding_rule_comes_from_pricing_yaml(small):
     quiet_pricing(small, rounding="вниз до 500")
-    materials = Decimal(str(api.estimate_from_order(ORDER, small).materials_cost))
+    materials = Decimal(str(api.calculation(order=ORDER, home=small).estimate().materials_cost))
     base = (materials / 500).to_integral_value(rounding=ROUND_CEILING) * 500 + 500
     with_delivery(small, base - materials + 499)
-    result = api.estimate_from_order(ORDER, small)
+    result = api.calculation(order=ORDER, home=small).estimate()
     assert result.price == base and result.rounding == "вниз до 500"
 
 
 def test_only_total_price_is_rounded(small):
-    result = api.estimate_from_order(ORDER, small)
+    result = api.calculation(order=ORDER, home=small).estimate()
     assert result.price_before_rounding != result.price
     assert result.price_before_rounding * 100 == pytest.approx(round(result.price_before_rounding * 100))
     parts = (result.materials_cost, result.markup, result.consumables, result.delivery, result.labor.total)
@@ -285,7 +293,7 @@ def test_only_total_price_is_rounded(small):
 
 
 def test_mock_warning_in_json_and_markdown(small):
-    result = api.estimate_and_save(ORDER, small)
+    result = api.save(calc := api.calculation(order=ORDER, home=small), calc.estimate())[0]
     assert result.mock and result.warning == MOCK_BANNER
     data = json.loads(Path(result.outputs[1].file).read_text(encoding="utf-8"))
     assert data["warning"] == MOCK_BANNER
@@ -294,7 +302,7 @@ def test_mock_warning_in_json_and_markdown(small):
 
 def test_no_mock_warning_when_all_files_are_real(small):
     unmock(small)
-    result = api.estimate_and_save(ORDER, small)
+    result = api.save(calc := api.calculation(order=ORDER, home=small), calc.estimate())[0]
     assert result.mock is False and result.warning is None
     data = json.loads(Path(result.outputs[1].file).read_text(encoding="utf-8"))
     assert data["warning"] is None
@@ -302,7 +310,7 @@ def test_no_mock_warning_when_all_files_are_real(small):
 
 
 def test_markdown_and_json_come_from_one_model(small):
-    result = api.estimate_and_save(ORDER, small)
+    result = api.save(calc := api.calculation(order=ORDER, home=small), calc.estimate())[0]
     outputs = {o.kind: o for o in result.outputs}
     assert set(outputs) == {"estimate_md", "estimate_json"}
     assert json.loads(Path(outputs["estimate_json"].file).read_text(encoding="utf-8")) == json.loads(
@@ -320,9 +328,9 @@ def test_markdown_and_json_come_from_one_model(small):
 
 
 def test_repeat_estimate_replaces_files_and_records(small):
-    first = api.estimate_and_save(ORDER, small)
+    first = api.save(calc := api.calculation(order=ORDER, home=small), calc.estimate())[0]
     edit_workshop(small, "labor.yaml", "распил_на_деталь: 4", "распил_на_деталь: 10")
-    second = api.estimate_and_save(ORDER, small)
+    second = api.save(calc := api.calculation(order=ORDER, home=small), calc.estimate())[0]
     assert second.labor.total != first.labor.total
     records = [o for o in api.list_outputs(ORDER, small) if o.kind.startswith("estimate")]
     assert len(records) == 2
@@ -333,8 +341,8 @@ def test_repeat_estimate_replaces_files_and_records(small):
 
 
 def test_estimate_does_not_touch_other_outputs(small):
-    api.purchase_and_save(ORDER, small)
-    api.estimate_and_save(ORDER, small)
+    api.save(calc := api.calculation(order=ORDER, home=small), calc.purchase())[0]
+    api.save(calc := api.calculation(order=ORDER, home=small), calc.estimate())[0]
     assert {o.kind for o in api.list_outputs(ORDER, small)} == {
         "purchase_md",
         "purchase_json",
@@ -346,12 +354,12 @@ def test_estimate_does_not_touch_other_outputs(small):
 def test_estimate_without_project_version_is_a_clear_error(home):
     api.order_new(ORDER, home=home)
     with pytest.raises(KitchenError, match="проекта ещё нет"):
-        api.estimate_and_save(ORDER, home)
+        api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
 
 
 def test_estimate_from_project_file_matches_order_and_writes_nothing(small):
-    result = api.estimate_from_project(small / "small.json", small)
-    from_order = api.estimate_from_order(ORDER, small)
+    result = api.calculation(project=small / "small.json", home=small).estimate()
+    from_order = api.calculation(order=ORDER, home=small).estimate()
     assert result.source.kind == "file"
     assert result.labor == from_order.labor and result.price == from_order.price
     assert result.outputs == []
@@ -366,13 +374,13 @@ def test_project_without_sink_warns_and_cutout_is_zero(small):
     data["appliances"] = [a for a in data["appliances"] if a["type"] != "sink"]
     path = small / "no-sink.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    result = api.estimate_from_project(path, small)
+    result = api.calculation(project=path, home=small).estimate()
     assert lines(result)["sink_cutout"].quantity == 0
     assert NO_SINK_WARNING in result.warnings
 
 
 def test_project_with_sink_has_no_sink_warning(small):
-    assert NO_SINK_WARNING not in api.estimate_from_order(ORDER, small).warnings
+    assert NO_SINK_WARNING not in api.calculation(order=ORDER, home=small).estimate().warnings
 
 
 LABOR_NORMS = {
@@ -398,11 +406,11 @@ def test_labor_norms_table_covers_the_whole_file(home):
 
 @pytest.mark.parametrize("key,operation", sorted(LABOR_NORMS.items()))
 def test_every_labor_norm_is_linked_to_its_operation(small, key, operation):
-    before = lines(api.estimate_from_order(ORDER, small))
+    before = lines(api.calculation(order=ORDER, home=small).estimate())
     text = (small / "workshop" / "labor.yaml").read_text(encoding="utf-8")
     old = re.search(rf"^  {key}: (\S+)$", text, re.MULTILINE).group(0)
     edit_workshop(small, "labor.yaml", old, f"  {key}: 7")
-    after = lines(api.estimate_from_order(ORDER, small))
+    after = lines(api.calculation(order=ORDER, home=small).estimate())
     assert after[operation].norm_min == 7
     assert after[operation].minutes == pytest.approx(7 * after[operation].quantity)
     assert {k: v for k, v in after.items() if k != operation} == {
@@ -412,8 +420,8 @@ def test_every_labor_norm_is_linked_to_its_operation(small, key, operation):
 
 def test_sink_and_hob_cutout_norms_are_independent(small):
     edit_workshop(small, "labor.yaml", "врезка_мойки: 60", "врезка_мойки: 30")
-    got = lines(api.estimate_from_order(ORDER, small))
+    got = lines(api.calculation(order=ORDER, home=small).estimate())
     assert got["sink_cutout"].minutes == 30 and got["hob_cutout"].minutes == 60
     edit_workshop(small, "labor.yaml", "врезка_варочной: 60", "врезка_варочной: 90")
-    got = lines(api.estimate_from_order(ORDER, small))
+    got = lines(api.calculation(order=ORDER, home=small).estimate())
     assert got["sink_cutout"].minutes == 30 and got["hob_cutout"].minutes == 90

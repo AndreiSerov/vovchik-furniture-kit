@@ -50,7 +50,7 @@ def write_project(home, project):
 
 
 def test_module_hardware_sums_to_project_hardware(home):
-    parts = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    parts = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     total: dict[str, int] = {}
     for module in parts.modules:
         for item, n in module.hardware.items():
@@ -60,9 +60,9 @@ def test_module_hardware_sums_to_project_hardware(home):
 
 
 def test_base_door_steps_follow_construction_order_and_confirmat_count(base_door_project, home):
-    result = api.assembly_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).assembly()
     (module,) = result.modules
-    hardware = api.parts_from_project(base_door_project, home).modules[0].hardware
+    hardware = api.calculation(project=base_door_project, home=home).parts().modules[0].hardware
     confirmats = [int(n) for n in re.findall(r"— (\d+) конфирмат", "\n".join(module.steps))]
     assert sum(confirmats) == hardware["confirmat_7x50"]
     assert module.steps[0].startswith("Н1-дно к Н1-бок-Л, Н1-бок-П — ")
@@ -88,9 +88,9 @@ def test_base_door_steps_follow_construction_order_and_confirmat_count(base_door
 
 
 def test_swapped_stage_order_in_workshop_copy_reorders_steps(base_door_project, home):
-    before = api.assembly_from_project(base_door_project, home).modules[0].steps
+    before = api.calculation(project=base_door_project, home=home).assembly().modules[0].steps
     set_stages(home, ["фасады", "корпус", "задняя_стенка", "полки", "ящики", "ручки", "опоры"])
-    after = api.assembly_from_project(base_door_project, home).modules[0].steps
+    after = api.calculation(project=base_door_project, home=home).assembly().modules[0].steps
     assert after[0] == before[-1] and after[1:] == before[:-1]
 
 
@@ -105,7 +105,7 @@ def test_swapped_stage_order_in_workshop_copy_reorders_steps(base_door_project, 
 def test_bad_stage_list_is_load_error_naming_the_stage(base_door_project, home, stages, needle):
     set_stages(home, stages)
     with pytest.raises(KitchenError) as e:
-        api.assembly_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).assembly()
     text = "\n".join(e.value.problems)
     assert "сборка" in text and needle in text
 
@@ -116,7 +116,7 @@ def test_missing_assembly_key_is_load_error(base_door_project, home):
         re.sub(r"^сборка:.*\n", "", path.read_text(encoding="utf-8"), flags=re.MULTILINE), encoding="utf-8"
     )
     with pytest.raises(KitchenError) as e:
-        api.assembly_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).assembly()
     assert "сборка" in "\n".join(e.value.problems)
 
 
@@ -131,7 +131,7 @@ def test_repository_workshop_names_the_mock_stage_order_and_site_hardware(repo):
 def test_unknown_install_place_is_load_error(base_door_project, home):
     edit(home, "hardware.yaml", "{id: leg_100, ставится: объект,", "{id: leg_100, ставится: склад,")
     with pytest.raises(KitchenError) as e:
-        api.assembly_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).assembly()
     text = "\n".join(e.value.problems)
     assert "ставится" in text and "склад" in text
 
@@ -139,14 +139,14 @@ def test_unknown_install_place_is_load_error(base_door_project, home):
 def test_site_hardware_is_listed_with_site_mark_and_handles_get_a_step_when_marked_workshop(
     base_door_project, home
 ):
-    plain = api.assembly_from_project(base_door_project, home).modules[0]
+    plain = api.calculation(project=base_door_project, home=home).assembly().modules[0]
     ids = [h.id for h in plain.hardware]
     assert {"hinge_71B3550", "handle_profile", "leg_100"} <= set(ids)  # тикет 53: «объект» остаётся в списке
     assert {h.id for h in plain.hardware if h.installed == "объект"} == {"handle_profile", "leg_100"}
     edit(
         home, "hardware.yaml", "{id: handle_profile, ставится: объект,", "{id: handle_profile, ставится: цех,"
     )
-    marked = api.assembly_from_project(base_door_project, home).modules[0]
+    marked = api.calculation(project=base_door_project, home=home).assembly().modules[0]
     handle = next(h for h in marked.hardware if h.id == "handle_profile")
     assert handle.quantity == 2 and handle.unit == "шт"  # две двери — две ручки
     assert "Ручки Ручка-профиль торцевая — 2 шт, фасады: Н1-фасад-Л, Н1-фасад-П" in marked.steps
@@ -154,7 +154,7 @@ def test_site_hardware_is_listed_with_site_mark_and_handles_get_a_step_when_mark
 
 
 def test_hardware_line_has_catalog_name_and_count(base_door_project, home):
-    module = api.assembly_from_project(base_door_project, home).modules[0]
+    module = api.calculation(project=base_door_project, home=home).assembly().modules[0]
     hinges = next(h for h in module.hardware if h.id == "hinge_71B3550")
     assert hinges.name == "Петля Blum Clip Top Blumotion 110° накладная" and hinges.quantity == 4
 
@@ -208,7 +208,7 @@ def test_cases_cover_every_template_with_a_carcass(home):
     project = json.loads(path.read_text(encoding="utf-8"))
     project["walls"][0]["rows"][0]["modules"][0]["template"] = "нет_такого"
     with pytest.raises(KitchenError) as e:
-        api.assembly_from_project(write_project(home, project), home)
+        api.calculation(project=write_project(home, project), home=home).assembly()
     known = set(re.search(r"известные: ([^)]*)\)", "\n".join(e.value.problems)).group(1).split(", "))
     assert known - {"dishwasher_panel"} == set(CASES) and len(CASES) == 11
 
@@ -216,13 +216,13 @@ def test_cases_cover_every_template_with_a_carcass(home):
 @pytest.mark.parametrize("template", sorted(CASES))
 def test_every_carcass_template_gives_a_block_with_a_step(home, template):
     path = write_project(home, one_module_project(template))
-    (block,) = api.assembly_from_project(path, home).modules
+    (block,) = api.calculation(project=path, home=home).assembly().modules
     assert block.carcass and block.steps, template
 
 
 def test_dishwasher_panel_has_no_carcass_and_no_steps(home):
     petrov(home)
-    block = module_of(api.assembly_from_order(ORDER, home), "Н6")
+    block = module_of(api.calculation(order=ORDER, home=home).assembly(), "Н6")
     assert not block.carcass and block.steps == []
     assert block.title == "Н6 — фасад посудомоечной машины, 450 мм"
     assert block.note == "корпуса нет, фасад Н6-фасад крепится к посудомойке на объекте"
@@ -231,7 +231,7 @@ def test_dishwasher_panel_has_no_carcass_and_no_steps(home):
 
 def test_module_titles_and_part_lines_use_template_title_and_materials(home):
     petrov(home)
-    result = api.assembly_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).assembly()
     assert [m.label for m in result.modules] == [
         "П1", "Н1", "Н2", "Н3", "Н4", "В1", "В2", "В3", "В4", "Н5", "Н6", "В5", "В6",
     ]  # fmt: skip
@@ -250,7 +250,7 @@ def test_module_titles_and_part_lines_use_template_title_and_materials(home):
 
 def test_drawer_and_hinge_steps_name_catalog_items_and_parts(home):
     petrov(home)
-    result = api.assembly_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).assembly()
     drawers = module_of(result, "Н1").steps
     assert "Направляющие Tandembox antaro M 500, комплект — 3 компл., ящиков: 3" in drawers
     lift = module_of(result, "В5").steps
@@ -265,7 +265,7 @@ def test_drawer_and_hinge_steps_name_catalog_items_and_parts(home):
 def test_other_appliance_is_named_in_assembly_sheet(home):
     project = json.loads(json.dumps(BASE_DOOR_PROJECT))
     project["appliances"] = [{"type": "other", "width": 500, "module": "Н1"}]
-    (block,) = api.assembly_from_project(write_project(home, project), home).modules
+    (block,) = api.calculation(project=write_project(home, project), home=home).assembly().modules
     assert block.appliances == ["другая техника"]
 
 
@@ -277,7 +277,7 @@ def test_legs_and_handles_marked_workshop_get_steps_only_where_the_module_has_th
     petrov(home)
     mark_workshop(home, "leg_100")
     mark_workshop(home, "handle_profile")
-    result = api.assembly_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).assembly()
     n1 = module_of(result, "Н1")
     legs = next(h for h in n1.hardware if h.id == "leg_100")
     assert f"Опоры {legs.name} — {legs.quantity} шт" in n1.steps
@@ -298,7 +298,7 @@ def test_workshop_hardware_is_listed_in_hardware_yaml_order(base_door_project, h
     lines.insert(first, lines.pop(screw))  # саморез — первой позицией каталога
     path.write_text("".join(lines), encoding="utf-8")
     order = [i["id"] for i in yaml.safe_load(path.read_text(encoding="utf-8"))["позиции"]]
-    ids = [h.id for h in api.assembly_from_project(base_door_project, home).modules[0].hardware]
+    ids = [h.id for h in api.calculation(project=base_door_project, home=home).assembly().modules[0].hardware]
     assert ids[0] == "screw_3_5x16" and ids == sorted(ids, key=order.index)
 
 
@@ -307,7 +307,7 @@ def test_cli_line_names_the_module_even_when_the_template_title_has_a_comma(home
     from kitchen.cli import _render_assembly
 
     petrov(home)
-    result = api.assembly_from_order(ORDER, home)
+    result = api.calculation(order=ORDER, home=home).assembly()
     first = result.modules[0].model_copy(update={"title": "П1 — пенал, с духовкой, 600×2100×560 мм"})
     text = _render_assembly(result.model_copy(update={"modules": [first]}))
     assert "  П1 — пенал, с духовкой: деталей" in text

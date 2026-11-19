@@ -72,8 +72,8 @@ def straight(total):
 
 def top_of(home, walls):
     path = project(home, walls)
-    top = next(c for c in api.parts_from_project(path, home).common if c.kind == "countertop")
-    cut = api.cut_from_project(path, home).countertop
+    top = next(c for c in api.calculation(project=path, home=home).parts().common if c.kind == "countertop")
+    cut = api.calculation(project=path, home=home).cut().countertop
     assert (cut.total_length_mm, cut.sheet_count) == (top.length_mm, top.quantity)
     return top.length_mm, top.quantity
 
@@ -81,10 +81,11 @@ def top_of(home, walls):
 def test_petrov_countertop_and_totals_unchanged(home):
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
-    cut = api.cut_and_save("petrov", home).countertop
+    calc = api.calculation(order="petrov", home=home)
+    cut = api.save(calc, calc.cut())[0].countertop
     assert (cut.total_length_mm, cut.sheet_count) == (3400, 1)
-    assert api.purchase_and_save("petrov", home).total == 158074.70
-    assert api.estimate_and_save("petrov", home).price == 222000
+    assert api.save(calc, calc.purchase())[0].total == 158074.70
+    assert api.save(calc, calc.estimate())[0].price == 222000
 
 
 @pytest.mark.parametrize(("total", "sheets"), [(4100, 1), (4101, 2), (8200, 2), (8201, 3), (9000, 3)])
@@ -123,24 +124,26 @@ def test_without_countertop_there_is_none_anywhere(home):
     del data["materials"]["countertop"]
     path = home / "p.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    assert api.cut_from_project(path, home).countertop is None
-    assert "countertop" not in [c.kind for c in api.parts_from_project(path, home).common]
+    assert api.calculation(project=path, home=home).cut().countertop is None
+    assert "countertop" not in [c.kind for c in api.calculation(project=path, home=home).parts().common]
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
     api.import_project(ORDER, path, home=home)
-    kinds = {i.kind for shop in api.purchase_from_order("petrov", home).shops for i in shop.items}
+    kinds = {
+        i.kind for shop in api.calculation(order="petrov", home=home).purchase().shops for i in shop.items
+    }
     assert "countertop" not in kinds
 
 
 def test_unknown_countertop_is_an_error(home):
     with pytest.raises(OrderError, match="top_nope"):
-        api.cut_from_project(project(home, straight(1200), top="top_nope"), home)
+        api.calculation(project=project(home, straight(1200), top="top_nope"), home=home).cut()
 
 
 def test_kerf_does_not_change_sheets(home):
     path = project(home, straight(4100))
     text = (home / "workshop/equipment.yaml").read_text()
     (home / "workshop/equipment.yaml").write_text(text.replace("пропил: 4", "пропил: 50"))
-    assert api.cut_from_project(path, home).countertop.sheet_count == 1
+    assert api.calculation(project=path, home=home).cut().countertop.sheet_count == 1
 
 
 def test_no_pieces_in_cut_purchase_and_estimate(home):
@@ -183,8 +186,12 @@ def test_cut_gives_the_duplicate_label_finding_text(home):
         {"label": "A", "length": 1000, "rows": [{"kind": "lower", "modules": [base("Н1"), base("Н1", 400)]}]}
     ]
     path = project(home, walls)
-    message = next(f.message for f in api.check_project(path, home).errors if f.code == "duplicate_label")
+    message = next(
+        f.message
+        for f in api.calculation(project=path, home=home).check().errors
+        if f.code == "duplicate_label"
+    )
     with pytest.raises(OrderError) as e:
-        api.cut_from_project(path, home)
+        api.calculation(project=path, home=home).cut()
     assert message in e.value.problems
     assert "Маркировка" not in str(e.value)

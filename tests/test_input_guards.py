@@ -171,7 +171,7 @@ def test_quick_estimate_is_not_computed_with_bad_range(home):
 def test_negative_rate_is_a_workshop_error_for_estimate(home):
     edit(home, "labor.yaml", "ставка_в_час: 1000", "ставка_в_час: -1000")
     with pytest.raises(KitchenError):
-        api.estimate_from_project(FIXTURES / "petrov_project.json", home)
+        api.calculation(project=FIXTURES / "petrov_project.json", home=home).estimate()
 
 
 # --- пропил и целые поля пилы и листа -------------------------------------------------------------
@@ -190,7 +190,7 @@ def gaps(result):
 @pytest.mark.parametrize(("kerf", "used"), [("4.5", 5), ("3.2", 4)])
 def test_fractional_kerf_rounds_up_with_warning(home, kerf, used):
     edit(home, "equipment.yaml", "пропил: 4", f"пропил: {kerf}")
-    result = api.cut_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).cut()
     assert result.kerf == used
     assert min(gaps(result)) >= used
     assert any(kerf in w and f"{used} мм" in w for w in result.warnings), result.warnings
@@ -203,10 +203,10 @@ def test_fractional_kerf_rounds_up_with_warning(home, kerf, used):
 
 
 def test_integer_kerf_has_no_warning(home):
-    result = api.cut_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).cut()
     assert result.kerf == 4 and not any("пропил" in w.lower() for w in result.warnings)
     edit(home, "equipment.yaml", "пропил: 4", "пропил: 4.0")
-    again = api.cut_from_project(FIXTURES / "petrov_project.json", home)
+    again = api.calculation(project=FIXTURES / "petrov_project.json", home=home).cut()
     assert again.kerf == 4 and not any("пропил" in w.lower() for w in again.warnings)
 
 
@@ -216,7 +216,7 @@ def test_kerf_warning_is_in_cutting_map_pdf(home):
     edit(home, "equipment.yaml", "пропил: 4", "пропил: 3.2")
     api.brief_save("2026-047-petrov", FIXTURES / "petrov_brief.json")
     api.import_project("petrov", FIXTURES / "petrov_project.json")
-    result = api.cut_and_save("petrov")
+    result = api.save(calc := api.calculation(order="petrov"), calc.cut())[0]
     text = PdfReader(result.output.file).pages[0].extract_text()
     assert "3.2" in text
 
@@ -327,10 +327,10 @@ def test_file_and_order_source_hashes_agree(home, tmp_path):
     path = project_file(tmp_path)
     api.order_new("2026-047-petrov")
     api.import_project("petrov", path)
-    file_hash = api.parts_from_project(path, home).source.content_hash
-    assert api.parts_from_order("petrov", home).source.content_hash == file_hash
+    file_hash = api.calculation(project=path, home=home).parts().source.content_hash
+    assert api.calculation(order="petrov", home=home).parts().source.content_hash == file_hash
     spelled = project_file(tmp_path, "q.json", order="2026-047")
-    assert api.parts_from_project(spelled, home).source.content_hash == file_hash
+    assert api.calculation(project=spelled, home=home).parts().source.content_hash == file_hash
 
 
 # --- BOM в JSON ---------------------------------------------------------------------------------------
@@ -556,7 +556,7 @@ def test_unreadable_file_counts_as_mock_even_when_the_rest_is_not(home):
 
 def test_kerf_warning_shows_the_declared_value(home):
     edit(home, "equipment.yaml", "пропил: 4", "пропил: 4.0000001")
-    r = api.cut_from_project(FIXTURES / "petrov_project.json", home)
+    r = api.calculation(project=FIXTURES / "petrov_project.json", home=home).cut()
     assert any("пропил 4.0000001 мм учтён как 5 мм" in w for w in r.warnings), r.warnings
 
 
@@ -567,12 +567,13 @@ def test_kerf_warning_in_purchase_estimate_production_and_map(home):
     api.brief_save("2026-047-petrov", FIXTURES / "petrov_brief.json")
     api.import_project("petrov", FIXTURES / "petrov_project.json")
     needle = "пропил 3.2 мм учтён как 4 мм"
-    assert any(needle in w for w in api.purchase_from_order("petrov", home).warnings)
-    assert any(needle in w for w in api.estimate_from_order("petrov", home).warnings)
+    assert any(needle in w for w in api.calculation(order="petrov", home=home).purchase().warnings)
+    assert any(needle in w for w in api.calculation(order="petrov", home=home).estimate().warnings)
     assert any(
-        needle in w for w in api.estimate_from_project(FIXTURES / "petrov_project.json", home).warnings
+        needle in w
+        for w in api.calculation(project=FIXTURES / "petrov_project.json", home=home).estimate().warnings
     )
-    production = api.production_and_save("petrov", home)
+    production = api.production(api.calculation(order="petrov", home=home))
     assert any(needle in w for w in production.purchase.warnings)
     assert any(needle in w for w in production.cutting.warnings)
     pdf = home / "orders" / "2026-047-petrov" / "out" / "cutting-map.pdf"
@@ -597,8 +598,8 @@ def test_source_hash_of_order_with_legacy_version_matches_file(home, tmp_path):
             "UPDATE project_versions SET data = ?, content_hash = ?",
             (old_text, hashlib.sha256(old_text.encode("utf-8")).hexdigest()),
         )
-    from_order = api.parts_from_order("petrov", home).source.content_hash
-    assert from_order == api.parts_from_project(path, home).source.content_hash
+    from_order = api.calculation(order="petrov", home=home).parts().source.content_hash
+    assert from_order == api.calculation(project=path, home=home).parts().source.content_hash
 
 
 def test_empty_contents_is_the_same_project_as_no_contents(home, tmp_path):

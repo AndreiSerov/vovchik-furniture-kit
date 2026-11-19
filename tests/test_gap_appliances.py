@@ -34,7 +34,7 @@ def fridge_project(home, gap_width=600, appliance=None, name="p.json", **gap_ext
 
 
 def gap_findings(home, path):
-    return [f for f in api.check_project(path, home).findings if f.code.startswith("gap_")]
+    return [f for f in api.calculation(project=path, home=home).check().findings if f.code.startswith("gap_")]
 
 
 def test_fridge_not_wider_than_gap_without_clearance_is_gap_too_small(home):
@@ -46,7 +46,7 @@ def test_fridge_not_wider_than_gap_without_clearance_is_gap_too_small(home):
 
 def test_fridge_fits_in_620_gap_and_needs_no_module(home):
     save_brief(home, BRIEF_FRIDGE_600)
-    result = api.check_project(fridge_project(home, 620), home)
+    result = api.calculation(project=fridge_project(home, 620), home=home).check()
     assert [f for f in result.findings if f.code.startswith("gap_") or f.code == "appliance_module"] == []
     assert result.errors == []
 
@@ -70,7 +70,7 @@ def test_other_kind_in_gap_is_gap_appliance(home):
 def test_appliance_in_upper_row_gap_is_an_error(home):
     walls = [{"label": "A", "length": 1200, "rows": [upper(gap("ПМ2"), wall_door("В1"))]}]
     appliance = {"type": "fridge", "width": 500, "module": "ПМ2"}
-    found = api.check_project(write(home, walls, appliances=[appliance]), home).findings
+    found = api.calculation(project=write(home, walls, appliances=[appliance]), home=home).check().findings
     [f] = [f for f in found if f.subject == "ПМ2" and f.level == "error"]
     assert f.message == "Место ПМ2 в верхнем ряду: технику ставят только в пустое место нижнего ряда"
 
@@ -81,7 +81,7 @@ def test_built_in_fridge_in_brief_and_gap_in_project_is_a_warning(home):
     [f] = gap_findings(home, path)
     assert (f.code, f.level, f.subject) == ("gap_built_in", "warning", "ПМ1")
     assert f.message == "Холодильник в брифе встраиваемый, а в проекте стоит в пустом месте ПМ1"
-    assert api.check_project(path, home).errors == []
+    assert api.calculation(project=path, home=home).check().errors == []
 
 
 def test_clearance_and_kinds_come_from_the_workshop(home):
@@ -110,11 +110,11 @@ def test_workshop_gap_kinds_are_validated_and_documented(home, repo):
 def test_parts_line_and_quote_line_for_gap_with_appliance(home):
     save_brief(home, BRIEF_FRIDGE_600)
     path = fridge_project(home, 620)
-    parts = api.parts_from_project(path, home)
+    parts = api.calculation(project=path, home=home).parts()
     assert [(g.label, g.width, g.appliance) for g in parts.gaps] == [("ПМ1", 620, "холодильник")]
     out = CliRunner().invoke(app, ["parts", "--project", str(path)]).output
     assert "ПМ1 — пустое место 620 мм (холодильник), деталей нет" in out
-    quote = api.quote_from_project(path, 14, home)
+    quote = api.calculation(project=path, home=home).quote(14)
     assert next(m for m in quote.modules if m.label == "ПМ1").text == "место под холодильник, 620 мм"
 
 
@@ -125,7 +125,7 @@ def test_parts_line_without_appliance(home):
 
 def test_install_in_estimate_does_not_count_gap(home):
     path = fridge_project(home, 620)
-    lines = api.estimate_from_project(path, home).labor.lines
+    lines = api.calculation(project=path, home=home).estimate().labor.lines
     install = next(line for line in lines if line.operation == "install")
     assert install.quantity == 1 and install.basis.endswith("все модули проекта")
 
@@ -200,7 +200,7 @@ def test_kitchen_check_sees_gap_findings_like_parts(home):
     path = fridge_project(home, 600)
     out = CliRunner().invoke(app, ["check", "--project", str(path), "--json"])
     assert "gap_too_small" in {f["code"] for f in json.loads(out.output)["findings"]}
-    assert "gap_too_small" in {f.code for f in api.parts_from_project(path, home).findings}
+    assert "gap_too_small" in {f.code for f in api.calculation(project=path, home=home).parts().findings}
 
 
 def two_appliances_project(home, gap_width):
@@ -224,7 +224,7 @@ def test_gap_with_two_appliances_must_fit_their_sum_plus_clearance(home):
 def test_quote_names_gap_appliances_in_accusative(home):
     walls = [{"label": "A", "length": 1200, "rows": [lower(gap("ПМ1", 600), base("Н1"))]}]
     apps = [{"type": "dishwasher", "width": 450, "module": "ПМ1"}]
-    quote = api.quote_from_project(write(home, walls, appliances=apps), 14, home)
+    quote = api.calculation(project=write(home, walls, appliances=apps), home=home).quote(14)
     assert quote.modules[0].text == "место под посудомойку, 600 мм"
 
 
@@ -275,7 +275,7 @@ def test_appliance_of_a_module_is_not_checked_as_gap_technique_when_a_gap_shares
         mod("ПМ1", "base_door", 600), {"label": "ПМ1", "gap": True, "width": 600},
     ]}]}]  # fmt: skip
     path = write(home, walls, appliances=[{"type": "oven", "width": 595, "module": "ПМ1"}])
-    codes = {f.code for f in api.check_project(path, home).findings}
+    codes = {f.code for f in api.calculation(project=path, home=home).check().findings}
     assert "duplicate_label" in codes
     assert "gap_appliance" not in codes
 
@@ -293,7 +293,7 @@ def fridge_in_module_project(home):
 
 def test_free_standing_fridge_in_brief_and_niche_in_a_module_is_a_warning(home):
     save_brief(home, {"built_in": False, "width_mm": 600, "wall": "A"})
-    result = api.check_project(fridge_in_module_project(home), home)
+    result = api.calculation(project=fridge_in_module_project(home), home=home).check()
     [found] = [f for f in result.findings if f.code == "fridge_in_module"]
     assert (found.level, found.subject, found.message) == ("warning", "Н3", IN_MODULE)
     # идёт вместе с находкой шаблона, а не вместо неё
@@ -310,7 +310,7 @@ def test_fridge_in_module_needs_an_explicit_free_standing_brief(home):
 
 def test_fridge_in_brief_not_in_kitchen_but_in_project_is_a_check_warning(home):
     save_brief(home, {"wall": "none", "width_mm": 600})
-    result = api.check_project(fridge_project(home, 620), home)
+    result = api.calculation(project=fridge_project(home, 620), home=home).check()
     [found] = [f for f in result.findings if f.code == "fridge_not_in_kitchen"]
     assert (found.level, found.subject, found.message) == ("warning", "ПМ1", NOT_IN_KITCHEN)
     assert "appliance_not_in_brief" not in {f.code for f in result.findings}
@@ -318,7 +318,7 @@ def test_fridge_in_brief_not_in_kitchen_but_in_project_is_a_check_warning(home):
 
 def test_fridge_not_in_kitchen_names_the_module_when_it_stands_in_one(home):
     save_brief(home, {"wall": "none", "width_mm": 600})
-    found = api.check_project(fridge_in_module_project(home), home).findings
+    found = api.calculation(project=fridge_in_module_project(home), home=home).check().findings
     [one] = [f for f in found if f.code == "fridge_not_in_kitchen"]
     assert one.subject == "Н3" and one.message.endswith("в проекте он есть (Н3) — проверьте.")
     assert "fridge_in_module" not in {f.code for f in found}
@@ -328,7 +328,7 @@ def test_fridge_not_in_kitchen_is_named_for_a_gap_of_the_upper_row_too(home):
     save_brief(home, {"wall": "none", "width_mm": 600})
     walls = [{"label": "A", "length": 1200, "rows": [upper(gap("ПМ2"), wall_door("В1"))]}]
     appliance = {"type": "fridge", "width": 500, "module": "ПМ2"}
-    found = api.check_project(write(home, walls, appliances=[appliance]), home).findings
+    found = api.calculation(project=write(home, walls, appliances=[appliance]), home=home).check().findings
     assert {"gap_upper_appliance", "fridge_not_in_kitchen"} <= {f.code for f in found}
 
 
@@ -367,14 +367,17 @@ def test_no_pairing_warning_when_the_brief_has_none_of_that_kind(home):
     api.brief_save(ORDER, home / "brief.json", home)
     walls = [{"label": "A", "length": 1900, "rows": [lower(gap("ПМ1", 1300), base("Н1"))]}]
     fridges = [{"type": "fridge", "width": 600, "module": "ПМ1"}] * 2
-    found = [f.code for f in api.check_project(write(home, walls, appliances=fridges), home).findings]
+    found = [
+        f.code
+        for f in api.calculation(project=write(home, walls, appliances=fridges), home=home).check().findings
+    ]
     assert found.count("appliance_not_in_brief") == 2 and "appliance_pairing" not in found
 
 
 def brief_fridge_findings(home, fridge, appliances=None):
     save_brief(home, fridge)
     walls = [{"label": "A", "length": 600, "rows": [lower(base("Н1"))]}]
-    found = api.check_project(write(home, walls, appliances=appliances), home).findings
+    found = api.calculation(project=write(home, walls, appliances=appliances), home=home).check().findings
     return [f for f in found if f.subject.startswith("холодильник")]
 
 
