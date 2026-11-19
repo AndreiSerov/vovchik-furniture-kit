@@ -1031,6 +1031,7 @@ class BriefSaveResult(Result):
     missing_required: int
     conflicts: int
     check: dict[str, Any]
+    warnings: list[str] = Field(default_factory=list)  # бриф сохранён, но status.md не записан
 
 
 class BriefShowResult(Result):
@@ -1116,7 +1117,11 @@ def brief_save(order: str, brief_path: Path, home: Path | None = None) -> BriefS
             check=check,
             **mock,
         )
-    status(result.order, home)  # папка заказа и status.md: этап «Бриф», запись «бриф сохранён»
+    try:
+        status(result.order, home)  # папка заказа и status.md: этап «Бриф», запись «бриф сохранён»
+    except OrderError as e:  # бриф уже в БД: отказ заставил бы скилл сохранять его заново
+        reason = " ".join(e.problems).rstrip(".")
+        result.warnings.append(f"status.md не записан: {reason}. Повторите: kitchen status {result.order}.")
     return result
 
 

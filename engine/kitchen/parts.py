@@ -586,8 +586,6 @@ def build_base_door(
         screws += _ceil_div(perimeter, bp.fastening_pitch)  # саморезы на ХДФ: периметр / шаг
     out.hardware[hw.screws] += screws
     out.back_screws = screws
-    if n_doors:
-        out.hardware[materials.handles] += n_doors * c.handles.per_unit
     return out
 
 
@@ -675,7 +673,7 @@ def build_base_sink(
 def build_dishwasher_panel(
     module: ModuleSpec, dims: ModuleDims, materials: ProjectMaterials, ws: Workshop
 ) -> TemplateOut:
-    """Фасад ПММ: корпуса нет, одна ручка на фасад (тикет 55); крепёж и лента поставляются с техникой."""
+    """Фасад ПММ: корпуса нет; ручку добавляет `_add_handles`; крепёж и лента поставляются с техникой."""
     f = ws.construction.facades
     facade = find_material(ws.materials.facades, materials.facades_lower, "Материал фасадов", "фасады")
     h = _calc(module, dims, "высота фасада", f.height_lower, H=dims.height, W=dims.width)
@@ -695,7 +693,7 @@ def build_dishwasher_panel(
                 area=True,
             )
         ],
-        hardware=Counter({materials.handles: ws.construction.handles.per_unit}),
+        hardware=Counter(),
     )
 
 
@@ -812,7 +810,6 @@ def build_base_drawers(
     out = build_base_door(
         module.model_copy(update={"shelves": 1}), dims, materials, ws, no_doors=True, no_shelf=True
     )
-    out.hardware[materials.handles] = 3 * c.handles.per_unit
     out.hardware[c.drawers.hardware] += 3
     out.hardware[c.furniture.screws] += 3 * c.screws_3_5x16.per_drawer
     facades = c.facades
@@ -1056,7 +1053,6 @@ def _build_corner(
     # петли со стороны прохода, у боковины: глухая часть справа — петли слева, и наоборот
     out.doors.append(hinged(module.label, f"{module.label}-фасад", "right" if blind_left else "left"))
     out.hardware[c.furniture.screws] += rules.filler_screws
-    out.hardware[materials.handles] += c.handles.per_unit
     return out
 
 
@@ -1497,6 +1493,7 @@ def build_module(
     resolved_materials = resolve_materials(module, row, materials)
     dims = module_dims(module, row.kind, ws)
     out = template.build(module, dims, resolved_materials, ws, BuildContext(appliances, row))
+    _add_handles(out, resolved_materials, ws)
     _check_sound(module, dims, out)
     _check_part_sizes(out, ws.construction.min_part_size)
     _check_hinge_side(module, out)
@@ -1505,6 +1502,13 @@ def build_module(
     )
     out.hardware.update(drilled)
     return out
+
+
+def _add_handles(out: TemplateOut, materials: ProjectMaterials, ws: Workshop) -> None:
+    """Ручки модуля: по `construction.ручки.per_unit` на каждый фасад (правило мастера); без фасадов ключа нет."""
+    facades = sum(is_facade(p) for p in out.parts)
+    if facades:
+        out.hardware[materials.handles] += facades * ws.construction.handles.per_unit
 
 
 def _check_hinge_side(module: ModuleSpec, out: TemplateOut) -> None:

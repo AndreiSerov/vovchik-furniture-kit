@@ -121,9 +121,12 @@ def order_show(order: OrderArg, json: JsonOpt = False) -> None:
 
 
 def _render_import(r: api.ImportResult) -> str:
-    if not r.changed:
-        return f"Заказ {r.order}: без изменений, текущая версия проекта — {r.version}."
-    return f"Заказ {r.order}: принята версия {r.version} проекта."
+    head = (
+        f"Заказ {r.order}: без изменений, текущая версия проекта — {r.version}."
+        if not r.changed
+        else f"Заказ {r.order}: принята версия {r.version} проекта."
+    )
+    return "\n".join([head, *(f"[предупреждение] {w}" for w in r.warnings)])
 
 
 @app.command("import")
@@ -803,6 +806,7 @@ def _render_brief_saved(r: api.BriefSaveResult) -> str:
             head,
             f"  Не заполнено обязательных полей: {r.missing_required}",
             f"  Противоречий и рисков: {r.conflicts}",
+            *(f"Предупреждение: {w}" for w in r.warnings),
         ]
     )
 

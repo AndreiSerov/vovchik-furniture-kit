@@ -114,13 +114,34 @@ def appliance_name(item: dict) -> str:
 CORNERS = {"corner": 1, "u_shape": 2}
 
 
+def is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def wrong_length_type(brief: dict) -> bool:
+    """Длина стены или острова не число (строка, да/нет): погонажа нет, правила бюджета молчат;
+    об ошибке типа уже сказано в `errors`."""
+    walls = get(brief, "room.walls")
+    values = [w.get("length_mm") for w in walls if isinstance(w, dict)] if isinstance(walls, list) else []
+    values.append(sub(get(brief, "room.island"), "length_mm"))
+    return any(not is_empty(v) and not is_number(v) for v in values)
+
+
+def fridge_out_of_kitchen(fridge: Any) -> bool:
+    """Холодильник брифа не на кухне: `wall: none` (как `BriefAppliance.not_in_kitchen` движка, пробелы срезаются)."""
+    wall = sub(fridge, "wall")
+    return isinstance(wall, str) and wall.strip() == "none"
+
+
 def running_meters(brief: dict, base_depth_mm: int = 600) -> float | None:
     """Погонаж низа: стены минус перекрытие в углах плюс длина острова."""
+    if wrong_length_type(brief):
+        return None
     walls = get(brief, "room.walls")
     if not isinstance(walls, list):
         walls = []
     lengths = [
-        w.get("length_mm") or 0
+        (w.get("length_mm") or 0)
         for w in walls
         if isinstance(w, dict) and w.get("furnished", True) is not False
     ]
@@ -242,7 +263,7 @@ def sink_window(brief: dict, s: dict) -> list[Finding]:
 @rule("tall_uppers_budget")
 def tall_uppers_budget(brief: dict, s: dict) -> list[Finding]:
     amount = get(brief, "budget.amount_rub")
-    if get(brief, "storage.upper_height") != "to_ceiling" or is_empty(amount):
+    if get(brief, "storage.upper_height") != "to_ceiling" or is_empty(amount) or wrong_length_type(brief):
         return []
     threshold = budget_threshold(brief, s, "min_budget_to_ceiling_per_reference_length")
     if amount >= threshold:
@@ -267,7 +288,7 @@ def tall_uppers_budget(brief: dict, s: dict) -> list[Finding]:
 @rule("budget_tight")
 def budget_tight(brief: dict, s: dict) -> list[Finding]:
     amount = get(brief, "budget.amount_rub")
-    if is_empty(amount):
+    if is_empty(amount) or wrong_length_type(brief):
         return []
     to_ceiling = get(brief, "storage.upper_height") == "to_ceiling"
     key = (
@@ -318,7 +339,11 @@ def builtin_without_model(brief: dict, s: dict) -> list[Finding]:
         elif item.get("built_in") is None and item.get("type") in TYPICALLY_BUILT_IN:
             unclear.append(appliance_name(item))
     fridge = get(brief, "appliances.fridge")
-    if sub(fridge, "built_in") is True and is_empty(sub(fridge, "model")):
+    if (
+        sub(fridge, "built_in") is True
+        and is_empty(sub(fridge, "model"))
+        and not fridge_out_of_kitchen(fridge)
+    ):
         no_model.append("холодильник")
         model_paths.add("appliances.fridge")
     hood = get(brief, "appliances.hood")
@@ -416,7 +441,7 @@ def fridge_door(brief: dict, s: dict) -> list[Finding]:
 @rule("fridge_place")
 def fridge_place(brief: dict, s: dict) -> list[Finding]:
     fridge = get(brief, "appliances.fridge")
-    if is_empty(fridge) or not isinstance(fridge, dict) or sub(fridge, "wall") == "none":
+    if is_empty(fridge) or not isinstance(fridge, dict) or fridge_out_of_kitchen(fridge):
         return []
     names = {w.get("name") for w in get(brief, "room.walls") or [] if isinstance(w, dict)}
     wall = sub(fridge, "wall")
@@ -441,7 +466,7 @@ def over_fridge(brief: dict, s: dict) -> list[Finding]:
     fridge = get(brief, "appliances.fridge")
     if get(brief, "storage.upper_height") != "to_ceiling" or not is_empty(get(brief, "storage.over_fridge")):
         return []
-    if sub(fridge, "built_in") is True or sub(fridge, "wall") == "none":
+    if sub(fridge, "built_in") is True or fridge_out_of_kitchen(fridge):
         return []
     return [
         Finding(
@@ -746,8 +771,40 @@ def enum_text(value: Any) -> str:
     return str(value)
 
 
+def _item_kind(desc: Any) -> str:
+    """Тип ключа по описанию «integer», «string: пояснение», «enum: a, b»; пустое описание — пустой тип."""
+    words = str(desc).split(":")[0].split()
+    return words[0] if words else ""
+
+
+def _enum_values(desc: Any) -> list[str] | None:
+    """Перечень из описания ключа «enum: a, b (пояснение), c — пояснение»; не перечень — `None`."""
+    if _item_kind(desc) != "enum" or not str(desc).startswith("enum: "):
+        return None
+    listed = re.sub(r"\([^)]*\)", "", str(desc)[6:]).split("—")[0]
+    return [v.strip() for v in listed.split(",")]
+
+
+def _keyed(value: Any, spec: dict, path: str) -> list[tuple[str, Any, str]]:
+    """Пары (путь, значение, описание) ключей объекта и элементов списка по `item` схемы."""
+    item = spec.get("item")
+    if not isinstance(item, dict):
+        return []
+    if spec.get("type") == "object" and isinstance(value, dict):
+        return [(f"{path}.{k}", value[k], d) for k, d in item.items() if not is_empty(value.get(k))]
+    if spec.get("type") == "list" and isinstance(value, list):
+        return [
+            (f"{path}[{i}].{k}", el[k], d)
+            for i, el in enumerate(value)
+            if isinstance(el, dict)
+            for k, d in item.items()
+            if not is_empty(el.get(k))
+        ]
+    return []
+
+
 def enum_errors(brief: dict, schema: dict) -> list[str]:
-    """Значение enum-поля не из перечня схемы; у полей-объектов — ключи вида «enum: a, b»."""
+    """Значение enum-поля не из перечня схемы; у полей-объектов и элементов списков — ключи «enum: a, b»."""
     out = []
     for sec_key, sec in schema["sections"].items():
         for name, spec in sec["fields"].items():
@@ -757,20 +814,68 @@ def enum_errors(brief: dict, schema: dict) -> list[str]:
             path = f"{sec_key}.{name}"
             if spec.get("type") == "enum" and enum_text(value) not in spec["values"]:
                 out.append(f"{path}: {value!r} не из перечня {', '.join(spec['values'])}")
-            elif spec.get("type") == "object" and isinstance(value, dict):
-                for key, desc in spec.get("item", {}).items():
-                    if not str(desc).startswith("enum: ") or is_empty(value.get(key)):
-                        continue
-                    listed = re.sub(r"\([^)]*\)", "", str(desc)[6:]).split("—")[0]
-                    allowed = [v.strip() for v in listed.split(",")]
-                    if enum_text(value[key]) not in allowed:
-                        out.append(f"{path}.{key}: {value[key]!r} не из перечня {', '.join(allowed)}")
+            for key_path, key_value, desc in _keyed(value, spec, path):
+                allowed = _enum_values(desc)
+                if allowed is not None and enum_text(key_value) not in allowed:
+                    out.append(f"{key_path}: {key_value!r} не из перечня {', '.join(allowed)}")
+    return out
+
+
+# тип схемы -> (проверка значения, название в сообщении)
+TYPE_CHECKS: dict[str, tuple[Callable[[Any], bool], str]] = {
+    # целое: int или дробное без дробной части (2700.0); bool и строки — нет
+    "integer": (
+        lambda v: (
+            not isinstance(v, bool) and (isinstance(v, int) or (isinstance(v, float) and v.is_integer()))
+        ),
+        "целое число",
+    ),
+    "string": (lambda v: isinstance(v, str), "строка"),
+    "boolean": (lambda v: isinstance(v, bool), "да/нет"),
+    "object": (lambda v: isinstance(v, dict), "объект"),
+    "list": (lambda v: isinstance(v, list), "список"),
+}
+
+
+def _type_error(path: str, value: Any, kind: str) -> str | None:
+    check_value, label = TYPE_CHECKS.get(kind, (None, ""))
+    if check_value is None or check_value(value):
+        return None
+    return f"{path}: {value!r} — ожидалось {label}"
+
+
+def type_errors(brief: dict, schema: dict) -> list[str]:
+    """Тип значения не тот, что в схеме: поля разделов, ключи объектов, элементы и ключи списков.
+
+    Пустое значение (`None`, `""`, `[]`, `{}`) не проверяется. Перечни — в `enum_errors`.
+    """
+    out = []
+    for sec_key, sec in schema["sections"].items():
+        for name, spec in sec["fields"].items():
+            value = get(brief, f"{sec_key}.{name}")
+            if is_empty(value):
+                continue
+            path = f"{sec_key}.{name}"
+            error = _type_error(path, value, spec.get("type", ""))
+            if error:
+                out.append(error)
+                continue
+            if spec.get("type") == "list" and isinstance(spec.get("item"), dict):
+                for i, el in enumerate(value):
+                    error = None if is_empty(el) else _type_error(f"{path}[{i}]", el, "object")
+                    if error:
+                        out.append(error)
+            for key_path, key_value, desc in _keyed(value, spec, path):
+                kind = _item_kind(desc)
+                error = _type_error(key_path, key_value, kind) if kind != "enum" else None
+                if error:
+                    out.append(error)
     return out
 
 
 def check(brief: dict, settings: dict, schema: dict) -> dict:
     conflicts: list[Finding] = []
-    errors: list[str] = enum_errors(brief, schema)
+    errors: list[str] = [*type_errors(brief, schema), *enum_errors(brief, schema)]
     for rule_id, fn in RULES.items():
         if rule_id in settings.get("disabled_rules", []):
             continue
@@ -787,9 +892,10 @@ def check(brief: dict, settings: dict, schema: dict) -> dict:
     missing = check_required(brief, schema)
     for m in missing:
         m["covered_by"] = next((c.rule for c in conflicts if m["path"] in c.paths), None)
+    meters = running_meters(brief, settings["base_depth_mm"])
     return {
         "summary": {
-            "running_meters": running_meters(brief, settings["base_depth_mm"]),
+            "running_meters": meters,
             "missing_required": len(missing),
             "conflicts": len(conflicts),
         },

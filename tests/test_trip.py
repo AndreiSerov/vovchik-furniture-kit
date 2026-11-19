@@ -429,8 +429,24 @@ def test_header_has_floor_and_elevator_after_the_address(home):
     path = home / "brief-floor.json"
     path.write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
     petrov(home, path)
-    lines = api.trip_from_order(ORDER, home).header.lines()
-    assert lines[1:3] == ["Адрес: Москва", "Этаж: 5, лифт: грузовой"]
+    header = api.trip_from_order(ORDER, home).header
+    assert header.lines()[1:3] == ["Адрес: Москва", "Этаж: 5, лифт: грузовой"]
+    assert header.storey == "5" and header.elevator == "грузовой"
+
+
+def test_header_without_floor_and_elevator_has_dash_fields(home):
+    petrov(home)
+    header = api.trip_from_order(ORDER, home).header
+    assert header.lines()[2] == "Этаж: —, лифт: —"
+    assert header.storey == "—" and header.elevator == "—"
+
+
+def test_cli_json_header_has_split_floor_fields(home):
+    petrov(home, brief_with_installation(home, walls_evenness="uneven", floor_evenness="even"))
+    header = json.loads(runner.invoke(app, ["trip", "petrov", "--json"]).output)["header"]
+    assert not {"floor_lift", "floor", "walls"} & set(header)
+    assert header["storey"] == "—" and header["elevator"] == "—"
+    assert header["floor_evenness"] == "ровный" and header["walls_evenness"] == "неровные"
 
 
 @pytest.mark.parametrize(
@@ -574,3 +590,40 @@ def test_production_cli_prints_a_warning_shared_by_purchase_and_trip_once(home):
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)  # бриф новее версии проекта
     out = runner.invoke(app, ["production", "petrov"]).output
     assert out.count("новее брифа") == 1, out
+
+
+HEADER_64 = [
+    "Клиент: Петров, +7 900 000-00-00",
+    "Адрес: Москва",
+    "Этаж: 5, лифт: грузовой",
+    "Парковка: платная",
+    "Демонтаж старой кухни: делает клиент",
+    "Стены: неровные, пол: ровный",
+]
+
+
+def petrov_full_header(home):
+    brief = json.loads((FIXTURES / "petrov_brief.json").read_text(encoding="utf-8"))
+    brief["client"]["floor"] = {"value": 5, "source": "client"}
+    brief["client"]["elevator"] = {"value": "freight", "source": "client"}
+    fields = {
+        "parking": "paid",
+        "dismantling": "client",
+        "walls_evenness": "uneven",
+        "floor_evenness": "even",
+    }
+    brief["installation"] = {k: {"value": v, "source": "client"} for k, v in fields.items()}
+    path = home / "brief-64.json"
+    path.write_text(json.dumps(brief, ensure_ascii=False), encoding="utf-8")
+    petrov(home, path)
+
+
+def test_cli_text_and_pdf_rows_of_the_header_match_the_snapshot_before_64(home):
+    """Проверка 4 тикета 64 (ревью): снимок снят на c58551f, текст CLI и строки PDF шапки не изменились."""
+    petrov_full_header(home)
+    lines = runner.invoke(app, ["trip", "petrov"]).output.splitlines()
+    start = lines.index("Чек-лист выезда:") + 2  # после строки «Источник: ...»
+    assert lines[start : start + 7] == [*HEADER_64, "Модули (13), пустых мест 1:"]
+    rows = api.trip_layout(api.trip_from_order(ORDER, home))[0].lines
+    assert [r.text for r in rows[:8]] == ["Чек-лист выезда", *HEADER_64, "Модули (13), пустых мест 1"]
+    assert {(r.size, r.bold) for r in rows[1:7]} == {(10.0, False)}

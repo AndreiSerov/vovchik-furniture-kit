@@ -5,6 +5,7 @@
 """
 
 import re
+from collections import Counter
 from typing import Literal
 
 from pydantic import BaseModel
@@ -21,7 +22,8 @@ from kitchen.common import (
     row_layouts,
     row_positions,
 )
-from kitchen.errors import KitchenError, WorkshopError
+from kitchen.drilling import reconcile
+from kitchen.errors import KitchenError, OrderError, WorkshopError
 from kitchen.format import label_key, num
 from kitchen.models import SheetMaterial, Workshop
 from kitchen.parts import (
@@ -52,7 +54,7 @@ __all__ = ["Finding", "along_texture", "check_project", "part_fit_findings"]
 
 
 class Finding(BaseModel):
-    """Находка проверки. `subject` — модуль, деталь или стена; `value` и `limit` — числа проверки."""
+    """Находка проверки. `subject` — модуль, деталь, стена или (у находок всего проекта) номер заказа; `value` и `limit` — числа проверки."""
 
     code: str
     level: Literal["error", "warning"]
@@ -242,7 +244,7 @@ def _pair(project: Project, brief: list[BriefAppliance], ws: Workshop, found: li
             )
     for items in leftover_brief.values():
         for b in items:
-            if not b.built_in:
+            if not b.built_in or b.not_in_kitchen:  # холодильника на кухне нет
                 continue
             if any(accepts(name, b.type, ws) for name in TEMPLATES):
                 found.append(
@@ -284,9 +286,6 @@ def _inner_width(dims: ModuleDims, ws: Workshop) -> int:
     )
 
 
-NOT_IN_KITCHEN = "none"  # `appliances.fridge.wall` брифа: холодильник не на кухне
-
-
 def _fridge_vs_brief(
     appliance: Appliance, label: str, pair: BriefAppliance | None, *, in_gap: bool
 ) -> list[Finding]:
@@ -294,7 +293,7 @@ def _fridge_vs_brief(
     модуле». Брифа или пары нет — сравнивать не с чем."""
     if appliance.type != "fridge" or pair is None:
         return []
-    if pair.wall == NOT_IN_KITCHEN:
+    if pair.not_in_kitchen:
         return [
             Finding(
                 code="fridge_not_in_kitchen",
@@ -379,7 +378,7 @@ def _gap_appliances(
     for appliance in fits:
         pair = paired[id(appliance)]
         found += _fridge_vs_brief(appliance, gap.label, pair, in_gap=True)
-        if appliance.type == "fridge" and pair is not None and pair.built_in and pair.wall != NOT_IN_KITCHEN:
+        if appliance.type == "fridge" and pair is not None and pair.built_in and not pair.not_in_kitchen:
             found.append(
                 Finding(
                     code="gap_built_in",
@@ -659,6 +658,48 @@ def part_fit_findings(part: Part, sheet: SheetMaterial, ws: Workshop) -> list[Fi
     ]
 
 
+def saw_over_message(sheet_id: str, longest: float, max_cut: float) -> str:
+    """Текст отказа «подрезка листа длиннее максимума реза станка»: один для раскроя и проверок проекта."""
+    return (
+        f"Материал {sheet_id}: подрезка листа {num(longest)} мм по периметру длиннее максимума "
+        f"станка {num(max_cut)} мм (equipment.yaml, пила)."
+    )
+
+
+def _saw_over(built: list[tuple[ModuleSpec, TemplateOut]], ws: Workshop) -> list[Finding]:
+    """Лист материала, по которому у проекта есть детали, длиннее максимума реза станка: раскрой отказал бы."""
+    max_cut = ws.equipment.saw.max_cut_length
+    used = {part.material for _, out in built for part in out.parts}
+    return [
+        Finding(
+            code="sheet_over_saw",
+            level="error",
+            subject=sheet.id,
+            message=saw_over_message(sheet.id, max(sheet.sheet), max_cut),
+            value=max(sheet.sheet),
+            limit=max_cut,
+        )
+        for sheet in ws.materials.sheets
+        if sheet.id in used and max(sheet.sheet) > max_cut
+    ]
+
+
+def _drilling_mismatch(
+    project: Project, built: list[tuple[ModuleSpec, TemplateOut]], ws: Workshop
+) -> list[Finding]:
+    """Присадка не сходится с фурнитурой (`drilling.reconcile`): предупреждение с текстом отказа присадки.
+    Сверка линейна по модулям, поэтому идёт по собранным; не собравшийся модуль виден как `module_build`."""
+    hardware: Counter = Counter()
+    for _, out in built:
+        hardware.update(out.hardware)
+    parts = [p for _, out in built for p in out.parts if p.holes]
+    try:
+        reconcile(parts, dict(hardware), ws)
+    except OrderError as e:
+        return [Finding(code="drilling_mismatch", level="warning", subject=project.order, message=str(e))]
+    return []
+
+
 def _sheet_fit(built: list[tuple[ModuleSpec, TemplateOut]], ws: Workshop) -> list[Finding]:
     """Все листовые детали проекта в рабочем поле листа."""
     sheets = {m.id: m for m in ws.materials.sheets}
@@ -725,4 +766,6 @@ def check_project(project: Project, ws: Workshop, brief: dict | None = None) -> 
     found += _niches(project, ws, dims, None if brief is None else brief_appliances(brief), failed, gaps)
     found += _sheet_fit(built, ws)
     found += _no_back(built)
+    found += _saw_over(built, ws)
+    found += _drilling_mismatch(project, built, ws)
     return found

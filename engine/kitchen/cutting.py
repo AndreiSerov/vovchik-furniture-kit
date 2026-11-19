@@ -41,7 +41,7 @@ from rectpack import (
     newPacker,
 )
 
-from kitchen.checks import along_texture, part_fit_findings
+from kitchen.checks import along_texture, part_fit_findings, saw_over_message
 from kitchen.errors import KitchenError, OrderError
 from kitchen.models import Saw, SheetMaterial, Workshop
 from kitchen.parts import ModuleParts, Part
@@ -276,10 +276,7 @@ def _cut_material(sheet: SheetMaterial, parts: list[Part], ws: Workshop) -> Mate
         if findings:
             raise OrderError(findings[0].message)
     if max(size) > max_cut:
-        raise OrderError(
-            f"Материал {sheet.id}: подрезка листа {max(size)} мм по периметру длиннее максимума "
-            f"станка {max_cut} мм (equipment.yaml, пила)."
-        )
+        raise OrderError(saw_over_message(sheet.id, max(size), max_cut))
     best = min(
         _layouts(by_id, field, kerf, rotation=not textured),
         key=lambda item: _score(item[1], by_id),

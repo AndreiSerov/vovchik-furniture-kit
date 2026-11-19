@@ -190,7 +190,7 @@
           "item": {
             "wall": "string",
             "description": "string",
-            "size_mm": "string"
+            "size_mm": "string: размеры строкой, например «300×250»"
           },
           "required": false,
           "ask": "measure"
@@ -230,7 +230,7 @@
           "item": {
             "type": "enum: sink, hob, cooker (отдельностоящая плита), oven, microwave, dishwasher, washing_machine, coffee_machine, wine_cooler, other",
             "built_in": "boolean",
-            "fuel": "enum для варочной или плиты: induction, electric, gas",
+            "fuel": "enum: induction, electric, gas — для варочной или плиты",
             "brand": "string: бренд, если назван без модели",
             "model": "string: модель (без неё встраиваемую технику нельзя пускать в производство)",
             "width_mm": "integer",

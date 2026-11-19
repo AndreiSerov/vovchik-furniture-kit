@@ -92,6 +92,12 @@ def test_built_in_appliance_without_module_is_an_error(home):
     assert findings(project_dw(home), home, "appliance_unbound") == []
 
 
+def test_wall_none_does_not_silence_a_non_fridge_appliance(home):
+    """Тикет 65: «не на кухне» — свойство холодильника; у другого прибора `wall: none` ничего не молчит."""
+    save_brief(home, [dw(wall="none")])
+    assert len(findings(single(home, "base_door"), home, "appliance_unbound")) == 1
+
+
 def test_not_built_in_appliance_needs_no_module(home):
     save_brief(home, [{"type": "dishwasher", "built_in": False}])
     assert findings(single(home, "base_door"), home, "appliance_unbound") == []

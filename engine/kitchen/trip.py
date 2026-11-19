@@ -39,20 +39,21 @@ class TripHeader(BaseModel):
 
     client: str
     address: str
-    floor_lift: str
+    storey: str
+    elevator: str
     parking: str
     dismantling: str
-    walls: str
-    floor: str
+    walls_evenness: str
+    floor_evenness: str
 
     def lines(self) -> list[str]:
         return [
             f"Клиент: {self.client}",
             f"Адрес: {self.address}",
-            f"Этаж: {self.floor_lift}",
+            f"Этаж: {self.storey}, лифт: {self.elevator}",
             f"Парковка: {self.parking}",
             f"Демонтаж старой кухни: {self.dismantling}",
-            f"Стены: {self.walls}, пол: {self.floor}",
+            f"Стены: {self.walls_evenness}, пол: {self.floor_evenness}",
         ]
 
 
@@ -75,11 +76,12 @@ def build_header(brief: dict[str, Any] | None) -> TripHeader:
     return TripHeader(
         client=_client(brief),
         address=_text(brief, "client.address"),
-        floor_lift=f"{_text(brief, 'client.floor')}, лифт: {_label(brief, 'client.elevator')}",
+        storey=_text(brief, "client.floor"),
+        elevator=_label(brief, "client.elevator"),
         parking=_label(brief, "installation.parking"),
         dismantling=_label(brief, "installation.dismantling"),
-        walls=_label(brief, "installation.walls_evenness"),
-        floor=_label(brief, "installation.floor_evenness"),
+        walls_evenness=_label(brief, "installation.walls_evenness"),
+        floor_evenness=_label(brief, "installation.floor_evenness"),
     )
 
 
