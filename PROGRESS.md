@@ -99,6 +99,20 @@
 - [x] 64 — Чек-лист выезда: этаж и лифт отдельными полями ([спека](docs/specs/stage-8-backlog.md))
 - [x] 65 — Уборка этапа 8 ([спека](docs/specs/stage-8-backlog.md))
 
+## Этап 9. Расчёт одним модулем
+
+Две проверки готовности пройдены 2026-11-18, замечания внесены; тикеты ждут третьей проверки (`docs/agents/workflow.md`, «Review rounds»). Ветка `stage-9`.
+
+- [ ] 66 — Снимок выводов до рефакторинга ([спека](docs/specs/stage-9-api-calculation.md))
+- [ ] 67 — Слои ADR 0002 под import-linter ([спека](docs/specs/stage-9-api-calculation.md))
+- [ ] 68 — Штамп PDF и HTML 3D ([спека](docs/specs/stage-9-api-calculation.md))
+- [ ] 69 — Расчёт и методы-выводы ([спека](docs/specs/stage-9-api-calculation.md))
+- [ ] 70 — `save`, таблица сохранения, `production` ([спека](docs/specs/stage-9-api-calculation.md))
+- [ ] 71 — CLI на расчёте ([спека](docs/specs/stage-9-api-calculation.md))
+- [ ] 72 — Тесты на расчёте, часть 1 ([спека](docs/specs/stage-9-api-calculation.md))
+- [ ] 73 — Тесты на расчёте, часть 2 ([спека](docs/specs/stage-9-api-calculation.md))
+- [ ] 74 — Удаление старой формы и уборка этапа ([спека](docs/specs/stage-9-api-calculation.md))
+
 ## Бэклог (после MVP)
 
 Решение 2026-11-15: MVP — от брифа до документов цеха и КП, с упрощённым 3D. Остальное ждёт здесь.
