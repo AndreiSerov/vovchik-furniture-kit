@@ -134,5 +134,5 @@ def test_talls_with_labels_equal_after_normalisation_do_not_stand_on_one_place(h
     lower = ("lower", [mod("П1", "tall_oven", 600), mod("Н1", "base_door", 600)])
     upper = ("upper", [mod("п1", "tall_oven", 600), mod("В1", "wall_door", 600)])
     path = write(home, one_wall(2400, *((upper, lower) if flip else (lower, upper))))
-    codes = {f.code for f in api.check_project(path, home).findings}
+    codes = {f.code for f in api.calculation(project=path, home=home).check().findings}
     assert "duplicate_label" in codes and "tall_overlap" not in codes

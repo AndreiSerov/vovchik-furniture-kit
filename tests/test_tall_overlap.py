@@ -13,7 +13,11 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 def tall_overlaps(home, walls):
-    return [f for f in api.check_project(write(home, walls), home).findings if f.code == "tall_overlap"]
+    return [
+        f
+        for f in api.calculation(project=write(home, walls), home=home).check().findings
+        if f.code == "tall_overlap"
+    ]
 
 
 def test_tall_of_other_row_on_the_corner_offset(home):
@@ -64,7 +68,7 @@ def test_tall_in_line_with_modules_of_other_row_has_no_finding(home):
 
 
 def test_petrov_has_no_tall_overlap(home):
-    findings = api.check_project(FIXTURES / "petrov_project.json", home).findings
+    findings = api.calculation(project=FIXTURES / "petrov_project.json", home=home).check().findings
     assert [f for f in findings if f.code == "tall_overlap"] == []
 
 

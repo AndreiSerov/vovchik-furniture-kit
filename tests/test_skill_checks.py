@@ -158,7 +158,7 @@ def test_kitchen_production_eval_setup_really_makes_the_cut_map_stale(home):
     order = "2026-047-petrov"
     api.brief_save(order, fixtures / "petrov_brief.json", home)
     api.import_project(order, fixtures / "petrov_project.json", home=home)
-    api.production_and_save(order, home)
+    api.production(api.calculation(order=order, home=home))
     project = json.loads((fixtures / "petrov_project.json").read_text(encoding="utf-8"))
     project["materials"]["facades_lower_color"] = "RAL 7016"
     path = home / "petrov_v2.json"

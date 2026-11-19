@@ -39,7 +39,11 @@ def write(home, walls):
 
 
 def row_sums(home, walls):
-    return [f for f in api.check_project(write(home, walls), home).findings if f.code == "row_sum"]
+    return [
+        f
+        for f in api.calculation(project=write(home, walls), home=home).check().findings
+        if f.code == "row_sum"
+    ]
 
 
 def edit(home, name, old, new):
@@ -88,7 +92,7 @@ def test_upper_offset_ignores_sheet_thickness_of_materials_yaml(home):
     )
     walls = corner_walls(664, {"materials": {"body": "ldsp_18_white"}})
     assert row_sums(home, walls) == []
-    result = api.parts_from_project(write(home, walls), home)
+    result = api.calculation(project=write(home, walls), home=home).parts()
     corner = next(m for m in result.modules if m.module == "В1")
     assert {p.width for p in corner.parts if p.name == "боковина"} == {320}
     assert {p.thickness for p in corner.parts if p.name == "боковина"} == {16}
@@ -107,13 +111,13 @@ def test_two_upper_corners_into_one_wall_add_up(home):
 
 def test_corner_facade_does_not_change_the_offset(home):
     walls = corner_walls(664, {"materials": {"facades": "nope"}})
-    result = api.check_project(write(home, walls), home)
+    result = api.calculation(project=write(home, walls), home=home).check()
     assert [f for f in result.findings if f.code == "row_sum"] == []
 
 
 def test_corner_body_unknown_is_module_build_and_row_is_still_summed(home):
     walls = corner_walls(664, {"materials": {"body": "nope"}})
-    result = api.check_project(write(home, walls), home)
+    result = api.calculation(project=write(home, walls), home=home).check()
     assert ("module_build", "В1") in {(f.code, f.subject) for f in result.errors}
     assert [f for f in result.findings if f.code == "row_sum" and f.subject == "Б"] == []
 
@@ -155,13 +159,13 @@ def test_petrov_wall_b_upper_row_starts_with_gap_after_corner_and_sums(home):
     assert upper["modules"][0].get("gap") is True
     assert upper["modules"][0]["width"] == 264  # 1800 − 450 − 750 − 336
     api.brief_save("2026-047-petrov", FIXTURES / "petrov_brief.json", home)
-    result = api.check_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).check()
     assert [f.message for f in result.errors] == []
 
 
 def test_petrov_v4_depth_is_upper_depth(home):
     api.brief_save("2026-047-petrov", FIXTURES / "petrov_brief.json", home)
-    result = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     v4 = next(m for m in result.modules if m.module == "В4")
     assert {p.width for p in v4.parts if p.name == "боковина"} == {320}
     bottom = next(p for p in v4.parts if p.name == "дно")
@@ -181,9 +185,9 @@ def test_docs_describe_the_new_rule():
 
 def test_petrov_gap_is_right_after_the_corner_in_wall_b_upper_row(home):
     api.brief_save("2026-047-petrov", FIXTURES / "petrov_brief.json", home)
-    result = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     assert [(g.label, g.wall, g.row, g.width) for g in result.gaps] == [("ПМ1", "Б", "upper", 264)]
-    quote = api.quote_from_project(FIXTURES / "petrov_project.json", 14, home)
+    quote = api.calculation(project=FIXTURES / "petrov_project.json", home=home).quote(14)
     labels = [m.label for m in quote.modules]
     assert labels[labels.index("Н6") :] == ["Н6", "ПМ1", "В5", "В6"]
 
@@ -193,6 +197,6 @@ def test_fractional_corner_dims_are_module_build_not_crash(home, extra):
     # дробный размер углового — находка module_build, а не обрыв проверок; сумму соседнего ряда не считаем
     walls = corner_walls(664)
     walls[0]["rows"][0]["modules"][0].update(extra)
-    result = api.check_project(write(home, walls), home)
+    result = api.calculation(project=write(home, walls), home=home).check()
     assert ("module_build", "В1") in {(f.code, f.subject) for f in result.errors}
     assert [f for f in result.findings if f.code == "row_sum" and f.subject == "Б"] == []

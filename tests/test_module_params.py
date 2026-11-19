@@ -19,7 +19,7 @@ def _project(home, mutate):
 
 
 def _parts(home, mutate):
-    return api.parts_from_project(_project(home, mutate), home)
+    return api.calculation(project=_project(home, mutate), home=home).parts()
 
 
 # --- цвет фасада ---------------------------------------------------------------
@@ -76,12 +76,12 @@ def test_facade_color_override_splits_purchase_by_color(home):
 
     purchased = {
         i.color: i.quantity
-        for shop in api.purchase_from_order(order, home).shops
+        for shop in api.calculation(order=order, home=home).purchase().shops
         for i in shop.items
         if i.kind == "facade"
     }
     assert set(purchased) == {"RAL 5002", "RAL 7044", "RAL 9003"}
-    assert purchased == api.parts_from_order(order, home).facade_area_by_color
+    assert purchased == api.calculation(order=order, home=home).parts().facade_area_by_color
 
 
 # --- число полок и дверей --------------------------------------------------------

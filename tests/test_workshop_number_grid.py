@@ -5,6 +5,7 @@
 
 import json
 import shutil
+from operator import methodcaller
 from pathlib import Path
 
 import pytest
@@ -68,7 +69,7 @@ def negatives(node, where="$"):
     return found
 
 
-COMPUTES = (api.parts_from_project, api.cut_from_project, api.estimate_from_project)
+COMPUTES = {"parts": methodcaller("parts"), "cut": methodcaller("cut"), "estimate": methodcaller("estimate")}
 
 
 @pytest.fixture(scope="module")
@@ -80,7 +81,12 @@ def baseline(tmp_path_factory):
     home = tmp_path_factory.mktemp("grid-baseline")
     shutil.copytree(REPO / "workshop", home / "workshop")
     petrov = FIXTURES / "petrov_project.json"
-    return {c.__name__: set(negatives(json.loads(c(petrov, home).model_dump_json()))) for c in COMPUTES}
+    return {
+        name: set(
+            negatives(json.loads(compute(api.calculation(project=petrov, home=home)).model_dump_json()))
+        )
+        for name, compute in COMPUTES.items()
+    }
 
 
 def with_value(data, path, value):
@@ -106,10 +112,10 @@ def test_numeric_field_bad_value_is_load_error_or_honest_calculation(
         assert any(name in e and key in e for e in checked.errors), (checked.errors, key)
         return
     petrov = FIXTURES / "petrov_project.json"
-    for compute in COMPUTES:
+    for compute_name, compute in COMPUTES.items():
         try:
-            result = compute(petrov, tmp_path)
+            result = compute(api.calculation(project=petrov, home=tmp_path))
         except KitchenError:
             return  # русская ошибка расчёта — не молчаливо неверный вывод
-        new = set(negatives(json.loads(result.model_dump_json()))) - baseline[compute.__name__]
-        assert not new, (compute.__name__, name, path, bad, sorted(new)[:3])
+        new = set(negatives(json.loads(result.model_dump_json()))) - baseline[compute_name]
+        assert not new, (compute_name, name, path, bad, sorted(new)[:3])

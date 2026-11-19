@@ -11,7 +11,7 @@ def test_tall_oven_contains_two_niches_and_drawer(home, base_door_project):
     project = json.loads(base_door_project.read_text(encoding="utf-8"))
     project["walls"][0]["rows"][0]["modules"] = [{"label": "П1", "template": "tall_oven", "width": 600}]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     parts = result.modules[0].parts
     assert len([p for p in parts if p.name == "перегородка ниши"]) == 2
     assert len([p for p in parts if p.name == "дно ящика"]) == 1
@@ -27,7 +27,7 @@ def test_tall_oven_manual_golden(home, base_door_project):
     project = json.loads(base_door_project.read_text(encoding="utf-8"))
     project["walls"][0]["rows"][0]["modules"] = [{"label": "П1", "template": "tall_oven", "width": 600}]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     expected = load_golden("tall_oven_600")
     assert golden_dump(result) == expected
 
@@ -37,7 +37,7 @@ def test_tall_oven_project_microwave_dimensions_change_niche(home, base_door_pro
     project["walls"][0]["rows"][0]["modules"] = [{"label": "П1", "template": "tall_oven", "width": 600}]
     project["appliances"] = [{"type": "microwave", "width": 600, "niche_height": 420, "module": "П1"}]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     by_id = {p.id: p for p in result.modules[0].parts}
     assert by_id["П1-перег-2"].position.z == 1324
     assert by_id["П1-фасад"].position.z == 1340
@@ -51,12 +51,12 @@ def test_tall_oven_rejects_impossible_drawer_or_niche(home, base_door_project):
     project["walls"][0]["rows"][0]["modules"] = [{"label": "П1", "template": "tall_oven", "width": 500}]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(OrderError, match="нишу техники"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
     project["walls"][0]["rows"][0]["modules"][0]["width"] = 600
     project["walls"][0]["rows"][0]["modules"][0]["depth"] = 500
     base_door_project.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(OrderError, match="нишу техники"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_tall_oven_invalid_appliance_reference_is_rejected(home, base_door_project):
@@ -69,7 +69,7 @@ def test_tall_oven_invalid_appliance_reference_is_rejected(home, base_door_proje
         encoding="utf-8",
     )
     with pytest.raises(WorkshopError, match="правила_пенала.духовка"):
-        api.parts_from_project(base_door_project, home)
+        api.calculation(project=base_door_project, home=home).parts()
 
 
 def test_tall_upper_row_uses_module_facade_override(home, base_door_project):
@@ -87,7 +87,7 @@ def test_tall_upper_row_uses_module_facade_override(home, base_door_project):
         {"label": "П1", "template": "tall_oven", "width": 600, "materials": {"facades": "other_facade"}}
     ]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     facades = [part for part in result.modules[0].parts if part.name == "фасад"]
     assert all(part.material == "other_facade" and part.thickness == 16 for part in facades)
 
@@ -97,7 +97,7 @@ def test_tall_odd_niche_height_places_shelf_on_whole_mm(home, base_door_project)
     project["walls"][0]["rows"][0]["modules"] = [{"label": "П1", "template": "tall_oven", "width": 600}]
     project["appliances"] = [{"type": "microwave", "module": "П1", "width": 600, "niche_height": 381}]
     base_door_project.write_text(json.dumps(project, ensure_ascii=False))
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     shelf = next(part for part in result.modules[0].parts if part.name == "полка")
     assert shelf.position.z == 1700
 
@@ -113,13 +113,13 @@ def test_tall_oven_real_body_dimensions_do_not_change_niche(home, base_door_proj
     # Габариты корпуса прибора (595x595x567) — не ниша: ниша духовки берётся из каталога (560x590x550),
     # детали те же, что у пенала без техники проекта.
     _tall_with_appliances(base_door_project, [])
-    expected = api.parts_from_project(base_door_project, home).modules[0].parts
+    expected = api.calculation(project=base_door_project, home=home).parts().modules[0].parts
     _tall_with_appliances(
         base_door_project, [{"type": "oven", "width": 595, "height": 595, "depth": 567, "module": "П1"}]
     )
-    findings = api.check_project(base_door_project, home).findings
+    findings = api.calculation(project=base_door_project, home=home).check().findings
     assert [f for f in findings if f.code == "module_build"] == []
-    parts = api.parts_from_project(base_door_project, home).modules[0].parts
+    parts = api.calculation(project=base_door_project, home=home).parts().modules[0].parts
     assert [(p.id, p.position.z) for p in parts] == [(p.id, p.position.z) for p in expected]
 
 
@@ -128,5 +128,5 @@ def test_tall_oven_niche_comes_from_project_niche_fields(home, base_door_project
         base_door_project,
         [{"type": "microwave", "width": 600, "niche_height": 420, "module": "П1"}],
     )
-    by_id = {p.id: p for p in api.parts_from_project(base_door_project, home).modules[0].parts}
+    by_id = {p.id: p for p in api.calculation(project=base_door_project, home=home).parts().modules[0].parts}
     assert by_id["П1-перег-2"].position.z == 1324

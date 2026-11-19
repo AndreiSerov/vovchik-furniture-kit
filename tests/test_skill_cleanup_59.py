@@ -244,8 +244,8 @@ def test_brief_save_by_unknown_phone_prints_not_found(home):
 
 def test_order_hands_the_estimate_step_to_kitchen_estimate(home):
     _v1(home)
-    api.quote_and_save(ORDER, 20, home)
-    api.production_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.quote(20))[0]
+    api.production(api.calculation(order=ORDER, home=home))
     step = api.status(ORDER, home).next_step
     assert step.text.startswith("Смета:")
     assert skill_for(step.text, step.commands) == "kitchen-estimate"

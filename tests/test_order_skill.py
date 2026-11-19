@@ -303,10 +303,10 @@ def test_order_found_by_surname_then_next_step_follows_ticket_49_table_and_hando
     check("Сделать проект", "kitchen-project")
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
     check("Смета и КП", "kitchen-estimate")
-    api.estimate_and_save(ORDER, home)
-    api.quote_and_save(ORDER, 35, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.quote(35))[0]
     check("Документы цеха", "kitchen-production")
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     done = check("Все документы готовы", None)
     assert section(done.text, "Устарело") == "Пока ничего."
     _import_v2(home)
@@ -354,9 +354,9 @@ def test_scenario_status_has_the_right_dalshe_section(home):
     api.order_new(ORDER, client="Петров П. П.", home=home)
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
-    api.estimate_and_save(ORDER, home)
-    api.quote_and_save(ORDER, 35, home)
-    api.production_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.quote(35))[0]
+    api.production(api.calculation(order=ORDER, home=home))
     api.log_add(
         ORDER, "next", "согласовать фасады", home
     )  # импорт, смета, КП и производство «Дальше» сбрасывают (57)

@@ -33,35 +33,35 @@ def stamp(*, version=None, mock=True):
 
 
 def _cutting(home, path, st):
-    r = api.cut_from_project(PETROV, home)
+    r = api.calculation(project=PETROV, home=home).cut()
     write_cutting_map(path, r.materials, kerf=r.kerf, kerf_declared=r.kerf_declared, trim=r.trim, stamp=st)
 
 
 def _edging(home, path, st):
-    r = api.edges_from_project(PETROV, home)
+    r = api.calculation(project=PETROV, home=home).edging()
     write_edging_map(path, r.parts, r.edges, purchase_digits=r.purchase_digits, stamp=st)
 
 
 def _drilling(home, path, st):
-    r = api.drilling_from_project(PETROV, home)
+    r = api.calculation(project=PETROV, home=home).drilling()
     write_drilling_map(path, r.parts, r.checks, stamp=st)
 
 
 def _assembly(home, path, st):
-    write_assembly(path, api.assembly_from_project(PETROV, home).modules, stamp=st)
+    write_assembly(path, api.calculation(project=PETROV, home=home).assembly().modules, stamp=st)
 
 
 def _trip(home, path, st):
-    r = api.trip_from_project(PETROV, home)
+    r = api.calculation(project=PETROV, home=home).trip()
     write_trip(path, r.header, r.sections, stamp=st)
 
 
 def _quote(home, path, st):
-    write_quote(path, api.quote_from_project(PETROV, 20, home), stamp=st)
+    write_quote(path, api.calculation(project=PETROV, home=home).quote(20), stamp=st)
 
 
 def _views(home, path, st):
-    write_views(path, api.views_layout(api.views_from_project(PETROV, home)), stamp=st)
+    write_views(path, api.views_layout(api.calculation(project=PETROV, home=home).views()), stamp=st)
 
 
 WRITERS = [_cutting, _edging, _drilling, _assembly, _trip, _quote, _views]
@@ -93,7 +93,7 @@ def test_footer_names_the_version(home, tmp_path, writer):
 
 
 def html(home, st):
-    scene = api.views_from_project(PETROV, home).scene3d
+    scene = api.calculation(project=PETROV, home=home).views().scene3d
     return render_html(scene, stamp=st, errors=0)
 
 

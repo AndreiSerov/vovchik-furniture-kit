@@ -1,4 +1,4 @@
-"""Тикет 23: расстановка модулей в комнате (`api.placement_from_project`). Начало координат — начало первой
+"""Тикет 23: расстановка модулей в комнате (`api.calculation(...).placement()`). Начало координат — начало первой
 стены цепочки на полу; x вдоль неё, y от стены в комнату, z вверх; поворот стены — градусы вокруг вертикали.
 Коробка модуля — корпус плюс фасад."""
 
@@ -41,7 +41,7 @@ def write(home, walls, **extra):
 
 
 def place(home, walls, **extra):
-    return api.placement_from_project(write(home, walls, **extra), home)
+    return api.calculation(project=write(home, walls, **extra), home=home).placement()
 
 
 def box(result, label):
@@ -114,7 +114,7 @@ def edit(home, name, old, new):
 
 
 def test_petrov_modules_do_not_intersect(home):
-    result = api.placement_from_project(PETROV, home)
+    result = api.calculation(project=PETROV, home=home).placement()
     boxes = {m.label: m.bounds() for m in result.modules}
     assert len(boxes) == 13
     clashes = [(a, b) for a in boxes for b in boxes if a < b and overlap(boxes[a], boxes[b])]
@@ -122,7 +122,7 @@ def test_petrov_modules_do_not_intersect(home):
 
 
 def test_petrov_corner_modules_stand_in_the_corner(home):
-    result = api.placement_from_project(PETROV, home)
+    result = api.calculation(project=PETROV, home=home).placement()
     # стена Б начинается в конце A (угол x 2800) и идёт от него в комнату
     assert [(w.label, (w.origin.x, w.origin.y), w.rotation) for w in result.walls] == [
         ("A", (0, 0), 0),
@@ -140,7 +140,7 @@ def test_petrov_corner_modules_stand_in_the_corner(home):
 
 
 def test_petrov_tall_spans_from_legs_to_top_of_uppers(home):
-    result = api.placement_from_project(PETROV, home)
+    result = api.calculation(project=PETROV, home=home).placement()
     # верх верхних = ножки.высота 100 + пенал.высота 2100; верхние выровнены по верху
     assert result.top_of_uppers == 2200
     assert box(result, "П1") == ((0, 0, 100), (600, 579, 2200))
@@ -149,7 +149,7 @@ def test_petrov_tall_spans_from_legs_to_top_of_uppers(home):
 
 def test_tall_height_of_workshop_moves_top_of_uppers(home):
     edit(home, "construction.yaml", "пенал: {высота: 2100", "пенал: {высота: 2300")
-    result = api.placement_from_project(PETROV, home)
+    result = api.calculation(project=PETROV, home=home).placement()
     assert result.top_of_uppers == 2400
     assert box(result, "В1") == ((600, 0, 1680), (1200, 339, 2400))
     assert box(result, "П1")[1][2] == 2400
@@ -173,7 +173,7 @@ def placement_error(home, data):
     path = home / "p.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(OrderError) as e:
-        api.placement_from_project(path, home)
+        api.calculation(project=path, home=home).placement()
     return e.value.problems
 
 
@@ -336,7 +336,7 @@ def test_top_of_uppers_at_the_ceiling_is_fine(home):
     data["ceiling_height"] = 2200
     path = home / "p.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    assert api.placement_from_project(path, home).top_of_uppers == 2200
+    assert api.calculation(project=path, home=home).placement().top_of_uppers == 2200
 
 
 def test_corner_only_in_lower_row_upper_modules_clash_in_the_corner(home):
@@ -362,7 +362,7 @@ def test_corner_only_in_lower_row_upper_modules_clash_in_the_corner(home):
 
 
 def test_petrov_has_no_placement_findings(home):
-    assert api.placement_from_project(PETROV, home).findings == []
+    assert api.calculation(project=PETROV, home=home).placement().findings == []
 
 
 def test_corner_only_in_upper_row_lower_modules_clash_in_the_corner(home):
@@ -420,8 +420,10 @@ def inside(inner, outer):
 @pytest.mark.parametrize("label", ["Н4", "П1"])
 def test_parts_of_module_lie_inside_its_box_except_hdf_back(home, label):
     # контракт расширения (виды 41, HTML 42): детали модуля из `parts` кладутся в сцену той же расстановкой
-    result = api.placement_from_project(PETROV, home)
-    parts = next(m for m in api.parts_from_project(PETROV, home).modules if m.module == label).parts
+    result = api.calculation(project=PETROV, home=home).placement()
+    parts = next(
+        m for m in api.calculation(project=PETROV, home=home).parts().modules if m.module == label
+    ).parts
     place_ = next(m for m in result.modules if m.label == label)
     objects = [api.part_in_room(place_, p) for p in parts]
     assert {o.kind for o in objects} == {"part"}
@@ -434,7 +436,7 @@ def test_parts_of_module_lie_inside_its_box_except_hdf_back(home, label):
 
 
 def test_scene_lists_modules_walls_and_floor(home):
-    result = api.placement_from_project(PETROV, home)
+    result = api.calculation(project=PETROV, home=home).placement()
     kinds = [o.kind for o in result.scene]
     assert kinds.count("module") == 13 and kinds.count("wall") == 2 and kinds.count("floor") == 1
     n5 = next(o for o in result.scene if o.label == "Н5")
@@ -450,7 +452,7 @@ def test_scene_lists_modules_walls_and_floor(home):
 def test_placement_of_order_keeps_source_version_and_mock_mark(home):
     api.order_new("2026-047-petrov", home=home)
     api.import_project("2026-047-petrov", PETROV, home=home)
-    result = api.placement_from_order("2026-047-petrov", home=home)
+    result = api.calculation(order="2026-047-petrov", home=home).placement()
     assert (result.source.kind, result.source.version) == ("order", 1)
     assert result.mock and result.warning == "МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА"
     assert result.model_dump(mode="json")["warning"] == "МОК-ДАННЫЕ — НЕ ДЛЯ КЛИЕНТА"

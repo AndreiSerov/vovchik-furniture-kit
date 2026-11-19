@@ -21,7 +21,7 @@ def petrov(home):
 
 def test_petrov_passes_checks_without_errors_and_n5_warns(home):
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
-    result = api.check_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).check()
     assert [f.message for f in result.errors] == []
     back = [f for f in result.warnings if f.code == "no_back_panel"]
     assert [f.subject for f in back] == ["Н5"]
@@ -32,7 +32,7 @@ def all_parts(result):
 
 
 def test_petrov_parts_from_order(petrov):
-    result = api.parts_from_order("petrov", petrov)
+    result = api.calculation(order="petrov", home=petrov).parts()
     assert [m.module for m in result.modules] == [
         "П1", "Н1", "Н2", "Н3", "Н4", "В1", "В2", "В3", "В4", "Н5", "Н6", "В5", "В6",
     ]  # fmt: skip
@@ -51,7 +51,7 @@ def test_petrov_parts_from_order(petrov):
 
 
 def test_source_names_version_and_brief(petrov):
-    result = api.parts_from_order(ORDER, petrov)
+    result = api.calculation(order=ORDER, home=petrov).parts()
     src = result.source
     assert (src.kind, src.order, src.version) == ("order", ORDER, 1)
     assert src.brief_id == 1 and src.version_brief_id == 1
@@ -61,7 +61,7 @@ def test_source_names_version_and_brief(petrov):
 
 def test_newer_brief_warns_that_version_is_stale(petrov):
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", petrov)  # бриф №2 новее записанного у версии
-    result = api.parts_from_order(ORDER, petrov)
+    result = api.calculation(order=ORDER, home=petrov).parts()
     assert (result.source.brief_id, result.source.version_brief_id) == (2, 1)
     text = " ".join(result.warnings)
     assert "бриф №2" in text.lower() and "№1" in text and "версия 1" in text
@@ -70,12 +70,12 @@ def test_newer_brief_warns_that_version_is_stale(petrov):
 def test_no_project_yet_is_an_error(home):
     api.order_new(ORDER, home=home)
     with pytest.raises(OrderError, match="проекта ещё нет"):
-        api.parts_from_order(ORDER, home)
+        api.calculation(order=ORDER, home=home).parts()
 
 
 def test_project_file_source_and_findings(home):
     api.brief_save(ORDER, FIXTURES / "petrov_brief.json", home)
-    result = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     src = result.source
     assert (src.kind, src.order, src.version, src.brief_id) == ("file", ORDER, None, 1)
     assert src.path.endswith("petrov_project.json")
@@ -83,11 +83,11 @@ def test_project_file_source_and_findings(home):
     assert not [f for f in result.findings if f.level == "error"]
     # тот же проект, что в БД: хеш содержимого совпадает с хешем версии
     api.import_project(ORDER, FIXTURES / "petrov_project.json", home=home)
-    assert api.parts_from_order(ORDER, home).source.content_hash == src.content_hash
+    assert api.calculation(order=ORDER, home=home).parts().source.content_hash == src.content_hash
 
 
 def test_facade_area_by_color(petrov):
-    result = api.parts_from_order(ORDER, petrov)
+    result = api.calculation(order=ORDER, home=petrov).parts()
     by_color = result.facade_area_by_color
     assert set(by_color) == {"RAL 7044", "RAL 9003"}
     lower = {"П1", "Н1", "Н2", "Н3", "Н4", "Н5", "Н6"}
@@ -100,7 +100,7 @@ def test_facade_area_by_color(petrov):
 
 
 def test_facade_without_color_is_grouped_apart(home, base_door_project):
-    result = api.parts_from_project(base_door_project, home)
+    result = api.calculation(project=base_door_project, home=home).parts()
     assert result.facade_area_by_color == {"без цвета": 0.4253}
 
 
@@ -112,7 +112,7 @@ def test_petrov_common_items(petrov):
     """Руками по правилам МОК: нижний фронт 2800 + 1200 − угловое смещение 600 = 3400 мм, верхние ряды 2200 + 1200 = 3400 мм,
     запас на стыки 5%: цоколь 3570 мм → 1 штука 4 м; шина 3570 мм → 2 по 2 м; LED 3.57 → 4 м,
     блок питания 1 (5 м на блок); столешница: общая длина 2200 + 1200 = 3400 мм — один лист 4100."""
-    c = common(api.parts_from_order(ORDER, petrov))
+    c = common(api.calculation(order=ORDER, home=petrov).parts())
     assert list(c) == ["plinth", "rail", "hangers", "led", "led_power_supply", "countertop"]
     assert (c["plinth"].item, c["plinth"].quantity, c["plinth"].length_mm) == ("plinth_100", 1, 3400)
     assert (c["rail"].item, c["rail"].quantity, c["rail"].length_mm) == ("rail_2000", 2, 3400)
@@ -135,7 +135,7 @@ def test_petrov_common_items(petrov):
 
 
 def test_common_items_are_not_added_to_hardware(petrov):
-    result = api.parts_from_order(ORDER, petrov)
+    result = api.calculation(order=ORDER, home=petrov).parts()
     assert not {"plinth_100", "rail_2000", "led_profile_m", "led_psu"} & set(result.hardware)
 
 
@@ -145,14 +145,14 @@ def test_without_led_and_countertop_those_items_are_absent(home):
     del project["materials"]["countertop"]
     path = home / "p.json"
     path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
-    kinds = [c.kind for c in api.parts_from_project(path, home).common]
+    kinds = [c.kind for c in api.calculation(project=path, home=home).parts().common]
     assert kinds == ["plinth", "rail", "hangers"]
 
 
 def test_countertop_longer_than_sheet_takes_whole_sheets(home):
     materials = home / "workshop/materials.yaml"
     materials.write_text(materials.read_text().replace("лист: [4100, 600]", "лист: [2000, 600]"))
-    result = api.parts_from_project(FIXTURES / "petrov_project.json", home)
+    result = api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts()
     top = common(result)["countertop"]
     # общая длина 3400 мм при листе 2000 — два листа
     assert top.quantity == 2
@@ -162,13 +162,13 @@ def test_common_rules_come_from_workshop(home):
     path = home / "workshop/construction.yaml"
     text = path.read_text()
     path.write_text(text.replace("запас_на_стыки: 0.05", "запас_на_стыки: 0.2"))
-    c = common(api.parts_from_project(FIXTURES / "petrov_project.json", home))
+    c = common(api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts())
     assert c["plinth"].quantity == 2  # 3400 × 1.2 = 4080 мм > одной штуки
     path.write_text(text.replace("смещение_нижнего: 600", "смещение_нижнего: 500"))
-    c = common(api.parts_from_project(FIXTURES / "petrov_project.json", home))
+    c = common(api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts())
     assert c["plinth"].length_mm == 3500  # угловое смещение — из мастерской, а не из кода
     path.write_text(text.replace("округление_метров: 1", "округление_метров: 5"))
-    c = common(api.parts_from_project(FIXTURES / "petrov_project.json", home))
+    c = common(api.calculation(project=FIXTURES / "petrov_project.json", home=home).parts())
     assert c["led"].quantity == 5  # 3.57 м вверх до кратного 5
 
 
@@ -181,7 +181,7 @@ def test_tall_in_upper_row_gives_same_plinth_and_countertop_as_in_lower_row(home
     rows["upper"]["modules"].insert(0, rows["lower"]["modules"].pop(0))
     path = home / "p.json"
     path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
-    result = api.parts_from_project(path, home)
+    result = api.calculation(project=path, home=home).parts()
     c = common(result)
     assert c["plinth"].length_mm == 3400
     assert c["rail"].length_mm == 3400
@@ -226,7 +226,7 @@ def test_tall_in_upper_row_breaks_countertop_at_its_place(home):
     }
     path = home / "p.json"
     path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
-    c = common(api.parts_from_project(path, home))
+    c = common(api.calculation(project=path, home=home).parts())
     assert c["plinth"].length_mm == 1600
     assert c["countertop"].length_mm == 1000
     assert c["countertop"].quantity == 1
@@ -246,4 +246,4 @@ def test_unknown_countertop_is_a_clear_error(home):
     path = home / "p.json"
     path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(OrderError, match="top_nope"):
-        api.parts_from_project(path, home)
+        api.calculation(project=path, home=home).parts()

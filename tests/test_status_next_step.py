@@ -41,7 +41,7 @@ def _v1(home):
 def test_stage_is_outputs_after_the_first_saved_output(home):
     _v1(home)
     assert api.status(ORDER, home).stage == "Проект"
-    api.estimate_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
     assert api.status(ORDER, home).stage == "Выводы"
 
 
@@ -71,7 +71,7 @@ def test_after_import_needs_estimate_and_quote(home):
 
 def test_stale_outputs_come_first(home):
     _v1(home)
-    api.estimate_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
     _import_v2(home)
     step = _step(home)
     assert step.text.startswith("Пересчитать устаревшее: ")
@@ -82,8 +82,8 @@ def test_stale_outputs_come_first(home):
 
 def test_quote_without_production_needs_workshop_documents(home):
     _v1(home)
-    api.estimate_and_save(ORDER, home)
-    api.quote_and_save(ORDER, 35, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.quote(35))[0]
     step = _step(home)
     assert step.text == "Документы цеха: kitchen production 2026-047-petrov."
     assert step.commands == [f"kitchen production {ORDER}"]
@@ -91,9 +91,9 @@ def test_quote_without_production_needs_workshop_documents(home):
 
 def test_everything_ready(home):
     _v1(home)
-    api.estimate_and_save(ORDER, home)
-    api.quote_and_save(ORDER, 35, home)
-    api.production_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.quote(35))[0]
+    api.production(api.calculation(order=ORDER, home=home))
     step = _step(home)
     assert step.text == "Все документы готовы: выезд на монтаж по чек-листу."
     assert step.commands == []
@@ -101,7 +101,7 @@ def test_everything_ready(home):
 
 def test_production_kinds_match_what_production_writes(home):
     _v1(home)
-    api.production_and_save(ORDER, home)
+    api.production(api.calculation(order=ORDER, home=home))
     with sqlite3.connect(home / "orders" / "kitchen.db") as conn:
         kinds = {r[0] for r in conn.execute("SELECT kind FROM outputs")}
     assert kinds == set(api.PRODUCTION_KINDS)
@@ -135,23 +135,23 @@ def test_automatic_done_does_not_reset_next(home):
 
 def test_estimate_without_quote_still_needs_quote(home):
     _v1(home)
-    api.estimate_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
     assert _step(home).text.startswith("Смета и КП: ")
 
 
 def test_one_workshop_document_is_not_enough(home):
     _v1(home)
-    api.estimate_and_save(ORDER, home)
-    api.quote_and_save(ORDER, 35, home)
-    api.cut_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.quote(35))[0]
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.cut())[0]
     assert _step(home).text == "Документы цеха: kitchen production 2026-047-petrov."
 
 
 def test_stale_workshop_documents_collapse_to_production(home):
     _v1(home)
-    api.estimate_and_save(ORDER, home)
-    api.quote_and_save(ORDER, 35, home)
-    api.production_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.quote(35))[0]
+    api.production(api.calculation(order=ORDER, home=home))
     _import_v2(home)
     step = _step(home)
     assert step.text == (
@@ -163,13 +163,13 @@ def test_stale_workshop_documents_collapse_to_production(home):
 
 def test_one_stale_workshop_document_also_gives_production(home):
     _v1(home)
-    api.estimate_and_save(ORDER, home)
-    api.quote_and_save(ORDER, 35, home)
-    api.production_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.quote(35))[0]
+    api.production(api.calculation(order=ORDER, home=home))
     _import_v2(home)
-    api.estimate_and_save(ORDER, home)
-    api.quote_and_save(ORDER, 35, home)
-    api.cut_and_save(ORDER, home)
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.estimate())[0]
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.quote(35))[0]
+    api.save(calc := api.calculation(order=ORDER, home=home), calc.cut())[0]
     assert _step(home).text == "Пересчитать устаревшее: kitchen production 2026-047-petrov."
 
 

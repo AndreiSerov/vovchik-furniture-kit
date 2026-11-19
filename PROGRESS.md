@@ -111,7 +111,7 @@
 - [x] 71 — `save`, таблица сохранения, `production` ([спека](docs/specs/stage-9-api-calculation.md))
 - [x] 72 — CLI на расчёте ([спека](docs/specs/stage-9-api-calculation.md))
 - [x] 73 — Тесты на расчёте, часть 1 ([спека](docs/specs/stage-9-api-calculation.md))
-- [ ] 74 — Тесты на расчёте, часть 2 ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 74 — Тесты на расчёте, часть 2 ([спека](docs/specs/stage-9-api-calculation.md))
 - [ ] 75 — Удаление старой формы и снимка, уборка этапа ([спека](docs/specs/stage-9-api-calculation.md))
 
 ## Бэклог (после MVP)
