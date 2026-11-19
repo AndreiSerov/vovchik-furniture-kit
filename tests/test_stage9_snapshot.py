@@ -33,7 +33,9 @@ def git(*args: str, **kwargs) -> subprocess.CompletedProcess:
 
 def snapshot_process(out: Path, pythonpath: Path | None) -> subprocess.Popen:
     env = {**os.environ}
-    env.pop("KITCHEN_HOME", None)
+    # обе стороны — только со своим движком и своим home
+    for name in ("KITCHEN_HOME", "KITCHEN_DB", "PYTHONPATH"):
+        env.pop(name, None)
     if pythonpath:
         env["PYTHONPATH"] = str(pythonpath)
     return subprocess.Popen(
@@ -81,22 +83,25 @@ def runs(tmp_path_factory) -> tuple[dict[str, str], dict[str, str]]:
     assert archive.returncode == 0, archive.stderr.decode()
     with tarfile.open(fileobj=io.BytesIO(archive.stdout)) as tar:
         tar.extractall(root / "base", filter="data")
-    probe = subprocess.run(
-        [sys.executable, "-c", "import kitchen; print(kitchen.__file__)"],
-        env={**os.environ, "PYTHONPATH": str(root / "base" / "engine")},
-        check=False,
-        capture_output=True,
-        text=True,
-        cwd=root,
-    )
-    assert probe.stdout.strip().startswith(str(root / "base")), probe  # kitchen пришёл из базового коммита
     procs = {
         "before": snapshot_process(root / "before", root / "base" / "engine"),
         "after": snapshot_process(root / "after", None),
     }
-    for name, proc in procs.items():
-        output, _ = proc.communicate()
-        assert proc.returncode == 0, f"помощник ({name}) упал:\n{output[-3000:]}"
+    outputs = {}
+    try:
+        for name, proc in procs.items():
+            outputs[name], _ = proc.communicate()
+            assert proc.returncode == 0, f"помощник ({name}) упал:\n{outputs[name][-3000:]}"
+    finally:
+        for proc in procs.values():
+            proc.kill()  # упавшая сторона не оставляет вторую висеть
+    origin = {
+        name: next(line for line in out.splitlines() if line.startswith("kitchen: "))[len("kitchen: ") :]
+        for name, out in outputs.items()
+    }
+    # каждая сторона сама сообщает, откуда импортирован kitchen: «до» — из базового коммита, «после» — из репо
+    assert origin["before"].startswith(str((root / "base" / "engine").resolve())), origin
+    assert origin["after"].startswith(str((REPO / "engine").resolve())), origin
     return read_dir(root / "before"), read_dir(root / "after")
 
 

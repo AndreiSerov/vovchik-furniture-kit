@@ -143,6 +143,12 @@ def _out_files(home: Path) -> dict[str, Path]:
     }
 
 
+def _out_listing(home: Path) -> list[str]:
+    """Всё под `out/`, включая папки и вложенное: мусор вроде забытой `.output-*` тоже попадает в снимок."""
+    paths = sorted(p.relative_to(home).as_posix() for p in (home / "orders").glob("*/out/**/*"))
+    return [re.sub(r"\.output-[^/]+", ".output-*", p) for p in paths]
+
+
 def _file_text(path: Path) -> str:
     if path.suffix == ".pdf":
         pages = PdfReader(path).pages
@@ -283,7 +289,7 @@ class Case:
             tables = _db_rows(home)
             self.put(f"{prefix}/outputs.json", _dump(tables["outputs"]))
             self.put(f"{prefix}/done.json", _dump(tables["done"]))
-            self.put(f"{prefix}/files.json", _dump(sorted(current)))
+            self.put(f"{prefix}/files.json", _dump(_out_listing(home)))
 
 
 def _without_sink_brief(raw: dict) -> dict:
@@ -396,4 +402,5 @@ if __name__ == "__main__":
         sys.exit("usage: python tests/stage9_snapshot.py --out DIR")
     out = Path(sys.argv[2])
     out.mkdir(parents=True, exist_ok=True)
+    print(f"kitchen: {Path(api.__file__).resolve()}")  # тест сверяет, из какого движка шёл прогон
     write_snapshot(build_snapshot(), out)
