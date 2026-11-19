@@ -104,7 +104,7 @@
 Четыре проверки готовности пройдены (2026-11-18, 2026-11-19), замечания внесены; тикеты готовы к сборке по порядку этого списка (решение мастера 2026-11-19: без пятой проверки). Ветка `stage-9`.
 
 - [x] 66 — Снимок выводов до рефакторинга ([спека](docs/specs/stage-9-api-calculation.md))
-- [ ] 67 — Слои движка под import-linter ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 67 — Слои движка под import-linter ([спека](docs/specs/stage-9-api-calculation.md))
 - [ ] 68 — Штамп PDF и HTML 3D ([спека](docs/specs/stage-9-api-calculation.md))
 - [ ] 69 — Перенос в `kitchen.calculation` ([спека](docs/specs/stage-9-api-calculation.md))
 - [ ] 70 — Расчёт и методы-выводы ([спека](docs/specs/stage-9-api-calculation.md))

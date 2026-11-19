@@ -19,7 +19,7 @@ from kitchen.drilling import DrillingCheck, part_extent
 from kitchen.errors import KitchenError
 from kitchen.geometry import PURPOSE_RU, Hole, Mm, ModuleFace, to_mm
 from kitchen.parts import Part
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, mm, page_area, register_fonts
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, TextLine, mm, page_area, register_fonts
 
 __all__ = ["PageLayout", "map_layout", "page_sizes", "write_drilling_map"]
 
@@ -53,17 +53,6 @@ _COLORS = {
 _BASE_COLOR = (0.85, 0.35, 0.0)
 
 Box = tuple[float, float, float, float]  # x0, y0, x1, y1, пункты
-
-
-class TextLine(BaseModel):
-    """Строка текста на странице: левый нижний угол, кегль и ширина при этом кегле, пункты."""
-
-    text: str
-    size: float
-    bold: bool
-    x: float
-    y: float
-    width: float
 
 
 class ChainLabel(BaseModel):

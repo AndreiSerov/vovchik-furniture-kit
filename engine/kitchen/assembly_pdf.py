@@ -13,8 +13,7 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 
 from kitchen.assembly import AssemblyHardware, AssemblyModule
-from kitchen.drilling_pdf import TextLine
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area, register_fonts, wrap
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, TextLine, page_area, register_fonts, wrap
 
 __all__ = ["AssemblyPageLayout", "layout", "write_assembly"]
 

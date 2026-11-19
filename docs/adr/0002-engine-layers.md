@@ -18,3 +18,23 @@
 
 - MCP-сервер в МВП не делаем.
 - Тесты логики идут через API; CLI проверяется только контрактными тестами.
+
+## Слои движка
+
+дополнено 2026-11-19 (тикет 67 этапа 9). Слои проверяет import-linter в `scripts/check`, контракты лежат в `pyproject.toml` (`[tool.importlinter]`). Модуль импортирует только слои ниже себя; модули одного слоя друг от друга не обязаны быть независимы.
+
+| Слой (сверху вниз) | Модули |
+|---|---|
+| CLI | `kitchen.cli` |
+| API | `kitchen.api`, `kitchen.calculation` (с тикета 69) |
+| Рендер | `cutting_pdf`, `edging_pdf`, `drilling_pdf`, `assembly_pdf`, `trip_pdf`, `quote_pdf`, `views_pdf`, `views_html`, `scene3d`, `pdf` |
+| Домен | `assembly`, `brief`, `checks`, `common`, `cutting`, `drilling`, `economy`, `estimate`, `geometry`, `models`, `parts`, `placement`, `project`, `purchase`, `quote`, `store`, `tall`, `trip`, `views`, `workshop` |
+| Основа | `errors`, `format`, `formulas`, `metrics`, `ral`, `result` |
+
+`kitchen.skill_lint` импортирует `kitchen.cli` и в слои не входит. `kitchen.metrics` — основа без отрисовки: шрифты, размер и область страницы, перенос строк; `kitchen.pdf` реэкспортирует эти имена.
+
+Остальные контракты:
+
+- «CLI ходит только в api»: `kitchen.cli` прямо не импортирует ничего, кроме `api`, `errors`, `result`; косвенные цепочки допустимы.
+- «Писатели независимы»: семь `*_pdf` и `views_html` не импортируют друг друга.
+- «Расчёты не ходят в БД»: расчётные модули домена прямо не импортируют `store` и `api`.

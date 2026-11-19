@@ -11,8 +11,7 @@ from pydantic import BaseModel
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen.canvas import Canvas
 
-from kitchen.drilling_pdf import TextLine
-from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, page_area, register_fonts, wrap
+from kitchen.pdf import FONT, FONT_BOLD, Area, PdfDocument, TextLine, page_area, register_fonts, wrap
 from kitchen.trip import DASH, TripHeader, TripSection
 
 __all__ = ["BOX", "TripPageLayout", "layout", "write_trip"]
