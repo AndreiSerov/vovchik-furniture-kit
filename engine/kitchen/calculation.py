@@ -9,6 +9,7 @@ import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from kitchen import store
 from kitchen.assembly import AssemblyModule, build_assembly
+from kitchen.assembly_pdf import write_assembly
 from kitchen.checks import Finding, duplicate_labels
 from kitchen.checks import check_project as run_checks
 from kitchen.common import (
@@ -25,11 +27,15 @@ from kitchen.common import (
     size_countertop,
 )
 from kitchen.cutting import MaterialCut, cut_parts, kerf_warnings
+from kitchen.cutting_pdf import write_cutting_map
 from kitchen.drilling import DrillingCheck, reconcile
+from kitchen.drilling_pdf import write_drilling_map
 from kitchen.economy import EconomyLine, EconomyVariant, apply_rule
+from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import OrderError, ProjectFileError
 from kitchen.estimate import EstimateLabor, build_labor, build_pricing
-from kitchen.format import purchase_digits
+from kitchen.format import purchase_digits, working_days
+from kitchen.metrics import Stamp
 from kitchen.models import Workshop
 from kitchen.parts import (
     EdgeTotals,
@@ -44,11 +50,15 @@ from kitchen.placement import GapPlace, ModulePlace, SceneObject, WallPlace, pla
 from kitchen.project import Project, parse_project
 from kitchen.purchase import PurchaseShop, build_purchase
 from kitchen.quote import QuoteBody, build_quote, check_days
+from kitchen.quote_pdf import write_quote
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.scene3d import Scene3D, build_scene3d
 from kitchen.trip import NO_BRIEF_WARNING, TripHeader, TripSection, build_header, build_trip
+from kitchen.trip_pdf import write_trip
 from kitchen.views import ViewPage, ViewScene, build_scene
 from kitchen.views import layout as views_page_layout
+from kitchen.views_html import write_html
+from kitchen.views_pdf import write_views
 from kitchen.workshop import load_workshop, resolve_home
 
 
@@ -383,11 +393,12 @@ def _save_outputs(
     home: Path,
     source: PartsSource,
     files: list[tuple[OutputInfo, Callable[[Path], None]]],
-    done: str | None = None,
+    done: list[str],
 ) -> None:
     """Регистрирует и устанавливает комплект файлов под одной блокировкой; сбой восстанавливает старый комплект.
 
-    `done` — текст авто-записи «сделано» (тикет 57): пишется в той же транзакции, откат убирает и её.
+    `done` — тексты авто-записей «сделано» (тикет 57) по порядку: пишутся в той же транзакции, откат убирает
+    и их.
     """
     if source.version is None:
         raise OrderError(f"У заказа {source.order} нет версии проекта.")
@@ -418,8 +429,8 @@ def _save_outputs(
                     store.register_output(conn, row["id"], info.kind, info.path, source.version)
                     (staging / path.name).replace(path)
                     installed.append((path, backup))
-                if done:
-                    _insert_log(conn, row["id"], "done", done, source.version, auto=True)
+                for text in done:
+                    _insert_log(conn, row["id"], "done", text, source.version, auto=True)
                 conn.execute("UPDATE orders SET updated_at = ? WHERE id = ?", (store.now(), row["id"]))
                 conn.commit()
             except BaseException as error:
@@ -826,17 +837,6 @@ class QuoteResult(QuoteBody, Result):
     outputs: list[OutputInfo] = Field(default_factory=list)
 
 
-# Документы цеха: виды выводов, которые пишет `kitchen production` (тикет 49 читает этот список).
-PRODUCTION_KINDS: tuple[OutputKind, ...] = (
-    store.CUTTING,
-    store.EDGING,
-    store.PURCHASE_MD,
-    store.PURCHASE_JSON,
-    store.ASSEMBLY,
-    store.TRIP,
-)
-
-
 class ProductionResult(Result):
     """Все производственные выводы одной версии проекта."""
 
@@ -1168,3 +1168,255 @@ def calculation(
         return Calculation(home, parsed, source, warnings, brief, brief_read=True)
     parsed, source = _project_file(project)
     return Calculation(home, parsed, source, [])
+
+
+# --- сохранение выводов ---------------------------------------------------------------------------
+
+
+def _stamp(result: Any, on: date) -> Stamp:
+    """Штамп вывода из результата: одно место, поля по именам (`bool` — подкласс `int`)."""
+    return Stamp(order=result.source.order, version=result.source.version, mock=result.mock, on=on)
+
+
+def _json_writer(exclude: set[str] | None = None) -> Callable[[Path, Any, Stamp], None]:
+    """JSON результата с заполненными `outputs`; `exclude` — поля, которые в файл не идут."""
+    return lambda path, result, stamp: path.write_text(
+        result.model_dump_json(indent=2, exclude=exclude) + "\n", encoding="utf-8"
+    )
+
+
+def view_pages(result: ViewsResult) -> list[ViewPage]:
+    """Раскладка страниц видов: из `_views` (`result._pages`), у результата, разобранного из JSON, — заново."""
+    if result._pages is None:
+        return views_page_layout(result.scene, len(result.errors))
+    return result._pages
+
+
+@dataclass(frozen=True)
+class SavedFile:
+    """Файл вывода: вид в `outputs`, имя в `out/`, поле результата и писатель (путь, результат, штамп)."""
+
+    kind: OutputKind
+    name: str
+    field: Literal["output", "output_html", "outputs"]
+    write: Callable[[Path, Any, Stamp], None]
+
+
+@dataclass(frozen=True)
+class Saving:
+    """Как сохраняется тип результата: файлы по порядку и необязательный текст записи «сделано»."""
+
+    files: tuple[SavedFile, ...]
+    done: Callable[[Any], str] | None = None
+
+
+# Таблица сохранения (спека этапа 9): единственное место, где имена файлов выводов связаны с писателями.
+# Писатели зовутся по глобальным именам модуля, поэтому тест подменяет `kitchen.calculation.write_*`.
+SAVE_TABLE: dict[type[Result], Saving] = {
+    CutResult: Saving(
+        (
+            SavedFile(
+                store.CUTTING,
+                "cutting-map.pdf",
+                "output",
+                lambda path, r, stamp: write_cutting_map(
+                    path, r.materials, kerf=r.kerf, kerf_declared=r.kerf_declared, trim=r.trim, stamp=stamp
+                ),
+            ),
+        )
+    ),
+    EdgingResult: Saving(
+        (
+            SavedFile(
+                store.EDGING,
+                "edging-map.pdf",
+                "output",
+                lambda path, r, stamp: write_edging_map(
+                    path, r.parts, r.edges, purchase_digits=r.purchase_digits, stamp=stamp
+                ),
+            ),
+        )
+    ),
+    DrillingResult: Saving(
+        (
+            SavedFile(
+                store.DRILLING,
+                "drilling-map.pdf",
+                "output",
+                lambda path, r, stamp: write_drilling_map(path, r.parts, r.checks, stamp=stamp),
+            ),
+        )
+    ),
+    AssemblyResult: Saving(
+        (
+            SavedFile(
+                store.ASSEMBLY,
+                "assembly.pdf",
+                "output",
+                lambda path, r, stamp: write_assembly(path, r.modules, stamp=stamp),
+            ),
+        )
+    ),
+    TripResult: Saving(
+        (
+            SavedFile(
+                store.TRIP,
+                "trip-checklist.pdf",
+                "output",
+                lambda path, r, stamp: write_trip(path, r.header, r.sections, stamp=stamp),
+            ),
+        )
+    ),
+    PurchaseResult: Saving(
+        (
+            SavedFile(
+                store.PURCHASE_MD,
+                "purchase.md",
+                "outputs",
+                lambda path, r, stamp: path.write_text(_purchase_markdown(r), encoding="utf-8"),
+            ),
+            SavedFile(store.PURCHASE_JSON, "purchase.json", "outputs", _json_writer()),
+        )
+    ),
+    EstimateResult: Saving(
+        (
+            SavedFile(
+                store.ESTIMATE_MD,
+                "estimate.md",
+                "outputs",
+                lambda path, r, stamp: path.write_text(_estimate_markdown(r), encoding="utf-8"),
+            ),
+            SavedFile(store.ESTIMATE_JSON, "estimate.json", "outputs", _json_writer()),
+        ),
+        done=lambda r: f"смета посчитана из версии {r.source.version}",
+    ),
+    QuoteResult: Saving(
+        (
+            SavedFile(
+                store.QUOTE_PDF,
+                "quote.pdf",
+                "outputs",
+                lambda path, r, stamp: write_quote(path, r, stamp=stamp),
+            ),
+            SavedFile(store.QUOTE_JSON, "quote.json", "outputs", _json_writer(exclude={"warnings"})),
+        ),
+        done=lambda r: f"КП посчитано из версии {r.source.version}, срок {working_days(r.days)}",
+    ),
+    ViewsResult: Saving(
+        (
+            SavedFile(
+                store.VIEWS,
+                "kitchen-views.pdf",
+                "output",
+                lambda path, r, stamp: write_views(path, view_pages(r), stamp=stamp),
+            ),
+            SavedFile(
+                store.VIEWS_HTML,
+                "kitchen-3d.html",
+                "output_html",
+                lambda path, r, stamp: write_html(path, r.scene3d, stamp=stamp, errors=len(r.errors)),
+            ),
+        )
+    ),
+}
+
+
+def _same_calculation(source: PartsSource, calc_source: PartsSource) -> bool:
+    return (source.order, source.version, source.content_hash) == (
+        calc_source.order,
+        calc_source.version,
+        calc_source.content_hash,
+    )
+
+
+def _filled(home: Path, result: Any, saving: Saving) -> tuple[Any, list[OutputInfo]]:
+    """Копия результата с заполненными полями таблицы (`output`, `output_html` или список `outputs`)
+    и записи выводов в порядке файлов таблицы."""
+    infos = [_output_info(home, result.source, f.kind, f.name) for f in saving.files]
+    update: dict[str, Any] = {}
+    for f, info in zip(saving.files, infos, strict=True):
+        if f.field == "outputs":
+            update.setdefault("outputs", []).append(info)
+        else:
+            update[f.field] = info
+    return result.model_copy(update=update), infos
+
+
+def save(
+    calc: Calculation, *results: Any, on: date | None = None, _done: str | None = None
+) -> tuple[Any, ...]:
+    """Сохраняет выводы расчёта заказа одной транзакцией: файлы в `out/`, записи `outputs` и «сделано»
+    в порядке аргументов. Возвращает копии результатов с заполненными полями файлов, тоже по порядку.
+
+    `on` — дата штампа (по умолчанию сегодня). `_done` — запись «сделано» всего набора (`production`)."""
+    if calc.source.kind == "file":
+        raise OrderError("Расчёт из файла (--project) не сохраняется: файлы пишет только заказ.")
+    if not results:
+        raise OrderError("Нечего сохранять: передайте хотя бы один вывод расчёта.")
+    for result in results:
+        source = getattr(result, "source", None)
+        if source is not None and not _same_calculation(source, calc.source):
+            raise OrderError("Вывод посчитан другим расчётом: сохраняются только выводы этого расчёта.")
+    savings = []
+    for result in results:
+        saving = SAVE_TABLE.get(type(result))
+        if saving is None:
+            raise OrderError(f"Вывод {type(result).__name__} не сохраняется: файлов у него нет.")
+        savings.append(saving)
+    kinds = [f.kind for saving in savings for f in saving.files]
+    repeated = next((kind for i, kind in enumerate(kinds) if kind in kinds[:i]), None)
+    if repeated is not None:
+        raise OrderError(f"Вид вывода «{repeated}» повторяется в одном сохранении.")
+    day = on or store.today()
+    saved: list[Any] = []
+    files: list[tuple[OutputInfo, Callable[[Path], None]]] = []
+    done: list[str] = []
+    for result, saving in zip(results, savings, strict=True):
+        copy, infos = _filled(calc.home, result, saving)
+        stamp = _stamp(copy, day)
+        for f, info in zip(saving.files, infos, strict=True):
+            files.append((info, lambda path, write=f.write, r=copy, s=stamp: write(path, r, s)))
+        if saving.done is not None:
+            done.append(saving.done(copy))
+        saved.append(copy)
+    if _done is not None:
+        done.append(_done)
+    _save_outputs(calc.home, calc.source, files, done)
+    return tuple(saved)
+
+
+# Документы цеха по порядку: результат и метод расчёта, который его считает.
+_PRODUCTION: tuple[tuple[type[Result], Callable[[Calculation], Any]], ...] = (
+    (CutResult, Calculation.cut),
+    (EdgingResult, Calculation.edging),
+    (PurchaseResult, Calculation.purchase),
+    (AssemblyResult, Calculation.assembly),
+    (TripResult, Calculation.trip),
+)
+
+# Виды выводов, которые пишет `kitchen production` (тикет 49 читает этот список): из таблицы сохранения.
+PRODUCTION_KINDS: tuple[OutputKind, ...] = tuple(
+    f.kind for kind, _ in _PRODUCTION for f in SAVE_TABLE[kind].files
+)
+
+
+def production(calc: Calculation, on: date | None = None) -> ProductionResult:
+    """Документы цеха одной версии одним `save`: раскрой, кромка, закупка, сборочный лист, чек-лист
+    и одна запись «сделано» на весь набор."""
+    parts = calc.parts()  # как раньше: отказ деталей раньше отказа раскроя
+    cutting, edging, purchase, assembly, trip = save(
+        calc,
+        *(method(calc) for _, method in _PRODUCTION),
+        on=on,
+        _done=f"документы цеха посчитаны из версии {calc.source.version}",
+    )
+    return ProductionResult(
+        cutting=cutting,
+        edging=edging,
+        purchase=purchase,
+        assembly=assembly,
+        trip=trip,
+        mock=parts.mock,
+        mock_files=parts.mock_files,
+        mock_notice=MOCK_BANNER if parts.mock else None,
+    )

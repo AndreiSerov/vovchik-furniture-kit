@@ -108,7 +108,7 @@
 - [x] 68 — Штамп PDF и HTML 3D ([спека](docs/specs/stage-9-api-calculation.md))
 - [x] 69 — Перенос в `kitchen.calculation` ([спека](docs/specs/stage-9-api-calculation.md))
 - [x] 70 — Расчёт и методы-выводы ([спека](docs/specs/stage-9-api-calculation.md))
-- [ ] 71 — `save`, таблица сохранения, `production` ([спека](docs/specs/stage-9-api-calculation.md))
+- [x] 71 — `save`, таблица сохранения, `production` ([спека](docs/specs/stage-9-api-calculation.md))
 - [ ] 72 — CLI на расчёте ([спека](docs/specs/stage-9-api-calculation.md))
 - [ ] 73 — Тесты на расчёте, часть 1 ([спека](docs/specs/stage-9-api-calculation.md))
 - [ ] 74 — Тесты на расчёте, часть 2 ([спека](docs/specs/stage-9-api-calculation.md))

@@ -119,9 +119,12 @@ ADDED_IN_69 = {"OutputKind", "PartsGap", "working_days"}
 # Тикет 70: расчёт — новая форма интерфейса рядом со старой.
 ADDED_IN_70 = {"calculation"}
 
+# Тикет 71: сохранение выводов расчёта.
+ADDED_IN_71 = {"save", "production"}
+
 
 def test_api_all_keeps_the_old_names_and_adds_the_new_ones():
-    assert set(api.__all__) == BEFORE_69 | ADDED_IN_69 | ADDED_IN_70
+    assert set(api.__all__) == BEFORE_69 | ADDED_IN_69 | ADDED_IN_70 | ADDED_IN_71
 
 
 def test_every_name_in_api_all_resolves():

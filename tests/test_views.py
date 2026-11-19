@@ -4,6 +4,7 @@
 PDF читается `pypdf`."""
 
 import json
+import sys
 from pathlib import Path
 
 from kitchen import api
@@ -481,7 +482,7 @@ def test_views_and_save_lays_pages_out_once(home, monkeypatch):
     """Тикет 47: раскладка страниц считается в `_views` один раз; запись PDF берёт её же."""
     petrov_order(home)
     calls = []
-    real = api.views_page_layout
+    real = sys.modules["kitchen.calculation"].views_page_layout
     monkeypatch.setattr(
         "kitchen.calculation.views_page_layout", lambda *a, **k: calls.append(1) or real(*a, **k)
     )

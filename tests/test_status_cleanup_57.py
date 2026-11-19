@@ -146,18 +146,13 @@ def test_single_commands_and_unchanged_import_write_nothing(home):
     assert _log(home) == before
 
 
-def test_refused_save_writes_no_entry(home, monkeypatch):
+def test_refused_save_writes_no_entry(home):
     _v1(home)
-    original = api.quote_from_order
-
-    def stale_after_compute(*args, **kwargs):
-        result = original(*args, **kwargs)
-        _import_v2(home)  # версия сменилась между расчётом и записью
-        return result
-
-    monkeypatch.setattr(api, "quote_from_order", stale_after_compute)
+    calc = api.calculation(order=ORDER, home=home)
+    quote = calc.quote(20)
+    _import_v2(home)  # версия сменилась между расчётом и записью
     with pytest.raises(OrderError, match="Изменилась версия проекта"):
-        api.quote_and_save(ORDER, 20, home)
+        api.save(calc, quote)
     assert not [t for t in _done_texts(home) if t.startswith("КП")]
 
 
@@ -267,24 +262,18 @@ def test_quote_only_asks_for_estimate_before_workshop_documents(home):
 
 
 @pytest.mark.parametrize(
-    ("save", "compute", "prefix"),
+    ("save", "prefix"),
     [
-        (lambda h: api.estimate_and_save(ORDER, h), "estimate_from_order", "смета"),
-        (lambda h: api.production_and_save(ORDER, h), "_order_project", "документы цеха"),
+        (lambda calc: api.save(calc, calc.estimate()), "смета"),
+        (lambda calc: api.production(calc), "документы цеха"),
     ],
 )
-def test_refused_estimate_and_production_write_no_entry(home, monkeypatch, save, compute, prefix):
+def test_refused_estimate_and_production_write_no_entry(home, save, prefix):
     _v1(home)
-    original = getattr(api, compute)
-
-    def stale_after_compute(*args, **kwargs):
-        result = original(*args, **kwargs)
-        _import_v2(home)
-        return result
-
-    monkeypatch.setattr(api, compute, stale_after_compute)
+    calc = api.calculation(order=ORDER, home=home)
+    _import_v2(home)  # версия сменилась между расчётом и записью
     with pytest.raises(OrderError, match="Изменилась версия проекта"):
-        save(home)
+        save(calc)
     assert not [t for t in _done_texts(home) if t.startswith(prefix)]
 
 

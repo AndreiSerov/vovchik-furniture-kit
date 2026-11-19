@@ -36,30 +36,26 @@ from kitchen.calculation import (
     TripResult,
     ValidationContext,
     ViewsResult,
-    _assembly,
     _build_cut,
     _build_parts,
     _canonical,
     _current_version,
     _draft_warnings,
-    _edging,
     _estimate,
-    _estimate_markdown,
     _insert_log,
     _latest_brief,
     _open_order,
-    _order_project,
     _output_info,
     _project_hash,
-    _purchase,
-    _purchase_markdown,
     _read_json,
     _save_outputs,
-    _trip,
     _with_economy,
     _write_reason,
     calculation,
     parse_project_file,
+    production,
+    save,
+    view_pages,
 )
 from kitchen.checks import Finding
 from kitchen.checks import check_project as run_checks
@@ -67,11 +63,9 @@ from kitchen.common import (
     CommonItem,
     pair_by_model_then_order,
 )
-from kitchen.cutting_pdf import write_cutting_map
 from kitchen.drilling import DrillingCheck
 from kitchen.drilling_pdf import PageLayout, map_layout, write_drilling_map
 from kitchen.economy import EconomyLine, EconomyVariant
-from kitchen.edging_pdf import write_edging_map
 from kitchen.errors import InputError, KitchenError, OrderError
 from kitchen.estimate import EstimateLabor, LaborLine
 from kitchen.format import group_digits, num, plural, working_days
@@ -89,14 +83,10 @@ from kitchen.parts import (
 from kitchen.placement import ModulePlace, SceneObject
 from kitchen.project import Project, parse_project
 from kitchen.quote import DAYS_ERROR, build_quote, check_days, money, parse_days, percent
-from kitchen.quote_pdf import write_quote
 from kitchen.result import MOCK_BANNER, Result
 from kitchen.trip_pdf import TripPageLayout, write_trip
 from kitchen.trip_pdf import layout as trip_page_layout
 from kitchen.views import ViewPage
-from kitchen.views import layout as views_page_layout
-from kitchen.views_html import write_html
-from kitchen.views_pdf import write_views
 from kitchen.workshop import FILES, Loaded, load, load_workshop, resolve_home
 
 __all__ = [
@@ -192,6 +182,7 @@ __all__ = [
     "placement_from_order",
     "placement_from_project",
     "plural",
+    "production",
     "production_and_save",
     "purchase_and_save",
     "purchase_from_order",
@@ -200,6 +191,7 @@ __all__ = [
     "quote_from_order",
     "quote_from_project",
     "resolve_home",
+    "save",
     "status",
     "trip_and_save",
     "trip_from_order",
@@ -1080,36 +1072,17 @@ def cut_from_order(order: str, home: Path | None = None) -> CutResult:
     return calculation(order=order, home=home).cut()
 
 
-CUTTING_PDF = "cutting-map.pdf"
-
-
 def _save_output(
     home: Path, source: PartsSource, kind: OutputKind, filename: str, write_pdf: Callable[[Path], None]
 ) -> OutputInfo:
     info = _output_info(home, source, kind, filename)
-    _save_outputs(home, source, [(info, write_pdf)])
+    _save_outputs(home, source, [(info, write_pdf)], [])
     return info
 
 
 def cut_and_save(order: str, home: Path | None = None, on: date | None = None) -> CutResult:
     """`kitchen cut <заказ>`: раскрой и сохранённый PDF карты."""
-    home = home or resolve_home()
-    result = cut_from_order(order, home)
-    output = _save_output(
-        home,
-        result.source,
-        store.CUTTING,
-        CUTTING_PDF,
-        lambda path: write_cutting_map(
-            path,
-            result.materials,
-            kerf=result.kerf,
-            kerf_declared=result.kerf_declared,
-            trim=result.trim,
-            stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
-        ),
-    )
-    return result.model_copy(update={"output": output})
+    return save(calc := calculation(order=order, home=home), calc.cut(), on=on)[0]
 
 
 def edges_from_order(order: str, home: Path | None = None) -> EdgingResult:
@@ -1122,22 +1095,7 @@ def edges_from_project(path: Path, home: Path | None = None) -> EdgingResult:
 
 def edges_and_save(order: str, home: Path | None = None, on: date | None = None) -> EdgingResult:
     """Карта кромления текущей версии и её регистрация в заказе."""
-    home = home or resolve_home()
-    result = edges_from_order(order, home)
-    output = _save_output(
-        home,
-        result.source,
-        store.EDGING,
-        "edging-map.pdf",
-        lambda path: write_edging_map(
-            path,
-            result.parts,
-            result.edges,
-            purchase_digits=result.purchase_digits,
-            stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
-        ),
-    )
-    return result.model_copy(update={"output": output})
+    return save(calc := calculation(order=order, home=home), calc.edging(), on=on)[0]
 
 
 # --- присадка -----------------------------------------------------------------
@@ -1156,9 +1114,6 @@ def drilling_from_project(path: Path, home: Path | None = None) -> DrillingResul
     return calculation(project=path, home=home).drilling()
 
 
-DRILLING_PDF = "drilling-map.pdf"
-
-
 def drilling_map_layout(result: DrillingResult) -> list[PageLayout]:
     """Раскладка страниц карты присадки (строки, контуры, базовые кромки, цепочки) — ровно то, что рисует PDF."""
     return map_layout(result.parts, result.checks)
@@ -1175,10 +1130,7 @@ def _drilling_writer(result: DrillingResult, on: date | None) -> Callable[[Path]
 
 def drilling_and_save(order: str, home: Path | None = None, on: date | None = None) -> DrillingResult:
     """`kitchen drilling <заказ>`: присадка текущей версии, PDF карты и регистрация вывода (как у раскроя)."""
-    home = home or resolve_home()
-    result = drilling_from_order(order, home)
-    output = _save_output(home, result.source, store.DRILLING, DRILLING_PDF, _drilling_writer(result, on))
-    return result.model_copy(update={"output": output})
+    return save(calc := calculation(order=order, home=home), calc.drilling(), on=on)[0]
 
 
 # --- сборочный лист -----------------------------------------------------------
@@ -1194,9 +1146,6 @@ def assembly_from_project(path: Path, home: Path | None = None) -> AssemblyResul
     return calculation(project=path, home=home).assembly()
 
 
-ASSEMBLY_PDF = "assembly.pdf"
-
-
 def assembly_layout(result: AssemblyResult) -> list[AssemblyPageLayout]:
     """Раскладка страниц сборочного листа (строки, кегли, положение) — ровно то, что рисует PDF."""
     return layout(result.modules)
@@ -1204,10 +1153,7 @@ def assembly_layout(result: AssemblyResult) -> list[AssemblyPageLayout]:
 
 def assembly_and_save(order: str, home: Path | None = None, on: date | None = None) -> AssemblyResult:
     """`kitchen assembly <заказ>`: сборочный лист текущей версии, PDF и регистрация вывода."""
-    home = home or resolve_home()
-    result = assembly_from_order(order, home)
-    output = _save_output(home, result.source, store.ASSEMBLY, ASSEMBLY_PDF, _assembly_writer(result, on))
-    return result.model_copy(update={"output": output})
+    return save(calc := calculation(order=order, home=home), calc.assembly(), on=on)[0]
 
 
 def _assembly_writer(result: AssemblyResult, on: date | None) -> Callable[[Path], None]:
@@ -1231,9 +1177,6 @@ def trip_from_project(path: Path, home: Path | None = None) -> TripResult:
     return calculation(project=path, home=home).trip()
 
 
-TRIP_PDF = "trip-checklist.pdf"
-
-
 def trip_layout(result: TripResult) -> list[TripPageLayout]:
     """Раскладка страниц чек-листа (строки, кегли, положение) — ровно то, что рисует PDF."""
     return trip_page_layout(result.header, result.sections)
@@ -1241,10 +1184,7 @@ def trip_layout(result: TripResult) -> list[TripPageLayout]:
 
 def trip_and_save(order: str, home: Path | None = None, on: date | None = None) -> TripResult:
     """`kitchen trip <заказ>`: чек-лист текущей версии, PDF и регистрация вывода."""
-    home = home or resolve_home()
-    result = trip_from_order(order, home)
-    output = _save_output(home, result.source, store.TRIP, TRIP_PDF, _trip_writer(result, on))
-    return result.model_copy(update={"output": output})
+    return save(calc := calculation(order=order, home=home), calc.trip(), on=on)[0]
 
 
 def _trip_writer(result: TripResult, on: date | None) -> Callable[[Path], None]:
@@ -1260,25 +1200,8 @@ def purchase_from_order(order: str, home: Path | None = None) -> PurchaseResult:
     return calculation(order=order, home=home).purchase()
 
 
-def _purchase_files(
-    home: Path, result: PurchaseResult
-) -> tuple[PurchaseResult, list[tuple[OutputInfo, Callable]]]:
-    outputs = [
-        _output_info(home, result.source, store.PURCHASE_MD, "purchase.md"),
-        _output_info(home, result.source, store.PURCHASE_JSON, "purchase.json"),
-    ]
-    result = result.model_copy(update={"outputs": outputs})
-    return result, [
-        (outputs[0], lambda path: path.write_text(_purchase_markdown(result), encoding="utf-8")),
-        (outputs[1], lambda path: path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")),
-    ]
-
-
 def purchase_and_save(order: str, home: Path | None = None) -> PurchaseResult:
-    home = home or resolve_home()
-    result, files = _purchase_files(home, purchase_from_order(order, home))
-    _save_outputs(home, result.source, files)
-    return result
+    return save(calc := calculation(order=order, home=home), calc.purchase())[0]
 
 
 def _estimate_run(
@@ -1315,25 +1238,8 @@ def economy_parts_from_project(path: Path, home: Path | None = None) -> PartsRes
     return calculation(project=path, home=home).economy_parts()
 
 
-def _estimate_files(
-    home: Path, result: EstimateResult
-) -> tuple[EstimateResult, list[tuple[OutputInfo, Callable]]]:
-    outputs = [
-        _output_info(home, result.source, store.ESTIMATE_MD, "estimate.md"),
-        _output_info(home, result.source, store.ESTIMATE_JSON, "estimate.json"),
-    ]
-    result = result.model_copy(update={"outputs": outputs})
-    return result, [
-        (outputs[0], lambda path: path.write_text(_estimate_markdown(result), encoding="utf-8")),
-        (outputs[1], lambda path: path.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")),
-    ]
-
-
 def estimate_and_save(order: str, home: Path | None = None, economy: bool = False) -> EstimateResult:
-    home = home or resolve_home()
-    result, files = _estimate_files(home, estimate_from_order(order, home, economy))
-    _save_outputs(home, result.source, files, f"смета посчитана из версии {result.source.version}")
-    return result
+    return save(calc := calculation(order=order, home=home), calc.estimate(economy))[0]
 
 
 def _quote(
@@ -1374,89 +1280,11 @@ def quote_and_save(
     order: str, days: int, home: Path | None = None, economy: bool = False, on: date | None = None
 ) -> QuoteResult:
     """КП заказа: `quote.pdf` и `quote.json` из одной модели, обе записи — в реестре выводов заказа."""
-    home = home or resolve_home()
-    result = quote_from_order(order, days, home, economy)
-    outputs = [
-        _output_info(home, result.source, store.QUOTE_PDF, "quote.pdf"),
-        _output_info(home, result.source, store.QUOTE_JSON, "quote.json"),
-    ]
-    result = result.model_copy(update={"outputs": outputs})
-    _save_outputs(
-        home,
-        result.source,
-        [
-            (
-                outputs[0],
-                lambda path: write_quote(
-                    path,
-                    result,
-                    stamp=Stamp(result.source.order, result.source.version, result.mock, on or store.today()),
-                ),
-            ),
-            (
-                outputs[1],
-                lambda path: path.write_text(
-                    result.model_dump_json(indent=2, exclude={"warnings"}) + "\n", encoding="utf-8"
-                ),
-            ),
-        ],
-        f"КП посчитано из версии {result.source.version}, срок {working_days(days)}",
-    )
-    return result
+    return save(calc := calculation(order=order, home=home), calc.quote(days, economy), on=on)[0]
 
 
 def production_and_save(order: str, home: Path | None = None, on: date | None = None) -> ProductionResult:
-    home = home or resolve_home()
-    project, source, brief, warnings = _order_project(order, home)
-    workshop = load_workshop(home)
-    parts = _build_parts(project, home, source, brief, warnings, workshop)
-    cut = _build_cut(project, home, source, brief, warnings, workshop)
-    edging = _edging(parts)
-    purchase, purchase_files = _purchase_files(home, _purchase(project, parts, cut, workshop))
-    assembly = _assembly(project, parts, workshop)
-    assembly_output = _output_info(home, source, store.ASSEMBLY, ASSEMBLY_PDF)
-    trip = _trip(project, parts, workshop, brief)
-    trip_output = _output_info(home, source, store.TRIP, TRIP_PDF)
-    cut_output = _output_info(home, source, store.CUTTING, CUTTING_PDF)
-    edging_output = _output_info(home, source, store.EDGING, "edging-map.pdf")
-    day = on or store.today()
-    files = [
-        (
-            cut_output,
-            lambda path: write_cutting_map(
-                path,
-                cut.materials,
-                kerf=cut.kerf,
-                kerf_declared=cut.kerf_declared,
-                trim=cut.trim,
-                stamp=Stamp(source.order, source.version, cut.mock, day),
-            ),
-        ),
-        (
-            edging_output,
-            lambda path: write_edging_map(
-                path,
-                edging.parts,
-                edging.edges,
-                purchase_digits=edging.purchase_digits,
-                stamp=Stamp(source.order, source.version, edging.mock, day),
-            ),
-        ),
-        *purchase_files,
-        (assembly_output, _assembly_writer(assembly, day)),
-        (trip_output, _trip_writer(trip, day)),
-    ]
-    _save_outputs(home, source, files, f"документы цеха посчитаны из версии {source.version}")
-    return ProductionResult(
-        cutting=cut.model_copy(update={"output": cut_output}),
-        edging=edging.model_copy(update={"output": edging_output}),
-        purchase=purchase,
-        assembly=assembly.model_copy(update={"output": assembly_output}),
-        trip=trip.model_copy(update={"output": trip_output}),
-        mock=parts.mock,
-        mock_files=parts.mock_files,
-        mock_notice=MOCK_BANNER if parts.mock else None,
-    )
+    return production(calculation(order=order, home=home), on)
 
 
 def list_outputs(order: str, home: Path | None = None) -> list[OutputInfo]:
@@ -1510,10 +1338,6 @@ def placement_from_order(order: str, home: Path | None = None) -> PlacementResul
 # --- виды кухни в PDF ---------------------------------------------------------
 
 
-VIEWS_PDF = "kitchen-views.pdf"
-VIEWS_HTML = "kitchen-3d.html"
-
-
 def views_from_project(path: Path, home: Path | None = None) -> ViewsResult:
     """`kitchen 3d --project <файл>`: виды проекта из файла, файлов не пишет."""
     return calculation(project=path, home=home).views()
@@ -1526,43 +1350,12 @@ def views_from_order(order: str, home: Path | None = None) -> ViewsResult:
 
 def views_layout(result: ViewsResult) -> list[ViewPage]:
     """Раскладка страниц видов (фигуры, линии, подписи, цепочки, высоты) — ровно то, что рисует PDF."""
-    if result._pages is None:  # результат собран не `_views` (например, разобран из JSON)
-        return views_page_layout(result.scene, len(result.errors))
-    return result._pages
+    return view_pages(result)
 
 
 def views_and_save(order: str, home: Path | None = None, on: date | None = None) -> ViewsResult:
     """`kitchen 3d <заказ>`: виды текущей версии — PDF и HTML 3D, оба регистрируются как выводы одной версии."""
-    home = home or resolve_home()
-    result = views_from_order(order, home)
-    pages = views_layout(result)
-    date_ = on or store.today()
-    pdf = _output_info(home, result.source, store.VIEWS, VIEWS_PDF)
-    html = _output_info(home, result.source, store.VIEWS_HTML, VIEWS_HTML)
-    _save_outputs(
-        home,
-        result.source,
-        [
-            (
-                pdf,
-                lambda path: write_views(
-                    path,
-                    pages,
-                    stamp=Stamp(result.source.order, result.source.version, result.mock, date_),
-                ),
-            ),
-            (
-                html,
-                lambda path: write_html(
-                    path,
-                    result.scene3d,
-                    stamp=Stamp(result.source.order, result.source.version, result.mock, date_),
-                    errors=len(result.errors),
-                ),
-            ),
-        ],
-    )
-    return result.model_copy(update={"output": pdf, "output_html": html})
+    return save(calc := calculation(order=order, home=home), calc.views(), on=on)[0]
 
 
 # --- быстрая вилка ------------------------------------------------------------

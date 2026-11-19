@@ -190,7 +190,7 @@ def test_old_calculation_cannot_replace_newer_output(home, monkeypatch):
     petrov(home)
     prepared = threading.Event()
     release = threading.Event()
-    write = api.write_cutting_map
+    write = write_cutting_map
 
     def delayed_write(*args, **kwargs):
         write(*args, **kwargs)
@@ -198,7 +198,7 @@ def test_old_calculation_cannot_replace_newer_output(home, monkeypatch):
             prepared.set()
             assert release.wait(10)
 
-    monkeypatch.setattr(api, "write_cutting_map", delayed_write)
+    monkeypatch.setattr("kitchen.calculation.write_cutting_map", delayed_write)
 
     def old_calculation():
         threading.current_thread().name = "old-calculation"
