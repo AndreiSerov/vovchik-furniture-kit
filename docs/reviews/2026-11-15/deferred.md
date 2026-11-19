@@ -410,3 +410,4 @@
 - `tests/test_workshop_number_grid.py:72,120`: в сообщении `assert` теперь «parts/cut/estimate» вместо имени старой функции; `tests/test_views_html.py:60` `html_of(home, **kw)` — `**kw` никто не передаёт (мёртвый параметр с базы).
 - Старые имена в именах тестов (`test_petrov_parts_from_order`, `test_views_and_save_lays_pages_out_once`) и в докстринге `tests/test_formulas.py:4` (`api.parts_from_project`); страж 75.3 `tests/` не смотрит.
 - `scripts/count-asserts`: счёт по строкам (подстрока в комментарии засчитывается, потерю перекрывает добавленная строка того же файла); неверный ref даёт traceback; README не называет скрипт (как и `claim`, `session-stats`).
+- `scripts/count-asserts` (ревью 73, повторные раунды): несуществующий ref и запуск вне репо — traceback и код 1 (тот же, что «число уменьшилось»); `.split()` по `ls-tree` падает на имени с пробелом, не-ASCII в кавычках (`-z`); файл без расширения не попадает под `ruff` в `scripts/check`.

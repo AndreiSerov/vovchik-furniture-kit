@@ -1,4 +1,6 @@
-"""`scripts/count-asserts` (тикет 73.2): потерянный assert даёт код 1 и из корня репозитория, и из подпапки."""
+"""`scripts/count-asserts` (тикет 73.2): потерянный assert даёт код 1 из корня и из подпапки, без потерь — 0,
+неверные аргументы — 2; `pytest.raises` считается; файл с одной стороны — 0 на другой. Временные репо не трогают
+индекс внешнего коммита (хук pre-commit)."""
 
 import os
 import subprocess
@@ -6,8 +8,14 @@ import sys
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "count-asserts"
-# git в хуке pre-commit получает GIT_INDEX_FILE внешнего коммита: без очистки `git add` во временном репо пишет в него
-CLEAN_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def clean_env() -> dict[str, str]:
+    """Окружение без `GIT_*`, собранное в момент вызова: git в хуке pre-commit получает GIT_INDEX_FILE внешнего
+    коммита, и без очистки `git add` во временном репо пишет в него."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 TWO = "def test_a():\n    assert 1\n    assert 2\n"
 ONE = "def test_a():\n    assert 1\n"
 
@@ -24,7 +32,7 @@ def make_repo(tmp_path: Path, base: dict[str, str], work: dict[str, str | None])
             cwd=repo,
             check=True,
             capture_output=True,
-            env=CLEAN_ENV,
+            env=clean_env(),
         )
 
     git("init", "-q")
@@ -52,7 +60,7 @@ def run_script(cwd: Path, *args: str) -> subprocess.CompletedProcess:
         cwd=cwd,
         capture_output=True,
         text=True,
-        env=CLEAN_ENV,
+        env=clean_env(),
     )
 
 
@@ -105,5 +113,18 @@ def test_count_asserts_file_on_one_side_only(tmp_path):
 
 def test_count_asserts_wrong_argument_count_exits_two(tmp_path):
     result = run_script(make_repo(tmp_path, {"test_x.py": TWO}, {}), "HEAD", "extra")
+    assert result.returncode == 2
+    assert "count-asserts <git-ref>" in result.stderr
+
+
+def test_count_asserts_no_arguments_exits_two(tmp_path):
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)],
+        check=False,
+        cwd=make_repo(tmp_path, {"test_x.py": TWO}, {}),
+        capture_output=True,
+        text=True,
+        env=clean_env(),
+    )
     assert result.returncode == 2
     assert "count-asserts <git-ref>" in result.stderr
