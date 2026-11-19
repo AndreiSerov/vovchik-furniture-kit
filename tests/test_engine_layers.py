@@ -41,6 +41,75 @@ def test_cli_forbidden_list_covers_all_other_modules() -> None:
     assert forbidden == _modules() - {f"kitchen.{name}" for name in allowed}
 
 
+def _kitchen(*names: str) -> set[str]:
+    return {f"kitchen.{name}" for name in names}
+
+
+def test_contracts_match_the_spec() -> None:
+    """Состав каждого слоя, писателей и источников контракта 4 — ровно по спеке: перенос модуля между слоями
+    или выпавший писатель линтер не заметит, а этот тест — да. Тикет 69 добавит `kitchen.calculation`."""
+    contracts = _contracts()
+    layers = [{m.strip() for m in line.split(":")} for line in contracts["Слои ADR 0002"]["layers"]]
+    writers = (
+        "cutting_pdf",
+        "edging_pdf",
+        "drilling_pdf",
+        "assembly_pdf",
+        "trip_pdf",
+        "quote_pdf",
+        "views_pdf",
+    )
+    assert layers == [
+        _kitchen("cli"),
+        _kitchen("api"),
+        _kitchen(*writers, "views_html", "scene3d", "pdf"),
+        _kitchen(
+            "assembly",
+            "brief",
+            "checks",
+            "common",
+            "cutting",
+            "drilling",
+            "economy",
+            "estimate",
+            "geometry",
+            "models",
+            "parts",
+            "placement",
+            "project",
+            "purchase",
+            "quote",
+            "store",
+            "tall",
+            "trip",
+            "views",
+            "workshop",
+        ),
+        _kitchen("errors", "format", "formulas", "metrics", "ral", "result"),
+    ]
+    assert set(contracts["Писатели независимы"]["modules"]) == _kitchen(*writers, "views_html")
+    db = contracts["Расчёты не ходят в БД"]
+    assert set(db["source_modules"]) == _kitchen(
+        "parts",
+        "cutting",
+        "drilling",
+        "assembly",
+        "trip",
+        "estimate",
+        "economy",
+        "quote",
+        "purchase",
+        "checks",
+        "placement",
+        "views",
+        "tall",
+        "common",
+    )
+    assert set(db["forbidden_modules"]) == _kitchen("store", "api")
+    assert contracts["CLI ходит только в api"]["allow_indirect_imports"] is True
+    assert db["allow_indirect_imports"] is True
+
+
 def test_check_script_runs_lint_imports() -> None:
     assert "lint-imports" in (ROOT / "scripts" / "check").read_text(encoding="utf-8")
 
@@ -62,8 +131,12 @@ def test_linter_bites_on_cli_importing_a_calculation(tmp_path: Path) -> None:
         timeout=25,
         check=False,
     )
-    assert result.returncode != 0
-    assert "CLI ходит только в api" in result.stdout + result.stderr
+    out = result.stdout + result.stderr
+    assert result.returncode != 0, out
+    # имя контракта печатается и при KEPT: ждём именно BROKEN у CLI и KEPT у остальных
+    assert re.search(r"CLI ходит только в api\s+BROKEN", out), out
+    for other in ("Слои ADR 0002", "Писатели независимы", "Расчёты не ходят в БД"):
+        assert re.search(rf"{other}\s+KEPT", out), out
 
 
 def test_adr_has_layers_section() -> None:

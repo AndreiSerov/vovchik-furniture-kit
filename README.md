@@ -175,7 +175,7 @@ uv run skills/kitchen-visualization/scripts/visualize.py generate \
 ```sh
 uv sync                 # зависимости для разработки
 scripts/sync-skills     # скиллы агента из .claude/skills.toml
-scripts/check           # ruff + pytest + проверки скиллов
+scripts/check           # ruff + import-linter (слои ADR 0002) + проверки скиллов + pytest
 ```
 
 `scripts/link-skills` ставит симлинки `skills/kitchen-*` в `.claude/skills/`, `.agents/skills/`, `.qwen/skills/` (его же вызывает `sync-skills`); для Hermes один раз вручную: `scripts/link-skills --hermes` (пишет в `~/.hermes/skills/`). Запускать из основной копии репозитория, не из worktree: после удаления worktree ссылки повиснут.
